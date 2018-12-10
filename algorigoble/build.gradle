@@ -6,6 +6,19 @@ apply plugin: 'kotlin-android-extensions'
 
 apply plugin: 'kotlin-kapt'
 
+apply plugin: 'com.novoda.bintray-release' // must be applied after your artifact generating plugin (eg. java / com.android.library)
+
+publish {
+    userOrg = 'chagilhwan'
+    groupId = 'com.algorigo.algorigoble'
+    artifactId = 'AlgorigoBleLibrary'
+    publishVersion = '1.0.0'
+    desc = 'AlgorigoBleLibrary'
+    website = 'https://github.com/Algorigo/AlgorigoBleLibrary'
+    issueTracker = "${website}/issues"
+    repository = "${website}.git"
+}
+
 android {
     compileSdkVersion 28
 
@@ -13,7 +26,7 @@ android {
         minSdkVersion 18
         targetSdkVersion 28
         versionCode 1
-        versionName "1.0"
+        versionName publish.publishVersion
 
         testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
     }
@@ -52,4 +65,13 @@ dependencies {
 
     // gson
     implementation 'com.google.code.gson:gson:2.8.5'
+}
+
+buildscript {
+    repositories {
+        jcenter()
+    }
+    dependencies {
+        classpath 'com.novoda:bintray-release:0.9'
+    }
 }
