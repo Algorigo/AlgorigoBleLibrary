@@ -1,0 +1,26 @@
+<resources>
+    <string name="app_name">AlgorigoBleLibrary</string>
+
+    <string name="common_millis">ms</string>
+
+    <string name="start_scan">Start Scan</string>
+    <string name="stop_scan">Stop Scan</string>
+
+    <string name="connect">Connect</string>
+    <string name="connecting">Connecting(%1s)&#8230;</string>
+    <string name="disconnect">Disconnect</string>
+    <string name="disconnecting">Disconnecting&#8230;</string>
+
+    <string name="get_amp">Get Amp</string>
+    <string name="set_amp">Set Amp</string>
+    <string name="amp">Amp</string>
+    <string name="get_sens">Get Sens</string>
+    <string name="set_sens">Set Sens</string>
+    <string name="sens">Sens</string>
+    <string name="get_period">Get Period</string>
+    <string name="set_period">Set Period</string>
+    <string name="period">Period</string>
+    <string name="get_battery">Get Battery</string>
+    <string name="send_on">Send On</string>
+    <string name="send_off">Send Off</string>
+</resources>
