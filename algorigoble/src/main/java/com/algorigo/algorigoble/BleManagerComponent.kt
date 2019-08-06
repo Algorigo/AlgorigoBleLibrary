@@ -22,18 +22,18 @@ interface BleManagerComponent {
         @Provides
         @Singleton
         fun providesBleManager(): BleManager{
-//            return BleManagerImpl().apply {
-//                initialize(context.applicationContext)
-//            }
-            return BleManagerRxAndroidBle().apply {
+            return BleManagerImpl().apply {
                 initialize(context.applicationContext)
             }
+//            return BleManagerRxAndroidBle().apply {
+//                initialize(context.applicationContext)
+//            }
         }
 
         @Provides
         fun providesBleDeviceEngine(): BleDeviceEngine {
-//            return BleDeviceEngineImpl()
-            return BleDeviceEngineRxAndroidBle()
+            return BleDeviceEngineImpl()
+//            return BleDeviceEngineRxAndroidBle()
         }
     }
 }
