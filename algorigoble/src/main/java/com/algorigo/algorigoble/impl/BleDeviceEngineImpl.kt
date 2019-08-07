@@ -108,6 +108,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
     private val characteristicMap = mutableMapOf<UUID, Subject<ByteArray>>()
     private val notificationMap = mutableMapOf<UUID, Subject<ByteArray>>()
     private val indicationMap = mutableMapOf<UUID, Subject<ByteArray>>()
+    private var serviceSingle: Single<List<BluetoothGattService>>? = null
 
     override val name: String?
         get() = device.name
@@ -412,9 +413,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
     }
 
     private fun getCharacteristic(characteristicUuid: UUID): Single<BluetoothGattCharacteristic> {
-        return Single.fromCallable({
-                gatt!!.getServices()
-            })
+        return getServices()
             .flatMap { services ->
                 return@flatMap Single.fromCallable {
                     for (service in services) {
@@ -427,6 +426,21 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                 }
             }
             .subscribeOn(Schedulers.io())
+    }
+
+    @Synchronized
+    private fun getServices(): Single<List<BluetoothGattService>> {
+        if (serviceSingle != null) {
+            return serviceSingle!!
+        } else {
+            serviceSingle = Single.fromCallable({
+                gatt!!.getServices()
+            })
+                .cache()
+                .also {
+                    return it
+                }
+        }
     }
 
     private fun readCharacteristicInner(characteristic: BluetoothGattCharacteristic): Boolean {
