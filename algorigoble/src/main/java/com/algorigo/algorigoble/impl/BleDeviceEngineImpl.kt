@@ -109,8 +109,9 @@ class BleDeviceEngineImpl : BleDeviceEngine {
     private var pushing = false
     private var serviceSingle: Single<List<BluetoothGattService>>? = null
     private val characteristicMap = mutableMapOf<UUID, Subject<ByteArray>>()
-    private val notificationSubjectMap = mutableMapOf<UUID, Observable<Observable<ByteArray>>>()
+    private val notificationObservableMap = mutableMapOf<UUID, Observable<Observable<ByteArray>>>()
     private val notificationMap = mutableMapOf<UUID, Subject<ByteArray>>()
+    private val indicationObservableMap = mutableMapOf<UUID, Observable<Observable<ByteArray>>>()
     private val indicationMap = mutableMapOf<UUID, Subject<ByteArray>>()
 
     override val name: String?
@@ -204,10 +205,10 @@ class BleDeviceEngineImpl : BleDeviceEngine {
     }
 
     override fun setupNotification(characteristicUuid: UUID): Observable<Observable<ByteArray>>? {
-        if (!notificationSubjectMap.containsKey(characteristicUuid)) {
+        if (!notificationObservableMap.containsKey(characteristicUuid)) {
             var isFirst = true
             BehaviorSubject.create<Observable<ByteArray>>().also { subject ->
-                notificationSubjectMap.put(characteristicUuid,
+                notificationObservableMap.put(characteristicUuid,
                     subject.doOnSubscribe {
                         if (isFirst) {
                             isFirst = false
@@ -220,20 +221,39 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                     })
             }
         }
-        return notificationSubjectMap.get(characteristicUuid)
+        return notificationObservableMap.get(characteristicUuid)
     }
 
     override fun setupIndication(characteristicUuid: UUID): Observable<Observable<ByteArray>>? {
-        throw IllegalAccessException("not support yet")
+        if (!indicationObservableMap.containsKey(characteristicUuid)) {
+            var isFirst = true
+            BehaviorSubject.create<Observable<ByteArray>>().also { subject ->
+                indicationObservableMap.put(characteristicUuid,
+                    subject.doOnSubscribe {
+                        if (isFirst) {
+                            isFirst = false
+                            processIndicationEnableData(characteristicUuid, subject)
+                        }
+                    }.doFinally {
+                        if (!subject.hasObservers()) {
+                            disableIndication(characteristicUuid)
+                        }
+                    })
+            }
+        }
+        return indicationObservableMap.get(characteristicUuid)
     }
 
     private fun disableNotification(characteristicUuid: UUID) {
-        notificationSubjectMap.remove(characteristicUuid)
+        notificationObservableMap.remove(characteristicUuid)
+        notificationMap.remove(characteristicUuid)
         processNotificationDisableData(characteristicUuid)
     }
 
     private fun disableIndication(characteristicUuid: UUID) {
-        throw IllegalAccessException("not support yet")
+        indicationObservableMap.remove(characteristicUuid)
+        indicationMap.remove(characteristicUuid)
+        processNotificationDisableData(characteristicUuid)
     }
 
     private fun writeDescriptor(characteristicUuid: UUID, value: ByteArray): Single<ByteArray>? {
@@ -320,7 +340,8 @@ class BleDeviceEngineImpl : BleDeviceEngine {
     }
 
     private fun processNotificationEnableData(characteristicUuid: UUID, subject: Subject<Observable<ByteArray>>) {
-        getCharacteristic(characteristicUuid)
+        checkNotificationAvailable(characteristicUuid)
+            .andThen(getCharacteristic(characteristicUuid))
             .flatMap { characteristic ->
                 Completable.create {
                     if (setCharacteristicNotificationInner(characteristic, true)) {
@@ -354,9 +375,31 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                     .andThen(writeDescriptor(characteristicUuid, BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE))
             }
             .subscribe({
-                notificationMap.remove(characteristicUuid)
             }, {
                 Log.e(TAG, "", it)
+            })
+    }
+
+    private fun processIndicationEnableData(characteristicUuid: UUID, subject: Subject<Observable<ByteArray>>) {
+        checkIndicationAvailable(characteristicUuid)
+            .andThen(getCharacteristic(characteristicUuid))
+            .flatMap { characteristic ->
+                Completable.create {
+                    if (setCharacteristicNotificationInner(characteristic, true)) {
+                        it.onComplete()
+                    } else {
+                        it.onError(RuntimeException())
+                    }
+                }
+                    .andThen(writeDescriptor(characteristicUuid, BluetoothGattDescriptor.ENABLE_INDICATION_VALUE))
+            }
+            .subscribe({
+                val dataSubject = PublishSubject.create<ByteArray>().toSerialized()
+                indicationMap.put(characteristicUuid, dataSubject)
+                subject.onNext(dataSubject)
+            }, {
+                Log.e(TAG, "", it)
+                subject.onError(it)
             })
     }
 
@@ -383,11 +426,11 @@ class BleDeviceEngineImpl : BleDeviceEngine {
 
     private fun checkNotificationAvailable(characteristicUuid: UUID): Completable {
         return Completable.defer {
-            Completable.create { emitter ->
-                if (indicationMap.containsKey(characteristicUuid)) {
-                    emitter.onError(IllegalStateException())
+            Completable.create {
+                if (indicationObservableMap.containsKey(characteristicUuid)) {
+                    it.onError(IllegalStateException())
                 } else {
-                    emitter.onComplete()
+                    it.onComplete()
                 }
             }
         }
@@ -395,11 +438,11 @@ class BleDeviceEngineImpl : BleDeviceEngine {
 
     private fun checkIndicationAvailable(characteristicUuid: UUID): Completable {
         return Completable.defer {
-            Completable.create { emitter ->
-                if (notificationMap.containsKey(characteristicUuid)) {
-                    emitter.onError(IllegalStateException())
+            Completable.create {
+                if (notificationObservableMap.containsKey(characteristicUuid)) {
+                    it.onError(IllegalStateException())
                 } else {
-                    emitter.onComplete()
+                    it.onComplete()
                 }
             }
         }
