@@ -8,6 +8,7 @@ import android.support.v7.app.AppCompatActivity
 import android.util.Log
 import com.algorigo.algorigoble.BleDevice
 import com.algorigo.algorigoble.BleManager
+import com.algorigo.algorigoblelibrary.util.PermissionUtil
 import io.reactivex.android.schedulers.AndroidSchedulers
 import io.reactivex.disposables.Disposable
 import kotlinx.android.synthetic.main.activity_main.*

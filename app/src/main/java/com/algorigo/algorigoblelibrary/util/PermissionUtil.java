@@ -1,4 +1,4 @@
-package com.algorigo.algorigoblelibrary;
+package com.algorigo.algorigoblelibrary.util;
 
 import android.app.Activity;
 import android.content.Context;
