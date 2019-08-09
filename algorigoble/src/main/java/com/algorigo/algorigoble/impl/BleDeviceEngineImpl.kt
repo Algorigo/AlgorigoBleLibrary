@@ -18,6 +18,8 @@ import java.util.concurrent.TimeUnit
 
 class BleDeviceEngineImpl : BleDeviceEngine {
 
+    class CommunicationError : RuntimeException("Android Gatt Process Failed")
+
     sealed class PushData {
         data class ReadCharacteristicData(val subject: Subject<ByteArray>, val characteristicUuid: UUID) : PushData()
         data class WriteCharacteristicData(val subject: Subject<ByteArray>, val characteristicUuid: UUID, val value: ByteArray) : PushData()
@@ -303,7 +305,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                     if (readCharacteristicInner(characteristic)) {
                         it.onComplete()
                     } else {
-                        it.onError(RuntimeException())
+                        it.onError(CommunicationError())
                     }
                 }
                     .doOnError {
@@ -325,7 +327,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                     if (writeCharacteristicInner(characteristic, pushData.value)) {
                         it.onComplete()
                     } else {
-                        it.onError(RuntimeException())
+                        it.onError(CommunicationError())
                     }
                 }
                     .doOnError {
@@ -347,7 +349,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                     if (setCharacteristicNotificationInner(characteristic, true)) {
                         it.onComplete()
                     } else {
-                        it.onError(RuntimeException())
+                        it.onError(CommunicationError())
                     }
                 }
                     .andThen(writeDescriptor(characteristicUuid, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE))
@@ -369,7 +371,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                     if (setCharacteristicNotificationInner(characteristic, false)) {
                         it.onComplete()
                     } else {
-                        it.onError(RuntimeException())
+                        it.onError(CommunicationError())
                     }
                 }
                     .andThen(writeDescriptor(characteristicUuid, BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE))
@@ -388,7 +390,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                     if (setCharacteristicNotificationInner(characteristic, true)) {
                         it.onComplete()
                     } else {
-                        it.onError(RuntimeException())
+                        it.onError(CommunicationError())
                     }
                 }
                     .andThen(writeDescriptor(characteristicUuid, BluetoothGattDescriptor.ENABLE_INDICATION_VALUE))
@@ -411,7 +413,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                     if (writeDescriptorInner(characteristic, pushData.value)) {
                         it.onComplete()
                     } else {
-                        it.onError(RuntimeException())
+                        it.onError(CommunicationError())
                     }
                 }
                     .doOnError {
