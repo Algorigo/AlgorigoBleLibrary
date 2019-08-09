@@ -5,9 +5,7 @@ import android.content.Context
 import android.util.Log
 import com.algorigo.algorigoble.BleDevice
 import com.algorigo.algorigoble.BleDeviceEngine
-import com.jakewharton.rxrelay2.BehaviorRelay
 import com.jakewharton.rxrelay2.PublishRelay
-import com.jakewharton.rxrelay2.Relay
 import io.reactivex.Completable
 import io.reactivex.Observable
 import io.reactivex.Single
@@ -23,10 +21,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
     sealed class PushData {
         data class ReadCharacteristicData(val subject: Subject<ByteArray>, val characteristicUuid: UUID) : PushData()
         data class WriteCharacteristicData(val subject: Subject<ByteArray>, val characteristicUuid: UUID, val value: ByteArray) : PushData()
-        data class NotificationEnableData(val relay: Relay<Observable<ByteArray>>, val characteristicUuid: UUID): PushData()
-        data class NotificationDisableData(val characteristicUuid: UUID): PushData()
-        data class IndicationEnableData(val relay: Relay<Observable<ByteArray>>, val characteristicUuid: UUID): PushData()
-        data class IndicationDisableData(val characteristicUuid: UUID): PushData()
+        data class WriteDescripterData(val subject: Subject<ByteArray>, val characteristicUuid: UUID, val value: ByteArray) : PushData()
     }
 
     private lateinit var context: Context
@@ -98,6 +93,13 @@ class BleDeviceEngineImpl : BleDeviceEngine {
 
         override fun onDescriptorWrite(gatt: BluetoothGatt?, descriptor: BluetoothGattDescriptor?, status: Int) {
             super.onDescriptorWrite(gatt, descriptor, status)
+            descriptor?.let {
+                characteristicMap.get(it.characteristic.uuid)?.also { subject ->
+                    subject.onNext(it.value)
+                    subject.onComplete()
+                    characteristicMap.remove(it.uuid)
+                }
+            }
         }
     }
 
@@ -105,10 +107,11 @@ class BleDeviceEngineImpl : BleDeviceEngine {
     private val connectionStateRelay = PublishRelay.create<BleDevice.ConnectionState>().toSerialized()
     private val pushQueue = ArrayDeque<PushData>()
     private var pushing = false
+    private var serviceSingle: Single<List<BluetoothGattService>>? = null
     private val characteristicMap = mutableMapOf<UUID, Subject<ByteArray>>()
+    private val notificationSubjectMap = mutableMapOf<UUID, Observable<Observable<ByteArray>>>()
     private val notificationMap = mutableMapOf<UUID, Subject<ByteArray>>()
     private val indicationMap = mutableMapOf<UUID, Subject<ByteArray>>()
-    private var serviceSingle: Single<List<BluetoothGattService>>? = null
 
     override val name: String?
         get() = device.name
@@ -172,22 +175,28 @@ class BleDeviceEngineImpl : BleDeviceEngine {
 
     override fun readCharacteristic(characteristicUuid: UUID): Single<ByteArray>? {
         val subject = BehaviorSubject.create<ByteArray>().toSerialized()
-        return subject.doOnSubscribe {
-            pushQueue.push(PushData.ReadCharacteristicData(subject, characteristicUuid))
-            pushStart()
-        }.doOnError {
-            Log.e(TAG, "", it)
-        }.timeout(TIMEOUT_VALUE, TIMEOUT_UNIT).firstOrError()
+        return subject
+            .doOnSubscribe {
+                pushQueue.push(PushData.ReadCharacteristicData(subject, characteristicUuid))
+                pushStart()
+            }
+            .doFinally {
+                doPush()
+            }
+            .firstOrError()
     }
 
     override fun writeCharacteristic(characteristicUuid: UUID, value: ByteArray): Single<ByteArray>? {
         val subject = BehaviorSubject.create<ByteArray>().toSerialized()
-        return subject.doOnSubscribe {
-            pushQueue.push(PushData.WriteCharacteristicData(subject, characteristicUuid, value))
-            pushStart()
-        }.doOnError {
-            Log.e(TAG, "", it)
-        }.timeout(TIMEOUT_VALUE, TIMEOUT_UNIT).firstOrError()
+        return subject
+            .doOnSubscribe {
+                pushQueue.push(PushData.WriteCharacteristicData(subject, characteristicUuid, value))
+                pushStart()
+            }
+            .doFinally {
+                doPush()
+            }
+            .firstOrError()
     }
 
     override fun writeLongValue(characteristicUuid: UUID, value: ByteArray): Observable<ByteArray>? {
@@ -195,49 +204,49 @@ class BleDeviceEngineImpl : BleDeviceEngine {
     }
 
     override fun setupNotification(characteristicUuid: UUID): Observable<Observable<ByteArray>>? {
-        return if (notificationMap.containsKey(characteristicUuid)) {
-            Observable.just(notificationMap.get(characteristicUuid))
-        } else {
-            var relay = PublishRelay.create<Observable<ByteArray>>().toSerialized()
-            relay.doOnSubscribe {
-                pushQueue.push(PushData.NotificationEnableData(relay, characteristicUuid))
-                pushStart()
-            }.doFinally {
-                if (!relay.hasObservers()) {
-                    disableNotification(characteristicUuid)
-                }
-            }.doOnError {
-                Log.e(TAG, "", it)
+        if (!notificationSubjectMap.containsKey(characteristicUuid)) {
+            var isFirst = true
+            BehaviorSubject.create<Observable<ByteArray>>().also { subject ->
+                notificationSubjectMap.put(characteristicUuid,
+                    subject.doOnSubscribe {
+                        if (isFirst) {
+                            isFirst = false
+                            processNotificationEnableData(characteristicUuid, subject)
+                        }
+                    }.doFinally {
+                        if (!subject.hasObservers()) {
+                            disableNotification(characteristicUuid)
+                        }
+                    })
             }
         }
+        return notificationSubjectMap.get(characteristicUuid)
     }
 
     override fun setupIndication(characteristicUuid: UUID): Observable<Observable<ByteArray>>? {
-        return if (notificationMap.containsKey(characteristicUuid)) {
-            Observable.just(notificationMap.get(characteristicUuid))
-        } else {
-            var relay = PublishRelay.create<Observable<ByteArray>>().toSerialized()
-            relay.doOnSubscribe {
-                pushQueue.push(PushData.IndicationEnableData(relay, characteristicUuid))
-                pushStart()
-            }.doFinally {
-                if (!relay.hasObservers()) {
-                    disableNotification(characteristicUuid)
-                }
-            }.doOnError {
-                Log.e(TAG, "", it)
-            }
-        }
+        throw IllegalAccessException("not support yet")
     }
 
     private fun disableNotification(characteristicUuid: UUID) {
-        pushQueue.push(PushData.NotificationDisableData(characteristicUuid))
-        pushStart()
+        notificationSubjectMap.remove(characteristicUuid)
+        processNotificationDisableData(characteristicUuid)
     }
 
     private fun disableIndication(characteristicUuid: UUID) {
-        pushQueue.push(PushData.IndicationDisableData(characteristicUuid))
-        pushStart()
+        throw IllegalAccessException("not support yet")
+    }
+
+    private fun writeDescriptor(characteristicUuid: UUID, value: ByteArray): Single<ByteArray>? {
+        val subject = BehaviorSubject.create<ByteArray>().toSerialized()
+        return subject
+            .doOnSubscribe {
+                pushQueue.push(PushData.WriteDescripterData(subject, characteristicUuid, value))
+                pushStart()
+            }
+            .doFinally {
+                doPush()
+            }
+            .firstOrError()
     }
 
     private fun pushStart() {
@@ -257,17 +266,8 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                 is PushData.WriteCharacteristicData -> {
                     processWriteCharacteristicData(pushData)
                 }
-                is PushData.NotificationEnableData -> {
-                    processNotificationEnableData(pushData)
-                }
-                is PushData.NotificationDisableData -> {
-                    processNotificationDisableData(pushData)
-                }
-                is PushData.IndicationEnableData -> {
-                    processIndicationEnableData(pushData)
-                }
-                is PushData.IndicationDisableData -> {
-                    processIndicationDisableData(pushData)
+                is PushData.WriteDescripterData -> {
+                    processWriteDescripterData(pushData)
                 }
             }
         } else {
@@ -276,17 +276,21 @@ class BleDeviceEngineImpl : BleDeviceEngine {
     }
 
     private fun processReadCharacteristicData(pushData: PushData.ReadCharacteristicData) {
-        checkCharacteristicAvailable(pushData.characteristicUuid)
-            .andThen(getCharacteristic(pushData.characteristicUuid))
-            .doFinally {
-                doPush()
+        getCharacteristic(pushData.characteristicUuid)
+            .flatMapCompletable { characteristic ->
+                characteristicMap.put(pushData.characteristicUuid, pushData.subject)
+                Completable.create {
+                    if (readCharacteristicInner(characteristic)) {
+                        it.onComplete()
+                    } else {
+                        it.onError(RuntimeException())
+                    }
+                }
+                    .doOnError {
+                        characteristicMap.remove(pushData.characteristicUuid)
+                    }
             }
             .subscribe({
-                characteristicMap.put(pushData.characteristicUuid, pushData.subject)
-                if (!readCharacteristicInner(it)) {
-                    pushData.subject.onError(IllegalStateException())
-                    characteristicMap.remove(pushData.characteristicUuid)
-                }
             }, {
                 Log.e(TAG, "", it)
                 pushData.subject.onError(it)
@@ -294,98 +298,87 @@ class BleDeviceEngineImpl : BleDeviceEngine {
     }
 
     private fun processWriteCharacteristicData(pushData: PushData.WriteCharacteristicData) {
-        checkCharacteristicAvailable(pushData.characteristicUuid)
-            .andThen(getCharacteristic(pushData.characteristicUuid))
-            .doFinally {
-                doPush()
+        getCharacteristic(pushData.characteristicUuid)
+            .flatMapCompletable { characteristic ->
+                characteristicMap.put(pushData.characteristicUuid, pushData.subject)
+                Completable.create {
+                    if (writeCharacteristicInner(characteristic, pushData.value)) {
+                        it.onComplete()
+                    } else {
+                        it.onError(RuntimeException())
+                    }
+                }
+                    .doOnError {
+                        characteristicMap.remove(pushData.characteristicUuid)
+                    }
             }
             .subscribe({
-                characteristicMap.put(pushData.characteristicUuid, pushData.subject)
-                it.value = pushData.value
-                if (!writeCharacteristicInner(it)) {
-                    pushData.subject.onError(IllegalStateException())
-                    characteristicMap.remove(pushData.characteristicUuid)
-                }
             }, {
                 Log.e(TAG, "", it)
                 pushData.subject.onError(it)
             })
     }
 
-    private fun processNotificationEnableData(pushData: PushData.NotificationEnableData) {
-        checkNotificationAvailable(pushData.characteristicUuid)
-            .andThen(getCharacteristic(pushData.characteristicUuid))
-            .doFinally {
-                doPush()
+    private fun processNotificationEnableData(characteristicUuid: UUID, subject: Subject<Observable<ByteArray>>) {
+        getCharacteristic(characteristicUuid)
+            .flatMap { characteristic ->
+                Completable.create {
+                    if (setCharacteristicNotificationInner(characteristic, true)) {
+                        it.onComplete()
+                    } else {
+                        it.onError(RuntimeException())
+                    }
+                }
+                    .andThen(writeDescriptor(characteristicUuid, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE))
             }
             .subscribe({
-                if (setCharacteristicNotificationInner(it, true) && setDescriptorNotificationInner(it)) {
-                    val subject = PublishSubject.create<ByteArray>().toSerialized()
-                    notificationMap.put(pushData.characteristicUuid, subject)
-                    pushData.relay.accept(subject)
+                val dataSubject = PublishSubject.create<ByteArray>().toSerialized()
+                notificationMap.put(characteristicUuid, dataSubject)
+                subject.onNext(dataSubject)
+            }, {
+                Log.e(TAG, "", it)
+                subject.onError(it)
+            })
+    }
+
+    private fun processNotificationDisableData(characteristicUuid: UUID) {
+        getCharacteristic(characteristicUuid)
+            .flatMap { characteristic ->
+                Completable.create {
+                    if (setCharacteristicNotificationInner(characteristic, false)) {
+                        it.onComplete()
+                    } else {
+                        it.onError(RuntimeException())
+                    }
                 }
+                    .andThen(writeDescriptor(characteristicUuid, BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE))
+            }
+            .subscribe({
+                notificationMap.remove(characteristicUuid)
             }, {
                 Log.e(TAG, "", it)
             })
     }
 
-    private fun processNotificationDisableData(pushData: PushData.NotificationDisableData) {
+    private fun processWriteDescripterData(pushData: PushData.WriteDescripterData) {
         getCharacteristic(pushData.characteristicUuid)
-            .doFinally {
-                doPush()
-            }
-            .subscribe({
-                setCharacteristicNotificationInner(it, false)
-                setDescriptorDisable(it)
-                notificationMap.remove(pushData.characteristicUuid)
-            }, {
-                Log.e(TAG, "", it)
-            })
-    }
-
-    private fun processIndicationEnableData(pushData: PushData.IndicationEnableData) {
-        checkIndicationAvailable(pushData.characteristicUuid)
-            .andThen(getCharacteristic(pushData.characteristicUuid))
-            .doFinally {
-                doPush()
-            }
-            .subscribe({
-                if (setCharacteristicNotificationInner(it, true) && setDescriptorIndicationInner(it)) {
-                    val subject = PublishSubject.create<ByteArray>().toSerialized()
-                    notificationMap.put(pushData.characteristicUuid, subject)
-                    pushData.relay.accept(subject)
+            .flatMapCompletable { characteristic ->
+                characteristicMap.put(pushData.characteristicUuid, pushData.subject)
+                Completable.create {
+                    if (writeDescriptorInner(characteristic, pushData.value)) {
+                        it.onComplete()
+                    } else {
+                        it.onError(RuntimeException())
+                    }
                 }
-            }, {
-                Log.e(TAG, "", it)
-            })
-    }
-
-    private fun processIndicationDisableData(pushData: PushData.IndicationDisableData) {
-        getCharacteristic(pushData.characteristicUuid)
-            .doFinally {
-                doPush()
+                    .doOnError {
+                        characteristicMap.remove(pushData.characteristicUuid)
+                    }
             }
             .subscribe({
-                setCharacteristicNotificationInner(it, false)
-                setDescriptorDisable(it)
-                notificationMap.remove(pushData.characteristicUuid)
             }, {
                 Log.e(TAG, "", it)
             })
-    }
-
-    private fun checkCharacteristicAvailable(characteristicUuid: UUID): Completable {
-        return Completable.defer {
-            Completable.create { emitter ->
-                if (characteristicMap.containsKey(characteristicUuid)) {
-                    emitter.onError(IllegalStateException())
-                } else {
-                    emitter.onComplete()
-                }
-            }
-        }
-            .retry(5)
-            .subscribeOn(Schedulers.io())
     }
 
     private fun checkNotificationAvailable(characteristicUuid: UUID): Completable {
@@ -447,9 +440,10 @@ class BleDeviceEngineImpl : BleDeviceEngine {
         return gatt?.readCharacteristic(characteristic) ?: false
     }
 
-    private fun writeCharacteristicInner(characteristic: BluetoothGattCharacteristic): Boolean {
+    private fun writeCharacteristicInner(characteristic: BluetoothGattCharacteristic, value: ByteArray): Boolean {
         val charaProp = characteristic.properties
         if (charaProp or BluetoothGattCharacteristic.PROPERTY_WRITE > 0) {
+            characteristic.value = value
             return gatt?.writeCharacteristic(characteristic) ?: false
         }
         return false
@@ -459,21 +453,9 @@ class BleDeviceEngineImpl : BleDeviceEngine {
         return gatt?.setCharacteristicNotification(characteristic, enabled) ?: false
     }
 
-    private fun setDescriptorNotificationInner(characteristic: BluetoothGattCharacteristic): Boolean {
+    private fun writeDescriptorInner(characteristic: BluetoothGattCharacteristic, value: ByteArray): Boolean {
         val descriptor = characteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG_UUID)
-        descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-        return gatt?.writeDescriptor(descriptor) ?: false
-    }
-
-    protected fun setDescriptorIndicationInner(characteristic: BluetoothGattCharacteristic): Boolean {
-        val descriptor = characteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG_UUID)
-        descriptor.value = BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
-        return gatt?.writeDescriptor(descriptor) ?: false
-    }
-
-    protected fun setDescriptorDisable(characteristic: BluetoothGattCharacteristic): Boolean {
-        val descriptor = characteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG_UUID)
-        descriptor.value = BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE
+        descriptor.value = value
         return gatt?.writeDescriptor(descriptor) ?: false
     }
 
