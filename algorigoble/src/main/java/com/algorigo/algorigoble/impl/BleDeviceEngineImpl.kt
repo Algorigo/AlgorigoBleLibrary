@@ -21,9 +21,9 @@ class BleDeviceEngineImpl : BleDeviceEngine {
     class CommunicationError : RuntimeException("Android Gatt Process Failed")
 
     sealed class PushData {
-        data class ReadCharacteristicData(val subject: Subject<ByteArray>, val characteristicUuid: UUID) : PushData()
-        data class WriteCharacteristicData(val subject: Subject<ByteArray>, val characteristicUuid: UUID, val value: ByteArray) : PushData()
-        data class WriteDescripterData(val subject: Subject<ByteArray>, val characteristicUuid: UUID, val value: ByteArray) : PushData()
+        data class ReadCharacteristicData(val engine: BleDeviceEngineImpl, val subject: Subject<ByteArray>, val characteristicUuid: UUID) : PushData()
+        data class WriteCharacteristicData(val engine: BleDeviceEngineImpl, val subject: Subject<ByteArray>, val characteristicUuid: UUID, val value: ByteArray) : PushData()
+        data class WriteDescripterData(val engine: BleDeviceEngineImpl, val subject: Subject<ByteArray>, val characteristicUuid: UUID, val value: ByteArray) : PushData()
     }
 
     private lateinit var context: Context
@@ -107,8 +107,6 @@ class BleDeviceEngineImpl : BleDeviceEngine {
 
     private var connectionSubject: Subject<Int>? = null
     private val connectionStateRelay = PublishRelay.create<BleDevice.ConnectionState>().toSerialized()
-    private val pushQueue = ArrayDeque<PushData>()
-    private var pushing = false
     private var serviceSingle: Single<List<BluetoothGattService>>? = null
     private val characteristicMap = mutableMapOf<UUID, Subject<ByteArray>>()
     private val notificationObservableMap = mutableMapOf<UUID, Observable<Observable<ByteArray>>>()
@@ -180,26 +178,28 @@ class BleDeviceEngineImpl : BleDeviceEngine {
         val subject = BehaviorSubject.create<ByteArray>().toSerialized()
         return subject
             .doOnSubscribe {
-                pushQueue.push(PushData.ReadCharacteristicData(subject, characteristicUuid))
+                pushQueue.push(PushData.ReadCharacteristicData(this, subject, characteristicUuid))
                 pushStart()
             }
             .doFinally {
                 doPush()
             }
             .firstOrError()
+            .timeout(TIMEOUT_VALUE, TimeUnit.MILLISECONDS)
     }
 
     override fun writeCharacteristic(characteristicUuid: UUID, value: ByteArray): Single<ByteArray>? {
         val subject = BehaviorSubject.create<ByteArray>().toSerialized()
         return subject
             .doOnSubscribe {
-                pushQueue.push(PushData.WriteCharacteristicData(subject, characteristicUuid, value))
+                pushQueue.push(PushData.WriteCharacteristicData(this, subject, characteristicUuid, value))
                 pushStart()
             }
             .doFinally {
                 doPush()
             }
             .firstOrError()
+            .timeout(TIMEOUT_VALUE, TimeUnit.MILLISECONDS)
     }
 
     override fun writeLongValue(characteristicUuid: UUID, value: ByteArray): Observable<ByteArray>? {
@@ -262,39 +262,14 @@ class BleDeviceEngineImpl : BleDeviceEngine {
         val subject = BehaviorSubject.create<ByteArray>().toSerialized()
         return subject
             .doOnSubscribe {
-                pushQueue.push(PushData.WriteDescripterData(subject, characteristicUuid, value))
+                pushQueue.push(PushData.WriteDescripterData(this, subject, characteristicUuid, value))
                 pushStart()
             }
             .doFinally {
                 doPush()
             }
             .firstOrError()
-    }
-
-    private fun pushStart() {
-        if (!pushing) {
-            doPush()
-        }
-    }
-
-    private fun doPush() {
-        if (pushQueue.size > 0) {
-            pushing = true
-            val pushData = pushQueue.pop()
-            when (pushData) {
-                is PushData.ReadCharacteristicData -> {
-                    processReadCharacteristicData(pushData)
-                }
-                is PushData.WriteCharacteristicData -> {
-                    processWriteCharacteristicData(pushData)
-                }
-                is PushData.WriteDescripterData -> {
-                    processWriteDescripterData(pushData)
-                }
-            }
-        } else {
-            pushing = false
-        }
+            .timeout(TIMEOUT_VALUE, TimeUnit.MILLISECONDS)
     }
 
     private fun processReadCharacteristicData(pushData: PushData.ReadCharacteristicData) {
@@ -507,8 +482,39 @@ class BleDeviceEngineImpl : BleDeviceEngine {
     companion object {
         private val TAG = BleDeviceEngineImpl::class.java.simpleName
 
-        private const val TIMEOUT_VALUE = 1000L
+        private const val TIMEOUT_VALUE = 3000L
         private val TIMEOUT_UNIT = TimeUnit.MILLISECONDS
         private val CLIENT_CHARACTERISTIC_CONFIG_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+
+        private val pushQueue = ArrayDeque<PushData>()
+        private var pushing = false
+
+        @Synchronized
+        private fun pushStart() {
+            if (!pushing) {
+                doPush()
+            }
+        }
+
+        private fun doPush() {
+            if (pushQueue.size > 0) {
+                pushing = true
+                val pushData = pushQueue.pop()
+                when (pushData) {
+                    is PushData.ReadCharacteristicData -> {
+                        pushData.engine.processReadCharacteristicData(pushData)
+                    }
+                    is PushData.WriteCharacteristicData -> {
+                        pushData.engine.processWriteCharacteristicData(pushData)
+                    }
+                    is PushData.WriteDescripterData -> {
+                        pushData.engine.processWriteDescripterData(pushData)
+                    }
+                }
+            } else {
+                pushing = false
+            }
+        }
+
     }
 }
