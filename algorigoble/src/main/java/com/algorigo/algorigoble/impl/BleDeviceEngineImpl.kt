@@ -5,6 +5,7 @@ import android.content.Context
 import android.util.Log
 import com.algorigo.algorigoble.BleDevice
 import com.algorigo.algorigoble.BleDeviceEngine
+import com.algorigo.algorigoble.RetryWithDelay
 import com.jakewharton.rxrelay2.PublishRelay
 import io.reactivex.Completable
 import io.reactivex.Observable
@@ -15,15 +16,16 @@ import io.reactivex.subjects.PublishSubject
 import io.reactivex.subjects.Subject
 import java.util.*
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 class BleDeviceEngineImpl : BleDeviceEngine {
 
     class CommunicationError : RuntimeException("Android Gatt Process Failed")
 
     sealed class PushData {
-        data class ReadCharacteristicData(val subject: Subject<ByteArray>, val characteristicUuid: UUID) : PushData()
-        data class WriteCharacteristicData(val subject: Subject<ByteArray>, val characteristicUuid: UUID, val value: ByteArray) : PushData()
-        data class WriteDescripterData(val subject: Subject<ByteArray>, val characteristicUuid: UUID, val value: ByteArray) : PushData()
+        data class ReadCharacteristicData(val engine: BleDeviceEngineImpl, val subject: Subject<ByteArray>, val characteristicUuid: UUID) : PushData()
+        data class WriteCharacteristicData(val engine: BleDeviceEngineImpl, val subject: Subject<ByteArray>, val characteristicUuid: UUID, val value: ByteArray) : PushData()
+        data class WriteDescripterData(val engine: BleDeviceEngineImpl, val subject: Subject<ByteArray>, val characteristicUuid: UUID, val value: ByteArray) : PushData()
     }
 
     private lateinit var context: Context
@@ -107,8 +109,6 @@ class BleDeviceEngineImpl : BleDeviceEngine {
 
     private var connectionSubject: Subject<Int>? = null
     private val connectionStateRelay = PublishRelay.create<BleDevice.ConnectionState>().toSerialized()
-    private val pushQueue = ArrayDeque<PushData>()
-    private var pushing = false
     private var serviceSingle: Single<List<BluetoothGattService>>? = null
     private val characteristicMap = mutableMapOf<UUID, Subject<ByteArray>>()
     private val notificationObservableMap = mutableMapOf<UUID, Observable<Observable<ByteArray>>>()
@@ -180,7 +180,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
         val subject = BehaviorSubject.create<ByteArray>().toSerialized()
         return subject
             .doOnSubscribe {
-                pushQueue.push(PushData.ReadCharacteristicData(subject, characteristicUuid))
+                pushQueue.push(PushData.ReadCharacteristicData(this, subject, characteristicUuid))
                 pushStart()
             }
             .doFinally {
@@ -193,7 +193,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
         val subject = BehaviorSubject.create<ByteArray>().toSerialized()
         return subject
             .doOnSubscribe {
-                pushQueue.push(PushData.WriteCharacteristicData(subject, characteristicUuid, value))
+                pushQueue.push(PushData.WriteCharacteristicData(this, subject, characteristicUuid, value))
                 pushStart()
             }
             .doFinally {
@@ -262,7 +262,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
         val subject = BehaviorSubject.create<ByteArray>().toSerialized()
         return subject
             .doOnSubscribe {
-                pushQueue.push(PushData.WriteDescripterData(subject, characteristicUuid, value))
+                pushQueue.push(PushData.WriteDescripterData(this, subject, characteristicUuid, value))
                 pushStart()
             }
             .doFinally {
@@ -271,36 +271,11 @@ class BleDeviceEngineImpl : BleDeviceEngine {
             .firstOrError()
     }
 
-    private fun pushStart() {
-        if (!pushing) {
-            doPush()
-        }
-    }
-
-    private fun doPush() {
-        if (pushQueue.size > 0) {
-            pushing = true
-            val pushData = pushQueue.pop()
-            when (pushData) {
-                is PushData.ReadCharacteristicData -> {
-                    processReadCharacteristicData(pushData)
-                }
-                is PushData.WriteCharacteristicData -> {
-                    processWriteCharacteristicData(pushData)
-                }
-                is PushData.WriteDescripterData -> {
-                    processWriteDescripterData(pushData)
-                }
-            }
-        } else {
-            pushing = false
-        }
-    }
-
     private fun processReadCharacteristicData(pushData: PushData.ReadCharacteristicData) {
         getCharacteristic(pushData.characteristicUuid)
-            .flatMapCompletable { characteristic ->
-                characteristicMap.put(pushData.characteristicUuid, pushData.subject)
+            .flatMap { characteristic ->
+                val subject = BehaviorSubject.create<ByteArray>()
+                characteristicMap.put(pushData.characteristicUuid, subject)
                 Completable.create {
                     if (readCharacteristicInner(characteristic)) {
                         it.onComplete()
@@ -308,11 +283,18 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                         it.onError(CommunicationError())
                     }
                 }
+                    .andThen(subject.firstOrError())
+                    .timeout(TIMEOUT_VALUE, TIMEOUT_UNIT)
+                    .retryWhen(RetryWithDelay(5, 100, TimeoutException::class, CommunicationError::class))
                     .doOnError {
                         characteristicMap.remove(pushData.characteristicUuid)
                     }
             }
             .subscribe({
+                pushData.subject.apply {
+                    onNext(it)
+                    onComplete()
+                }
             }, {
                 Log.e(TAG, "", it)
                 pushData.subject.onError(it)
@@ -321,8 +303,9 @@ class BleDeviceEngineImpl : BleDeviceEngine {
 
     private fun processWriteCharacteristicData(pushData: PushData.WriteCharacteristicData) {
         getCharacteristic(pushData.characteristicUuid)
-            .flatMapCompletable { characteristic ->
-                characteristicMap.put(pushData.characteristicUuid, pushData.subject)
+            .flatMap { characteristic ->
+                val subject = BehaviorSubject.create<ByteArray>()
+                characteristicMap.put(pushData.characteristicUuid, subject)
                 Completable.create {
                     if (writeCharacteristicInner(characteristic, pushData.value)) {
                         it.onComplete()
@@ -330,11 +313,18 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                         it.onError(CommunicationError())
                     }
                 }
+                    .andThen(subject.firstOrError())
+                    .timeout(TIMEOUT_VALUE, TIMEOUT_UNIT)
+                    .retryWhen(RetryWithDelay(5, 100, TimeoutException::class, CommunicationError::class))
                     .doOnError {
                         characteristicMap.remove(pushData.characteristicUuid)
                     }
             }
             .subscribe({
+                pushData.subject.apply {
+                    onNext(it)
+                    onComplete()
+                }
             }, {
                 Log.e(TAG, "", it)
                 pushData.subject.onError(it)
@@ -407,8 +397,9 @@ class BleDeviceEngineImpl : BleDeviceEngine {
 
     private fun processWriteDescripterData(pushData: PushData.WriteDescripterData) {
         getCharacteristic(pushData.characteristicUuid)
-            .flatMapCompletable { characteristic ->
-                characteristicMap.put(pushData.characteristicUuid, pushData.subject)
+            .flatMap { characteristic ->
+                val subject = BehaviorSubject.create<ByteArray>()
+                characteristicMap.put(pushData.characteristicUuid, subject)
                 Completable.create {
                     if (writeDescriptorInner(characteristic, pushData.value)) {
                         it.onComplete()
@@ -416,13 +407,21 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                         it.onError(CommunicationError())
                     }
                 }
+                    .andThen(subject.firstOrError())
+                    .timeout(TIMEOUT_VALUE, TIMEOUT_UNIT)
+                    .retryWhen(RetryWithDelay(5, 100, TimeoutException::class, CommunicationError::class))
                     .doOnError {
                         characteristicMap.remove(pushData.characteristicUuid)
                     }
             }
             .subscribe({
+                pushData.subject.apply {
+                    onNext(it)
+                    onComplete()
+                }
             }, {
                 Log.e(TAG, "", it)
+                pushData.subject.onError(it)
             })
     }
 
@@ -507,8 +506,39 @@ class BleDeviceEngineImpl : BleDeviceEngine {
     companion object {
         private val TAG = BleDeviceEngineImpl::class.java.simpleName
 
-        private const val TIMEOUT_VALUE = 1000L
+        private const val TIMEOUT_VALUE = 500L
         private val TIMEOUT_UNIT = TimeUnit.MILLISECONDS
         private val CLIENT_CHARACTERISTIC_CONFIG_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+
+        private val pushQueue = ArrayDeque<PushData>()
+        private var pushing = false
+
+        @Synchronized
+        private fun pushStart() {
+            if (!pushing) {
+                doPush()
+            }
+        }
+
+        private fun doPush() {
+            if (pushQueue.size > 0) {
+                pushing = true
+                val pushData = pushQueue.pop()
+                when (pushData) {
+                    is PushData.ReadCharacteristicData -> {
+                        pushData.engine.processReadCharacteristicData(pushData)
+                    }
+                    is PushData.WriteCharacteristicData -> {
+                        pushData.engine.processWriteCharacteristicData(pushData)
+                    }
+                    is PushData.WriteDescripterData -> {
+                        pushData.engine.processWriteDescripterData(pushData)
+                    }
+                }
+            } else {
+                pushing = false
+            }
+        }
+
     }
 }
