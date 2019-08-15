@@ -5,6 +5,7 @@ import android.content.Context
 import android.util.Log
 import com.algorigo.algorigoble.BleDevice
 import com.algorigo.algorigoble.BleDeviceEngine
+import com.algorigo.algorigoble.RetryWithDelay
 import com.jakewharton.rxrelay2.PublishRelay
 import io.reactivex.Completable
 import io.reactivex.Observable
@@ -15,6 +16,7 @@ import io.reactivex.subjects.PublishSubject
 import io.reactivex.subjects.Subject
 import java.util.*
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 class BleDeviceEngineImpl : BleDeviceEngine {
 
@@ -185,7 +187,6 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                 doPush()
             }
             .firstOrError()
-            .timeout(TIMEOUT_VALUE, TimeUnit.MILLISECONDS)
     }
 
     override fun writeCharacteristic(characteristicUuid: UUID, value: ByteArray): Single<ByteArray>? {
@@ -199,7 +200,6 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                 doPush()
             }
             .firstOrError()
-            .timeout(TIMEOUT_VALUE, TimeUnit.MILLISECONDS)
     }
 
     override fun writeLongValue(characteristicUuid: UUID, value: ByteArray): Observable<ByteArray>? {
@@ -269,13 +269,13 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                 doPush()
             }
             .firstOrError()
-            .timeout(TIMEOUT_VALUE, TimeUnit.MILLISECONDS)
     }
 
     private fun processReadCharacteristicData(pushData: PushData.ReadCharacteristicData) {
         getCharacteristic(pushData.characteristicUuid)
-            .flatMapCompletable { characteristic ->
-                characteristicMap.put(pushData.characteristicUuid, pushData.subject)
+            .flatMap { characteristic ->
+                val subject = BehaviorSubject.create<ByteArray>()
+                characteristicMap.put(pushData.characteristicUuid, subject)
                 Completable.create {
                     if (readCharacteristicInner(characteristic)) {
                         it.onComplete()
@@ -283,11 +283,18 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                         it.onError(CommunicationError())
                     }
                 }
+                    .andThen(subject.firstOrError())
+                    .timeout(TIMEOUT_VALUE, TIMEOUT_UNIT)
+                    .retryWhen(RetryWithDelay(5, 100, TimeoutException::class, CommunicationError::class))
                     .doOnError {
                         characteristicMap.remove(pushData.characteristicUuid)
                     }
             }
             .subscribe({
+                pushData.subject.apply {
+                    onNext(it)
+                    onComplete()
+                }
             }, {
                 Log.e(TAG, "", it)
                 pushData.subject.onError(it)
@@ -296,8 +303,9 @@ class BleDeviceEngineImpl : BleDeviceEngine {
 
     private fun processWriteCharacteristicData(pushData: PushData.WriteCharacteristicData) {
         getCharacteristic(pushData.characteristicUuid)
-            .flatMapCompletable { characteristic ->
-                characteristicMap.put(pushData.characteristicUuid, pushData.subject)
+            .flatMap { characteristic ->
+                val subject = BehaviorSubject.create<ByteArray>()
+                characteristicMap.put(pushData.characteristicUuid, subject)
                 Completable.create {
                     if (writeCharacteristicInner(characteristic, pushData.value)) {
                         it.onComplete()
@@ -305,11 +313,18 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                         it.onError(CommunicationError())
                     }
                 }
+                    .andThen(subject.firstOrError())
+                    .timeout(TIMEOUT_VALUE, TIMEOUT_UNIT)
+                    .retryWhen(RetryWithDelay(5, 100, TimeoutException::class, CommunicationError::class))
                     .doOnError {
                         characteristicMap.remove(pushData.characteristicUuid)
                     }
             }
             .subscribe({
+                pushData.subject.apply {
+                    onNext(it)
+                    onComplete()
+                }
             }, {
                 Log.e(TAG, "", it)
                 pushData.subject.onError(it)
@@ -382,8 +397,9 @@ class BleDeviceEngineImpl : BleDeviceEngine {
 
     private fun processWriteDescripterData(pushData: PushData.WriteDescripterData) {
         getCharacteristic(pushData.characteristicUuid)
-            .flatMapCompletable { characteristic ->
-                characteristicMap.put(pushData.characteristicUuid, pushData.subject)
+            .flatMap { characteristic ->
+                val subject = BehaviorSubject.create<ByteArray>()
+                characteristicMap.put(pushData.characteristicUuid, subject)
                 Completable.create {
                     if (writeDescriptorInner(characteristic, pushData.value)) {
                         it.onComplete()
@@ -391,13 +407,21 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                         it.onError(CommunicationError())
                     }
                 }
+                    .andThen(subject.firstOrError())
+                    .timeout(TIMEOUT_VALUE, TIMEOUT_UNIT)
+                    .retryWhen(RetryWithDelay(5, 100, TimeoutException::class, CommunicationError::class))
                     .doOnError {
                         characteristicMap.remove(pushData.characteristicUuid)
                     }
             }
             .subscribe({
+                pushData.subject.apply {
+                    onNext(it)
+                    onComplete()
+                }
             }, {
                 Log.e(TAG, "", it)
+                pushData.subject.onError(it)
             })
     }
 
@@ -482,7 +506,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
     companion object {
         private val TAG = BleDeviceEngineImpl::class.java.simpleName
 
-        private const val TIMEOUT_VALUE = 3000L
+        private const val TIMEOUT_VALUE = 500L
         private val TIMEOUT_UNIT = TimeUnit.MILLISECONDS
         private val CLIENT_CHARACTERISTIC_CONFIG_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
