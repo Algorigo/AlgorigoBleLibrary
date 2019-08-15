@@ -65,7 +65,6 @@ class BleDeviceEngineImpl : BleDeviceEngine {
             characteristic?.let {
                 characteristicMap.get(it.uuid)?.also { subject ->
                     subject.onNext(it.value)
-                    subject.onComplete()
                     characteristicMap.remove(it.uuid)
                 }
             }
@@ -76,7 +75,6 @@ class BleDeviceEngineImpl : BleDeviceEngine {
             characteristic?.let {
                 characteristicMap.get(it.uuid)?.also { subject ->
                     subject.onNext(it.value)
-                    subject.onComplete()
                     characteristicMap.remove(it.uuid)
                 }
             }
@@ -100,7 +98,6 @@ class BleDeviceEngineImpl : BleDeviceEngine {
             descriptor?.let {
                 characteristicMap.get(it.characteristic.uuid)?.also { subject ->
                     subject.onNext(it.value)
-                    subject.onComplete()
                     characteristicMap.remove(it.uuid)
                 }
             }
