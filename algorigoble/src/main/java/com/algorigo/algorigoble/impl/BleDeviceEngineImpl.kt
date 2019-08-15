@@ -282,7 +282,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                 }
                     .andThen(subject.firstOrError())
                     .timeout(TIMEOUT_VALUE, TIMEOUT_UNIT)
-                    .retryWhen(RetryWithDelay(5, 100, TimeoutException::class, CommunicationError::class))
+                    .retryWhen(RetryWithDelay(RETRY_COUNT, RETRY_INTERVAL, TimeoutException::class, CommunicationError::class))
                     .doOnError {
                         characteristicMap.remove(pushData.characteristicUuid)
                     }
@@ -312,7 +312,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                 }
                     .andThen(subject.firstOrError())
                     .timeout(TIMEOUT_VALUE, TIMEOUT_UNIT)
-                    .retryWhen(RetryWithDelay(5, 100, TimeoutException::class, CommunicationError::class))
+                    .retryWhen(RetryWithDelay(RETRY_COUNT, RETRY_INTERVAL, TimeoutException::class, CommunicationError::class))
                     .doOnError {
                         characteristicMap.remove(pushData.characteristicUuid)
                     }
@@ -406,7 +406,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                 }
                     .andThen(subject.firstOrError())
                     .timeout(TIMEOUT_VALUE, TIMEOUT_UNIT)
-                    .retryWhen(RetryWithDelay(5, 100, TimeoutException::class, CommunicationError::class))
+                    .retryWhen(RetryWithDelay(RETRY_COUNT, RETRY_INTERVAL, TimeoutException::class, CommunicationError::class))
                     .doOnError {
                         characteristicMap.remove(pushData.characteristicUuid)
                     }
@@ -505,6 +505,8 @@ class BleDeviceEngineImpl : BleDeviceEngine {
 
         private const val TIMEOUT_VALUE = 500L
         private val TIMEOUT_UNIT = TimeUnit.MILLISECONDS
+        private val RETRY_COUNT = 5
+        private val RETRY_INTERVAL = 500L
         private val CLIENT_CHARACTERISTIC_CONFIG_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
         private val pushQueue = ArrayDeque<PushData>()
