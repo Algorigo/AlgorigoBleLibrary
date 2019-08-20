@@ -64,8 +64,8 @@ class BleDeviceEngineImpl : BleDeviceEngine {
             super.onCharacteristicRead(gatt, characteristic, status)
             characteristic?.let {
                 characteristicMap.get(it.uuid)?.also { subject ->
-                    subject.onNext(it.value)
                     characteristicMap.remove(it.uuid)
+                    subject.onNext(it.value)
                 }
             }
         }
@@ -74,8 +74,8 @@ class BleDeviceEngineImpl : BleDeviceEngine {
             super.onCharacteristicWrite(gatt, characteristic, status)
             characteristic?.let {
                 characteristicMap.get(it.uuid)?.also { subject ->
-                    subject.onNext(it.value)
                     characteristicMap.remove(it.uuid)
+                    subject.onNext(it.value)
                 }
             }
         }
@@ -97,8 +97,8 @@ class BleDeviceEngineImpl : BleDeviceEngine {
             super.onDescriptorWrite(gatt, descriptor, status)
             descriptor?.let {
                 characteristicMap.get(it.characteristic.uuid)?.also { subject ->
-                    subject.onNext(it.value)
                     characteristicMap.remove(it.uuid)
+                    subject.onNext(it.value)
                 }
             }
         }
@@ -290,7 +290,6 @@ class BleDeviceEngineImpl : BleDeviceEngine {
             .subscribe({
                 pushData.subject.apply {
                     onNext(it)
-                    onComplete()
                 }
             }, {
                 Log.e(TAG, "", it)
@@ -320,7 +319,6 @@ class BleDeviceEngineImpl : BleDeviceEngine {
             .subscribe({
                 pushData.subject.apply {
                     onNext(it)
-                    onComplete()
                 }
             }, {
                 Log.e(TAG, "", it)
@@ -414,7 +412,6 @@ class BleDeviceEngineImpl : BleDeviceEngine {
             .subscribe({
                 pushData.subject.apply {
                     onNext(it)
-                    onComplete()
                 }
             }, {
                 Log.e(TAG, "", it)
