@@ -303,7 +303,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
             .subscribe({
                 pushData.subject.onNext(it)
             }, {
-                Log.e(TAG, "", it)
+                Log.e(TAG, "", Exception(it))
                 pushData.subject.onError(Exception(it))
             })
     }
@@ -335,7 +335,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
             .subscribe({
                 pushData.subject.onNext(it)
             }, {
-                Log.e(TAG, "", it)
+                Log.e(TAG, "", Exception(it))
                 pushData.subject.onError(Exception(it))
             })
     }
@@ -363,7 +363,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                 notificationMap.put(characteristicUuid, dataSubject)
                 subject.onNext(dataSubject)
             }, {
-                Log.e(TAG, "", it)
+                Log.e(TAG, "", Exception(it))
                 subject.onError(Exception(it))
             })
     }
@@ -382,7 +382,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
             }
             .subscribe({
             }, {
-                Log.e(TAG, "", it)
+                Log.e(TAG, "", Exception(it))
             })
     }
 
@@ -409,7 +409,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                 indicationMap.put(characteristicUuid, dataSubject)
                 subject.onNext(dataSubject)
             }, {
-                Log.e(TAG, "", it)
+                Log.e(TAG, "", Exception(it))
                 subject.onError(Exception(it))
             })
     }
@@ -441,7 +441,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
             .subscribe({
                 pushData.subject.onNext(it)
             }, {
-                Log.e(TAG, "", it)
+                Log.e(TAG, "", Exception(it))
                 pushData.subject.onError(Exception(it))
             })
     }
