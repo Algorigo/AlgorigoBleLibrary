@@ -21,6 +21,7 @@ import java.util.concurrent.TimeoutException
 class BleDeviceEngineImpl : BleDeviceEngine {
 
     class CommunicationError : RuntimeException("Android Gatt Process Failed")
+    class DisconnectError : RuntimeException("Bluetooth is disconnected")
 
     sealed class PushData {
         data class ReadCharacteristicData(val engine: BleDeviceEngineImpl, val subject: Subject<ByteArray>, val characteristicUuid: UUID) : PushData()
@@ -108,9 +109,9 @@ class BleDeviceEngineImpl : BleDeviceEngine {
     private val connectionStateRelay = PublishRelay.create<BleDevice.ConnectionState>().toSerialized()
     private var serviceSingle: Single<List<BluetoothGattService>>? = null
     private val characteristicMap = mutableMapOf<UUID, Subject<ByteArray>>()
-    private val notificationObservableMap = mutableMapOf<UUID, Observable<Observable<ByteArray>>>()
+    private val notificationObservableMap = mutableMapOf<UUID, Pair<Observable<Observable<ByteArray>>, Subject<Observable<ByteArray>>>>()
     private val notificationMap = mutableMapOf<UUID, Subject<ByteArray>>()
-    private val indicationObservableMap = mutableMapOf<UUID, Observable<Observable<ByteArray>>>()
+    private val indicationObservableMap = mutableMapOf<UUID, Pair<Observable<Observable<ByteArray>>, Subject<Observable<ByteArray>>>>()
     private val indicationMap = mutableMapOf<UUID, Subject<ByteArray>>()
 
     override val name: String?
@@ -166,7 +167,13 @@ class BleDeviceEngineImpl : BleDeviceEngine {
     }
 
     override fun onDisconnected() {
-
+        for (pair in notificationObservableMap.values) {
+            pair.second.onError(DisconnectError())
+        }
+        for (pair in indicationObservableMap.values) {
+            pair.second.onError(DisconnectError())
+        }
+        bleDeviceCallback?.onDeviceDisconnected()
     }
 
     override fun getConnectionStateObservable(): Observable<BleDevice.ConnectionState> {
@@ -208,7 +215,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
             var isFirst = true
             BehaviorSubject.create<Observable<ByteArray>>().also { subject ->
                 notificationObservableMap.put(characteristicUuid,
-                    subject.doOnSubscribe {
+                    Pair(subject.doOnSubscribe {
                         if (isFirst) {
                             isFirst = false
                             processNotificationEnableData(characteristicUuid, subject)
@@ -217,10 +224,10 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                         if (!subject.hasObservers()) {
                             disableNotification(characteristicUuid)
                         }
-                    })
+                    }, subject))
             }
         }
-        return notificationObservableMap.get(characteristicUuid)
+        return notificationObservableMap.get(characteristicUuid)!!.first
     }
 
     override fun setupIndication(characteristicUuid: UUID): Observable<Observable<ByteArray>>? {
@@ -228,7 +235,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
             var isFirst = true
             BehaviorSubject.create<Observable<ByteArray>>().also { subject ->
                 indicationObservableMap.put(characteristicUuid,
-                    subject.doOnSubscribe {
+                    Pair(subject.doOnSubscribe {
                         if (isFirst) {
                             isFirst = false
                             processIndicationEnableData(characteristicUuid, subject)
@@ -237,10 +244,10 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                         if (!subject.hasObservers()) {
                             disableIndication(characteristicUuid)
                         }
-                    })
+                    }, subject))
             }
         }
-        return indicationObservableMap.get(characteristicUuid)
+        return indicationObservableMap.get(characteristicUuid)!!.first
     }
 
     private fun disableNotification(characteristicUuid: UUID) {
@@ -269,6 +276,11 @@ class BleDeviceEngineImpl : BleDeviceEngine {
     }
 
     private fun processReadCharacteristicData(pushData: PushData.ReadCharacteristicData) {
+        if (connectionState != BleDevice.ConnectionState.CONNECTED) {
+            pushData.subject.onError(DisconnectError())
+            return
+        }
+
         getCharacteristic(pushData.characteristicUuid)
             .flatMap { characteristic ->
                 val subject = BehaviorSubject.create<ByteArray>()
@@ -288,16 +300,19 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                     }
             }
             .subscribe({
-                pushData.subject.apply {
-                    onNext(it)
-                }
+                pushData.subject.onNext(it)
             }, {
                 Log.e(TAG, "", it)
-                pushData.subject.onError(it)
+                pushData.subject.onError(Exception(it))
             })
     }
 
     private fun processWriteCharacteristicData(pushData: PushData.WriteCharacteristicData) {
+        if (connectionState != BleDevice.ConnectionState.CONNECTED) {
+            pushData.subject.onError(DisconnectError())
+            return
+        }
+
         getCharacteristic(pushData.characteristicUuid)
             .flatMap { characteristic ->
                 val subject = BehaviorSubject.create<ByteArray>()
@@ -317,16 +332,19 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                     }
             }
             .subscribe({
-                pushData.subject.apply {
-                    onNext(it)
-                }
+                pushData.subject.onNext(it)
             }, {
                 Log.e(TAG, "", it)
-                pushData.subject.onError(it)
+                pushData.subject.onError(Exception(it))
             })
     }
 
     private fun processNotificationEnableData(characteristicUuid: UUID, subject: Subject<Observable<ByteArray>>) {
+        if (connectionState != BleDevice.ConnectionState.CONNECTED) {
+            subject.onError(DisconnectError())
+            return
+        }
+
         checkNotificationAvailable(characteristicUuid)
             .andThen(getCharacteristic(characteristicUuid))
             .flatMap { characteristic ->
@@ -345,7 +363,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                 subject.onNext(dataSubject)
             }, {
                 Log.e(TAG, "", it)
-                subject.onError(it)
+                subject.onError(Exception(it))
             })
     }
 
@@ -368,6 +386,11 @@ class BleDeviceEngineImpl : BleDeviceEngine {
     }
 
     private fun processIndicationEnableData(characteristicUuid: UUID, subject: Subject<Observable<ByteArray>>) {
+        if (connectionState != BleDevice.ConnectionState.CONNECTED) {
+            subject.onError(DisconnectError())
+            return
+        }
+
         checkIndicationAvailable(characteristicUuid)
             .andThen(getCharacteristic(characteristicUuid))
             .flatMap { characteristic ->
@@ -386,11 +409,16 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                 subject.onNext(dataSubject)
             }, {
                 Log.e(TAG, "", it)
-                subject.onError(it)
+                subject.onError(Exception(it))
             })
     }
 
     private fun processWriteDescripterData(pushData: PushData.WriteDescripterData) {
+        if (connectionState != BleDevice.ConnectionState.CONNECTED) {
+            pushData.subject.onError(DisconnectError())
+            return
+        }
+
         getCharacteristic(pushData.characteristicUuid)
             .flatMap { characteristic ->
                 val subject = BehaviorSubject.create<ByteArray>()
@@ -410,12 +438,10 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                     }
             }
             .subscribe({
-                pushData.subject.apply {
-                    onNext(it)
-                }
+                pushData.subject.onNext(it)
             }, {
                 Log.e(TAG, "", it)
-                pushData.subject.onError(it)
+                pushData.subject.onError(Exception(it))
             })
     }
 
