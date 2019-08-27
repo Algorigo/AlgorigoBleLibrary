@@ -56,7 +56,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
 
         override fun onServicesDiscovered(gatt: BluetoothGatt?, status: Int) {
             super.onServicesDiscovered(gatt, status)
-//            this@BleDeviceEngineImpl.gatt = gatt
+            this@BleDeviceEngineImpl.gatt = gatt
             this@BleDeviceEngineImpl.status = BleDevice.ConnectionState.CONNECTED
             connectionSubject?.onComplete()
         }
@@ -141,7 +141,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
         connectionSubject = PublishSubject.create<Int>().toSerialized()
         return connectionSubject!!.doOnSubscribe {
             gatt?.disconnect()
-            gatt = bluetoothDevice.connectGatt(context, autoConnect, gattCallback)
+            bluetoothDevice.connectGatt(context, autoConnect, gattCallback)
             status = BleDevice.ConnectionState.CONNECTING
         }.doOnComplete {
             connectionSubject = null
@@ -156,7 +156,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
         connectionSubject = PublishSubject.create<Int>().toSerialized()
         return connectionSubject!!.doOnSubscribe {
             gatt?.disconnect()
-            gatt = bluetoothDevice.connectGatt(context, autoConnect, gattCallback)
+            bluetoothDevice.connectGatt(context, autoConnect, gattCallback)
             status = BleDevice.ConnectionState.CONNECTING
         }.doOnComplete {
             connectionSubject = null
