@@ -47,7 +47,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
                 }
 
                 BluetoothProfile.STATE_DISCONNECTED -> {
-                    this@BleDeviceEngineImpl.gatt = null
+                    serviceSingle = null
                     this@BleDeviceEngineImpl.status = BleDevice.ConnectionState.DISCONNECTED
                     onDisconnected()
                 }
@@ -56,7 +56,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
 
         override fun onServicesDiscovered(gatt: BluetoothGatt?, status: Int) {
             super.onServicesDiscovered(gatt, status)
-            this@BleDeviceEngineImpl.gatt = gatt
+//            this@BleDeviceEngineImpl.gatt = gatt
             this@BleDeviceEngineImpl.status = BleDevice.ConnectionState.CONNECTED
             connectionSubject?.onComplete()
         }
@@ -98,7 +98,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
             super.onDescriptorWrite(gatt, descriptor, status)
             descriptor?.let {
                 characteristicMap[it.characteristic.uuid]?.also { subject ->
-                    characteristicMap.remove(it.uuid)
+                    characteristicMap.remove(it.characteristic.uuid)
                     subject.onNext(it.value)
                 }
             }
@@ -140,6 +140,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
 
         connectionSubject = PublishSubject.create<Int>().toSerialized()
         return connectionSubject!!.doOnSubscribe {
+            gatt?.disconnect()
             gatt = bluetoothDevice.connectGatt(context, autoConnect, gattCallback)
             status = BleDevice.ConnectionState.CONNECTING
         }.doOnComplete {
@@ -154,6 +155,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
 
         connectionSubject = PublishSubject.create<Int>().toSerialized()
         return connectionSubject!!.doOnSubscribe {
+            gatt?.disconnect()
             gatt = bluetoothDevice.connectGatt(context, autoConnect, gattCallback)
             status = BleDevice.ConnectionState.CONNECTING
         }.doOnComplete {
