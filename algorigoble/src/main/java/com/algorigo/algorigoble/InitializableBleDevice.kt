@@ -35,7 +35,7 @@ abstract class InitializableBleDevice: BleDevice() {
     }
 
     private fun getInitializeCompletable(): Completable {
-        return Completable.defer({
+        return Completable.defer {
             initializeCompletable()
                 .doOnComplete {
                     initialized = true
@@ -45,7 +45,7 @@ abstract class InitializableBleDevice: BleDevice() {
                     Log.e(TAG, "", it)
                     disconnect()
                 }
-            })
+        }
     }
 
     abstract fun initializeCompletable(): Completable

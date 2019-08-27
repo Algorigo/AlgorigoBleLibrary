@@ -51,12 +51,12 @@ abstract class BleManager {
     abstract fun getConnectionStateObservable(): Observable<ConnectionStateData>
 
     protected fun onDeviceFound(bluetoothDevice: BluetoothDevice): BleDevice? {
-        return deviceMap.get(bluetoothDevice) ?: createBleDevice(bluetoothDevice)
+        return deviceMap[bluetoothDevice] ?: createBleDevice(bluetoothDevice)
     }
 
     private fun createBleDevice(bluetoothDevice: BluetoothDevice): BleDevice? {
         return bleDeviceDelegate.createBleDeviceOuter(bluetoothDevice)?.also {
-            deviceMap.put(bluetoothDevice, it)
+            deviceMap[bluetoothDevice] = it
         }
     }
 
@@ -67,13 +67,13 @@ abstract class BleManager {
     }
 
     fun getDevice(bluetoothDevice: BluetoothDevice): BleDevice? {
-        return deviceMap.get(bluetoothDevice)
+        return deviceMap[bluetoothDevice]
     }
 
     companion object {
         private val TAG = BleManager::class.java.simpleName
 
-        var bleManagerComponenet: BleManagerComponent? = null
+        private var bleManagerComponenet: BleManagerComponent? = null
 
         fun init(context: Context) {
             bleManagerComponenet = DaggerBleManagerComponent.builder()

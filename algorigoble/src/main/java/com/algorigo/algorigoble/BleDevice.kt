@@ -19,7 +19,7 @@ open class BleDevice {
     val bleDeviceEngine: BleDeviceEngine = BleManager.generateDeviceEngine().apply {
         bleDeviceCallback = object : BleDeviceEngine.BleDeviceCallback {
             override fun onDeviceDisconnected() {
-                onDisconnected()
+                this@BleDevice.onDisconnected()
             }
         }
     }
@@ -37,7 +37,7 @@ open class BleDevice {
         get() = bleDeviceEngine.connectionState
 
     open val connected: Boolean
-        get() = connectionState == BleDevice.ConnectionState.CONNECTED
+        get() = connectionState == ConnectionState.CONNECTED
 
     fun connectCompletable(autoConnect: Boolean, milliSec: Long? = null): Completable {
         return if (milliSec != null) {
