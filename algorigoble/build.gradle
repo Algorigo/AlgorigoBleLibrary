@@ -12,7 +12,7 @@ publish {
     userOrg = 'chagilhwan'
     groupId = 'com.algorigo.algorigoble'
     artifactId = 'AlgorigoBleLibrary'
-    publishVersion = '1.0.6'
+    publishVersion = '1.0.7'
     desc = 'AlgorigoBleLibrary'
     website = 'https://github.com/Algorigo/AlgorigoBleLibrary'
     issueTracker = "${website}/issues"
