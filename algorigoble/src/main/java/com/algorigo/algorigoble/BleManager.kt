@@ -3,7 +3,6 @@ package com.algorigo.algorigoble
 import android.bluetooth.BluetoothDevice
 import android.content.Context
 import io.reactivex.Observable
-import java.lang.RuntimeException
 
 abstract class BleManager {
 
