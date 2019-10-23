@@ -82,17 +82,16 @@ abstract class BleManager {
         private val TAG = BleManager::class.java.simpleName
 
         private lateinit var bleManager: BleManager
-        private lateinit var bleDeviceEngine: BleDeviceEngine
+        private lateinit var bleManagerEngine: BleManagerEngine
 
         fun init(context: Context, engine: BleManagerEngine = BleManagerEngine.ALGORIGO_BLE) {
+            bleManagerEngine = engine
             when (engine) {
                 BleManagerEngine.RX_ANDROID_BLE -> {
                     bleManager = BleManagerRxAndroidBle().apply { initialize(context.applicationContext) }
-                    bleDeviceEngine = BleDeviceEngineRxAndroidBle()
                 }
                 BleManagerEngine.ALGORIGO_BLE -> {
                     bleManager = BleManagerImpl().apply { initialize(context.applicationContext) }
-                    bleDeviceEngine = BleDeviceEngineImpl()
                 }
             }
         }
@@ -102,7 +101,14 @@ abstract class BleManager {
         }
 
         fun generateDeviceEngine(): BleDeviceEngine {
-            return bleDeviceEngine
+            return when (bleManagerEngine) {
+                BleManagerEngine.RX_ANDROID_BLE -> {
+                    BleDeviceEngineRxAndroidBle()
+                }
+                BleManagerEngine.ALGORIGO_BLE -> {
+                    BleDeviceEngineImpl()
+                }
+            }
         }
     }
 }
