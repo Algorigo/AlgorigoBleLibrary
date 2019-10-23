@@ -1,9 +1,9 @@
 package com.algorigo.algorigoblelibrary
 
-import android.support.v7.widget.RecyclerView
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import androidx.recyclerview.widget.RecyclerView
 import com.algorigo.algorigoble.BleDevice
 import kotlinx.android.synthetic.main.item_ble_device_list.view.*
 

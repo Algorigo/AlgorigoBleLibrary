@@ -2,10 +2,18 @@ package com.algorigo.algorigoble
 
 import android.bluetooth.BluetoothDevice
 import android.content.Context
+import com.algorigo.algorigoble.impl.BleDeviceEngineImpl
+import com.algorigo.algorigoble.impl.BleManagerImpl
+import com.algorigo.algorigoble.rxandroidble.BleDeviceEngineRxAndroidBle
+import com.algorigo.algorigoble.rxandroidble.BleManagerRxAndroidBle
 import io.reactivex.Observable
-import java.lang.RuntimeException
 
 abstract class BleManager {
+
+    enum class BleManagerEngine {
+        RX_ANDROID_BLE,
+        ALGORIGO_BLE,
+    }
 
     class BleNotAvailableException(message: String?, cause: Throwable?) : RuntimeException(message, cause) {
         constructor(): this(null, null)
@@ -73,28 +81,28 @@ abstract class BleManager {
     companion object {
         private val TAG = BleManager::class.java.simpleName
 
-        private var bleManagerComponenet: BleManagerComponent? = null
+        private lateinit var bleManager: BleManager
+        private lateinit var bleDeviceEngine: BleDeviceEngine
 
-        fun init(context: Context) {
-            bleManagerComponenet = DaggerBleManagerComponent.builder()
-                .bleManagerModule(BleManagerComponent.BleManagerModule(context.applicationContext))
-                .build()
+        fun init(context: Context, engine: BleManagerEngine = BleManagerEngine.ALGORIGO_BLE) {
+            when (engine) {
+                BleManagerEngine.RX_ANDROID_BLE -> {
+                    bleManager = BleManagerRxAndroidBle().apply { initialize(context.applicationContext) }
+                    bleDeviceEngine = BleDeviceEngineRxAndroidBle()
+                }
+                BleManagerEngine.ALGORIGO_BLE -> {
+                    bleManager = BleManagerImpl().apply { initialize(context.applicationContext) }
+                    bleDeviceEngine = BleDeviceEngineImpl()
+                }
+            }
         }
 
         fun getInstance(): BleManager {
-            if (bleManagerComponenet != null) {
-                return bleManagerComponenet!!.bleManager()
-            } else {
-                throw IllegalStateException("BleManager is not initialized")
-            }
+            return bleManager
         }
 
         fun generateDeviceEngine(): BleDeviceEngine {
-            if (bleManagerComponenet != null) {
-                return bleManagerComponenet!!.bleDeviceEngine()
-            } else {
-                throw IllegalStateException("BleManager is not initialized")
-            }
+            return bleDeviceEngine
         }
     }
 }
