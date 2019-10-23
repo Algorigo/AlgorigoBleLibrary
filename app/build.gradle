@@ -5,6 +5,14 @@ apply plugin: 'kotlin-android'
 apply plugin: 'kotlin-android-extensions'
 
 android {
+    signingConfigs {
+        release {
+            keyAlias 'Algorigo'
+            keyPassword project.property("keyPassword")
+            storeFile file(project.property("storeFile"))
+            storePassword project.property("storePassword")
+        }
+    }
     compileSdkVersion 28
     defaultConfig {
         applicationId "com.algorigo.algorigoblelibrary"
@@ -18,6 +26,7 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.release
         }
     }
 }
