@@ -18,6 +18,10 @@ open class BleDevice {
 
     val bleDeviceEngine: BleDeviceEngine = BleManager.generateDeviceEngine().apply {
         bleDeviceCallback = object : BleDeviceEngine.BleDeviceCallback {
+            override fun onDeviceReconnected() {
+                this@BleDevice.onReconnected()
+            }
+
             override fun onDeviceDisconnected() {
                 this@BleDevice.onDisconnected()
             }
@@ -65,6 +69,10 @@ open class BleDevice {
 
     fun disconnect() {
         bleDeviceEngine.disconnect()
+    }
+
+    open fun onReconnected() {
+
     }
 
     open fun onDisconnected() {

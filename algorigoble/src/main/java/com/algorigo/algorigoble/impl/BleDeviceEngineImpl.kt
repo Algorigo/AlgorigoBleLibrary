@@ -58,7 +58,11 @@ class BleDeviceEngineImpl : BleDeviceEngine {
             super.onServicesDiscovered(gatt, status)
             this@BleDeviceEngineImpl.gatt = gatt
             this@BleDeviceEngineImpl.status = BleDevice.ConnectionState.CONNECTED
-            connectionSubject?.onComplete()
+            if (connectionSubject?.hasComplete() == false) {
+                connectionSubject?.onComplete()
+            } else {
+                onReconnected()
+            }
         }
 
         override fun onCharacteristicRead(gatt: BluetoothGatt?, characteristic: BluetoothGattCharacteristic?, status: Int) {
@@ -166,6 +170,10 @@ class BleDeviceEngineImpl : BleDeviceEngine {
     override fun disconnect() {
         status = BleDevice.ConnectionState.DISCONNECTING
         gatt?.disconnect()
+    }
+
+    override fun onReconnected() {
+        bleDeviceCallback?.onDeviceReconnected()
     }
 
     override fun onDisconnected() {
