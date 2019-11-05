@@ -77,6 +77,10 @@ class BleDeviceEngineRxAndroidBle: BleDeviceEngine {
         connectDisposable?.dispose()
     }
 
+    override fun onReconnected() {
+
+    }
+
     override fun onDisconnected() {
         connectDisposable = null
         rxBleConnection = null

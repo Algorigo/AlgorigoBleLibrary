@@ -9,6 +9,7 @@ import java.util.*
 interface BleDeviceEngine {
 
     interface BleDeviceCallback {
+        fun onDeviceReconnected()
         fun onDeviceDisconnected()
     }
 
@@ -21,6 +22,7 @@ interface BleDeviceEngine {
     fun connectCompletableImpl(autoConnect: Boolean): Completable
     fun connectCompletableImpl(autoConnect: Boolean, milliSec: Long): Completable
     fun disconnect()
+    fun onReconnected()
     fun onDisconnected()
     fun getConnectionStateObservable(): Observable<BleDevice.ConnectionState>
     fun readCharacteristic(characteristicUuid: UUID): Single<ByteArray>?

@@ -50,6 +50,18 @@ abstract class InitializableBleDevice: BleDevice() {
 
     abstract fun initializeCompletable(): Completable
 
+    override fun onReconnected() {
+        super.onReconnected()
+        getInitializeCompletable()
+            .subscribe({
+                initialized = true
+                initializeRelay.accept(ConnectionState.CONNECTED)
+            }, {
+                Log.e(TAG, "", it)
+                disconnect()
+            })
+    }
+
     override fun onDisconnected() {
         super.onDisconnected()
         initialized = false
