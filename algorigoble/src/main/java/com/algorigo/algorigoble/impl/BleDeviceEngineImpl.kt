@@ -168,7 +168,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
     }
 
     override fun disconnect() {
-        status = BleDevice.ConnectionState.DISCONNECTING
+        status = BleDevice.ConnectionState.DISCONNECTED
         gatt?.disconnect()
     }
 
