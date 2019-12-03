@@ -48,8 +48,10 @@ class BleDeviceEngineImpl : BleDeviceEngine {
 
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     serviceSingle = null
-                    this@BleDeviceEngineImpl.status = BleDevice.ConnectionState.DISCONNECTED
-                    onDisconnected()
+                    if (this@BleDeviceEngineImpl.status == BleDevice.ConnectionState.DISCONNECTED) {
+                        this@BleDeviceEngineImpl.status = BleDevice.ConnectionState.DISCONNECTED
+                        onDisconnected()
+                    }
                 }
             }
         }
@@ -171,6 +173,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
         status = BleDevice.ConnectionState.DISCONNECTED
         gatt?.disconnect()
         gatt?.close()
+        onDisconnected()
     }
 
     override fun onReconnected() {
