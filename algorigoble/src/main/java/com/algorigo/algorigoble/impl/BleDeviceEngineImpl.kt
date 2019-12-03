@@ -70,9 +70,9 @@ class BleDeviceEngineImpl : BleDeviceEngine {
         override fun onCharacteristicRead(gatt: BluetoothGatt?, characteristic: BluetoothGattCharacteristic?, status: Int) {
             super.onCharacteristicRead(gatt, characteristic, status)
             characteristic?.let {
-                characteristicMap[it.uuid]?.also { subject ->
+                characteristicMap[it.uuid]?.also { subjectPair ->
                     characteristicMap.remove(it.uuid)
-                    subject.onNext(it.value)
+                    subjectPair.first.onNext(it.value ?: subjectPair.second)
                 }
             }
         }
@@ -80,9 +80,9 @@ class BleDeviceEngineImpl : BleDeviceEngine {
         override fun onCharacteristicWrite(gatt: BluetoothGatt?, characteristic: BluetoothGattCharacteristic?, status: Int) {
             super.onCharacteristicWrite(gatt, characteristic, status)
             characteristic?.let {
-                characteristicMap[it.uuid]?.also { subject ->
+                characteristicMap[it.uuid]?.also { subjectPair ->
                     characteristicMap.remove(it.uuid)
-                    subject.onNext(it.value)
+                    subjectPair.first.onNext(it.value ?: subjectPair.second)
                 }
             }
         }
@@ -103,9 +103,9 @@ class BleDeviceEngineImpl : BleDeviceEngine {
         override fun onDescriptorWrite(gatt: BluetoothGatt?, descriptor: BluetoothGattDescriptor?, status: Int) {
             super.onDescriptorWrite(gatt, descriptor, status)
             descriptor?.let {
-                characteristicMap[it.characteristic.uuid]?.also { subject ->
+                characteristicMap[it.characteristic.uuid]?.also { subjectPair ->
                     characteristicMap.remove(it.characteristic.uuid)
-                    subject.onNext(it.value)
+                    subjectPair.first.onNext(it.value ?: subjectPair.second)
                 }
             }
         }
@@ -114,7 +114,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
     private var connectionSubject: Subject<Int>? = null
     private val connectionStateRelay = PublishRelay.create<BleDevice.ConnectionState>().toSerialized()
     private var serviceSingle: Single<List<BluetoothGattService>>? = null
-    private val characteristicMap = mutableMapOf<UUID, Subject<ByteArray>>()
+    private val characteristicMap = mutableMapOf<UUID, Pair<Subject<ByteArray>, ByteArray>>()
     private val notificationObservableMap = mutableMapOf<UUID, Pair<Observable<Observable<ByteArray>>, Subject<Observable<ByteArray>>>>()
     private val notificationMap = mutableMapOf<UUID, Subject<ByteArray>>()
     private val indicationObservableMap = mutableMapOf<UUID, Pair<Observable<Observable<ByteArray>>, Subject<Observable<ByteArray>>>>()
@@ -299,7 +299,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
         getCharacteristic(pushData.characteristicUuid)
             .flatMap { characteristic ->
                 val subject = BehaviorSubject.create<ByteArray>()
-                characteristicMap.put(pushData.characteristicUuid, subject)
+                characteristicMap.put(pushData.characteristicUuid, Pair(subject, byteArrayOf()))
                 Completable.create {
                     if (readCharacteristicInner(characteristic)) {
                         it.onComplete()
@@ -331,7 +331,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
         getCharacteristic(pushData.characteristicUuid)
             .flatMap { characteristic ->
                 val subject = BehaviorSubject.create<ByteArray>()
-                characteristicMap.put(pushData.characteristicUuid, subject)
+                characteristicMap.put(pushData.characteristicUuid, Pair(subject, pushData.value))
                 Completable.create {
                     if (writeCharacteristicInner(characteristic, pushData.value)) {
                         it.onComplete()
@@ -437,7 +437,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
         getCharacteristic(pushData.characteristicUuid)
             .flatMap { characteristic ->
                 val subject = BehaviorSubject.create<ByteArray>()
-                characteristicMap.put(pushData.characteristicUuid, subject)
+                characteristicMap.put(pushData.characteristicUuid, Pair(subject, pushData.value))
                 Completable.create {
                     if (writeDescriptorInner(characteristic, pushData.value)) {
                         it.onComplete()
