@@ -48,7 +48,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
 
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     serviceSingle = null
-                    if (this@BleDeviceEngineImpl.status == BleDevice.ConnectionState.DISCONNECTED) {
+                    if (this@BleDeviceEngineImpl.status != BleDevice.ConnectionState.DISCONNECTED) {
                         this@BleDeviceEngineImpl.status = BleDevice.ConnectionState.DISCONNECTED
                         onDisconnected()
                     }
@@ -181,11 +181,11 @@ class BleDeviceEngineImpl : BleDeviceEngine {
     }
 
     override fun onDisconnected() {
-        for (pair in notificationObservableMap.values) {
-            pair.second.onError(DisconnectError())
+        notificationObservableMap.values.map { it.second }.forEach {
+            it.onError(DisconnectError())
         }
-        for (pair in indicationObservableMap.values) {
-            pair.second.onError(DisconnectError())
+        indicationObservableMap.values.map { it.second }.forEach {
+            it.onError(DisconnectError())
         }
         bleDeviceCallback?.onDeviceDisconnected()
     }
