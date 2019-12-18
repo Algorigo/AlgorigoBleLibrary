@@ -48,7 +48,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
 
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     serviceSingle = null
-                    if (this@BleDeviceEngineImpl.status == BleDevice.ConnectionState.DISCONNECTED) {
+                    if (this@BleDeviceEngineImpl.status != BleDevice.ConnectionState.DISCONNECTED) {
                         this@BleDeviceEngineImpl.status = BleDevice.ConnectionState.DISCONNECTED
                         onDisconnected()
                     }
