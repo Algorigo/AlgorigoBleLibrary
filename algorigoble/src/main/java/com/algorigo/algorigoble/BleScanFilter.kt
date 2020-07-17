@@ -2,12 +2,12 @@ package com.algorigo.algorigoble
 
 import android.bluetooth.BluetoothDevice
 
-class BleScanFilter {
+open class BleScanFilter {
 
     internal var deviceName: String? = null
     internal var deviceAddress: String? = null
 
-    fun isOk(device: BluetoothDevice?, rssi: Int, scanRecord: ByteArray?): Boolean {
+    open fun isOk(device: BluetoothDevice?, rssi: Int, scanRecord: ByteArray?): Boolean {
         return (if (deviceName != null) deviceName.equals(device?.name) else true) &&
                 (if (deviceAddress != null) deviceAddress.equals(device?.address) else true)
     }
