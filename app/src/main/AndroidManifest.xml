@@ -11,12 +11,19 @@
         android:theme="@style/AppTheme">
         <activity android:name=".MainActivity">
             <intent-filter>
-                <action android:name="android.intent.action.MAIN"/>
+                <action android:name="android.intent.action.MAIN" />
 
-                <category android:name="android.intent.category.LAUNCHER"/>
+                <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
         <activity android:name=".SampleBleDeviceActivity" />
+        <activity android:name=".smart_chair.SC01DeviceActivity" />
+        <activity android:name=".smart_chair.SC20DeviceActivity" />
+        <activity android:name=".smart_chair.SC21DeviceActivity" />
+        <activity android:name=".smart_chair.SC30DeviceActivity" />
+        <activity android:name=".bruxweeper.BruxweeperActivity" />
+        <activity android:name=".mldp_terminal.MLDPTerminalActivity" />
+        <activity android:name=".carseat.CarSeatDeviceActivity" />
     </application>
 
 </manifest>

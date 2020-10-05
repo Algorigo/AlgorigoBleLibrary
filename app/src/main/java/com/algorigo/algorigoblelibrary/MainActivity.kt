@@ -8,6 +8,13 @@ import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
 import com.algorigo.algorigoble.BleDevice
 import com.algorigo.algorigoble.BleManager
+import com.algorigo.algorigoblelibrary.bruxweeper.BruxweeperActivity
+import com.algorigo.algorigoblelibrary.bruxweeper.BruxweeperBleDevice
+import com.algorigo.algorigoblelibrary.carseat.CarSeatDevice
+import com.algorigo.algorigoblelibrary.carseat.CarSeatDeviceActivity
+import com.algorigo.algorigoblelibrary.mldp_terminal.MLDPTerminal
+import com.algorigo.algorigoblelibrary.mldp_terminal.MLDPTerminalActivity
+import com.algorigo.algorigoblelibrary.smart_chair.*
 import com.algorigo.algorigoblelibrary.util.PermissionUtil
 import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
 import io.reactivex.rxjava3.disposables.Disposable
@@ -20,9 +27,45 @@ class MainActivity : AppCompatActivity() {
         override fun onSelect(bleDevice: BleDevice) {
             if (bleDevice.connected) {
                 when (bleDevice) {
-                    is SampleBleDevice -> {
-                        Intent(this@MainActivity, SampleBleDeviceActivity::class.java).apply {
-                            putExtra(SampleBleDeviceActivity.NAME_MAC_ADDRESS, bleDevice.macAddress)
+                    is SC01Device -> {
+                        Intent(this@MainActivity, SC01DeviceActivity::class.java).apply {
+                            putExtra(SC01DeviceActivity.NAME_MAC_ADDRESS, bleDevice.macAddress)
+                            startActivity(this)
+                        }
+                    }
+                    is SC20Device -> {
+                        Intent(this@MainActivity, SC20DeviceActivity::class.java).apply {
+                            putExtra(SC20DeviceActivity.NAME_MAC_ADDRESS, bleDevice.macAddress)
+                            startActivity(this)
+                        }
+                    }
+                    is SC21Device -> {
+                        Intent(this@MainActivity, SC21DeviceActivity::class.java).apply {
+                            putExtra(SC21DeviceActivity.NAME_MAC_ADDRESS, bleDevice.macAddress)
+                            startActivity(this)
+                        }
+                    }
+                    is SC30Device -> {
+                        Intent(this@MainActivity, SC30DeviceActivity::class.java).apply {
+                            putExtra(SC30DeviceActivity.NAME_MAC_ADDRESS, bleDevice.macAddress)
+                            startActivity(this)
+                        }
+                    }
+                    is BruxweeperBleDevice -> {
+                        Intent(this@MainActivity, BruxweeperActivity::class.java).apply {
+                            putExtra(BruxweeperActivity.NAME_MAC_ADDRESS, bleDevice.macAddress)
+                            startActivity(this)
+                        }
+                    }
+                    is MLDPTerminal -> {
+                        Intent(this@MainActivity, MLDPTerminalActivity::class.java).apply {
+                            putExtra(MLDPTerminalActivity.NAME_MAC_ADDRESS, bleDevice.macAddress)
+                            startActivity(this)
+                        }
+                    }
+                    is CarSeatDevice -> {
+                        Intent(this@MainActivity, CarSeatDeviceActivity::class.java).apply {
+                            putExtra(CarSeatDeviceActivity.NAME_MAC_ADDRESS, bleDevice.macAddress)
                             startActivity(this)
                         }
                     }

@@ -1,0 +1,243 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context=".smart_chair.SC21DeviceActivity">
+
+    <Button
+        android:id="@+id/startBtn"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Data"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <com.algorigo.algorigoblelibrary.GridTextView
+        android:id="@+id/gridTextView"
+        android:layout_width="match_parent"
+        android:layout_height="200dp"
+        android:background="#cccccc"
+        app:grid_height="4"
+        app:grid_reverse="true"
+        app:grid_rotate="cw_90"
+        app:grid_width="4"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/startBtn" />
+
+    <TextView
+        android:id="@+id/intervalLabel"
+        android:layout_width="0px"
+        android:layout_height="wrap_content"
+        android:text="Interval : "
+        app:layout_constraintEnd_toStartOf="@+id/intervalView"
+        app:layout_constraintHorizontal_weight="1"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/gridTextView" />
+
+    <TextView
+        android:id="@+id/intervalView"
+        android:layout_width="0px"
+        android:layout_height="wrap_content"
+        android:textColor="@android:color/holo_red_light"
+        app:layout_constraintBaseline_toBaselineOf="@+id/intervalLabel"
+        app:layout_constraintEnd_toStartOf="@+id/voltageLabel"
+        app:layout_constraintHorizontal_weight="1"
+        app:layout_constraintStart_toEndOf="@+id/intervalLabel" />
+
+    <TextView
+        android:id="@+id/voltageLabel"
+        android:layout_width="0px"
+        android:layout_height="wrap_content"
+        android:text="Voltage : "
+        app:layout_constraintBaseline_toBaselineOf="@+id/intervalView"
+        app:layout_constraintEnd_toStartOf="@+id/voltageView"
+        app:layout_constraintHorizontal_weight="1"
+        app:layout_constraintStart_toEndOf="@+id/intervalView" />
+
+    <TextView
+        android:id="@+id/voltageView"
+        android:layout_width="0px"
+        android:layout_height="wrap_content"
+        android:textColor="@android:color/holo_red_light"
+        app:layout_constraintBaseline_toBaselineOf="@+id/voltageLabel"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintHorizontal_weight="1"
+        app:layout_constraintStart_toEndOf="@+id/voltageLabel" />
+
+    <TextView
+        android:id="@+id/capacityLabel"
+        android:layout_width="0px"
+        android:layout_height="wrap_content"
+        android:text="Capacity : "
+        app:layout_constraintEnd_toStartOf="@+id/capacityView"
+        app:layout_constraintHorizontal_weight="1"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/intervalLabel" />
+
+    <TextView
+        android:id="@+id/capacityView"
+        android:layout_width="0px"
+        android:layout_height="wrap_content"
+        android:textColor="@android:color/holo_red_light"
+        app:layout_constraintBaseline_toBaselineOf="@+id/capacityLabel"
+        app:layout_constraintEnd_toStartOf="@+id/chargingLabel"
+        app:layout_constraintHorizontal_weight="1"
+        app:layout_constraintStart_toEndOf="@+id/capacityLabel" />
+
+    <TextView
+        android:id="@+id/chargingLabel"
+        android:layout_width="0px"
+        android:layout_height="wrap_content"
+        android:text="Charging : "
+        app:layout_constraintBaseline_toBaselineOf="@+id/capacityView"
+        app:layout_constraintEnd_toStartOf="@+id/chargingView"
+        app:layout_constraintHorizontal_weight="1"
+        app:layout_constraintStart_toEndOf="@+id/capacityView" />
+
+    <TextView
+        android:id="@+id/chargingView"
+        android:layout_width="0px"
+        android:layout_height="wrap_content"
+        android:textColor="@android:color/holo_red_light"
+        app:layout_constraintBaseline_toBaselineOf="@+id/chargingLabel"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintHorizontal_weight="1"
+        app:layout_constraintStart_toEndOf="@+id/chargingLabel" />
+
+    <TextView
+        android:id="@+id/amplificationLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Amplification : "
+        app:layout_constraintBaseline_toBaselineOf="@+id/amplificationEdit"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <EditText
+        android:id="@+id/amplificationEdit"
+        android:layout_width="0px"
+        android:layout_height="wrap_content"
+        android:inputType="number"
+        app:layout_constraintEnd_toStartOf="@+id/amplificationSetBtn"
+        app:layout_constraintHorizontal_weight="1"
+        app:layout_constraintStart_toEndOf="@+id/amplificationLabel"
+        app:layout_constraintTop_toBottomOf="@+id/capacityLabel" />
+
+    <Button
+        android:id="@+id/amplificationSetBtn"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Set"
+        app:layout_constraintBaseline_toBaselineOf="@+id/amplificationEdit"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toEndOf="@+id/amplificationEdit" />
+
+    <TextView
+        android:id="@+id/potentiometerLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Potentiometer : "
+        app:layout_constraintBaseline_toBaselineOf="@+id/potentiometerEdit"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <EditText
+        android:id="@+id/potentiometerEdit"
+        android:layout_width="0px"
+        android:layout_height="wrap_content"
+        android:inputType="number"
+        app:layout_constraintEnd_toStartOf="@+id/potentiometerSetBtn"
+        app:layout_constraintHorizontal_weight="1"
+        app:layout_constraintStart_toEndOf="@+id/potentiometerLabel"
+        app:layout_constraintTop_toBottomOf="@+id/amplificationEdit" />
+
+    <Button
+        android:id="@+id/potentiometerSetBtn"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Set"
+        app:layout_constraintBaseline_toBaselineOf="@+id/potentiometerEdit"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toEndOf="@+id/potentiometerEdit" />
+
+    <TextView
+        android:id="@+id/sensingIntervalLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Sensing Interval : "
+        app:layout_constraintBaseline_toBaselineOf="@+id/sensingIntervalEdit"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <EditText
+        android:id="@+id/sensingIntervalEdit"
+        android:layout_width="0px"
+        android:layout_height="wrap_content"
+        android:inputType="number"
+        app:layout_constraintEnd_toStartOf="@+id/sensingIntervalSetBtn"
+        app:layout_constraintHorizontal_weight="1"
+        app:layout_constraintStart_toEndOf="@+id/sensingIntervalLabel"
+        app:layout_constraintTop_toBottomOf="@+id/potentiometerEdit" />
+
+    <Button
+        android:id="@+id/sensingIntervalSetBtn"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Set"
+        app:layout_constraintBaseline_toBaselineOf="@+id/sensingIntervalEdit"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toEndOf="@+id/sensingIntervalEdit" />
+
+    <TextView
+        android:id="@+id/commIntervalLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Comm Interval : "
+        app:layout_constraintBaseline_toBaselineOf="@+id/commIntervalEdit"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <EditText
+        android:id="@+id/commIntervalEdit"
+        android:layout_width="0px"
+        android:layout_height="wrap_content"
+        android:inputType="number"
+        app:layout_constraintEnd_toStartOf="@+id/commIntervalSetBtn"
+        app:layout_constraintHorizontal_weight="1"
+        app:layout_constraintStart_toEndOf="@+id/commIntervalLabel"
+        app:layout_constraintTop_toBottomOf="@+id/sensingIntervalEdit" />
+
+    <Button
+        android:id="@+id/commIntervalSetBtn"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Set"
+        app:layout_constraintBaseline_toBaselineOf="@+id/commIntervalEdit"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toEndOf="@+id/commIntervalEdit" />
+
+    <TextView
+        android:id="@+id/offTimerLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Off Timer : "
+        app:layout_constraintBaseline_toBaselineOf="@+id/offTimerEdit"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <EditText
+        android:id="@+id/offTimerEdit"
+        android:layout_width="0px"
+        android:layout_height="wrap_content"
+        android:inputType="number"
+        app:layout_constraintEnd_toStartOf="@+id/offTimerSetBtn"
+        app:layout_constraintHorizontal_weight="1"
+        app:layout_constraintStart_toEndOf="@+id/offTimerLabel"
+        app:layout_constraintTop_toBottomOf="@+id/commIntervalEdit" />
+
+    <Button
+        android:id="@+id/offTimerSetBtn"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Set"
+        app:layout_constraintBaseline_toBaselineOf="@+id/offTimerEdit"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toEndOf="@+id/offTimerEdit" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <declare-styleable name="GridTextView">
+        <attr name="grid_width" format="integer" />
+        <attr name="grid_height" format="integer" />
+        <attr name="grid_reverse" format="boolean" />
+        <attr name="grid_rotate" format="enum">
+            <enum name="normal" value="0" />
+            <enum name="cw_90" value="1" />
+            <enum name="cw_180" value="2" />
+            <enum name="cw_270" value="3" />
+        </attr>
+    </declare-styleable>
+</resources>
