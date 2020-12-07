@@ -56,8 +56,8 @@ public class PermissionUtil {
         }
     }
 
-    public static void requestExternalPermissions(Activity activity, String permission, final int requestCode) {
-        requestPermissions(activity, new String[] { permission }, requestCode);
+    public static void requestExternalPermissions(Activity activity, String[] permissions, final int requestCode) {
+        requestPermissions(activity, permissions, requestCode);
     }
 
     public static boolean verifyPermission(int[] grantresults) {
