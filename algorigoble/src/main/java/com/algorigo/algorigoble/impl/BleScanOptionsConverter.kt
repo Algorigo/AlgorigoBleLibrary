@@ -36,7 +36,9 @@ object BleScanOptionsConverter {
     fun convertScanFilters(filters: Array<out BleScanFilter>): List<ScanFilter> {
         return filters.map {
             ScanFilter.Builder().apply {
-                setDeviceName(it.deviceName)
+                it.deviceName?.let { deviceName ->
+                    setDeviceName(deviceName)
+                }
                 it.deviceAddress?.let { deviceAddress ->
                     setDeviceAddress(deviceAddress)
                 }
