@@ -28,10 +28,10 @@ jobs:
         - ~/.gradle/caches
         - ~/.gradle/wrapper
     - store_artifacts:
-        path: algorigoutil/build/reports
+        path: algorigoble/build/reports
         destination: reports
     - store_test_results:
-        path: algorigoutil/build/test-results
+        path: algorigoble/build/test-results
     - persist_to_workspace:
         root: .
         paths:
