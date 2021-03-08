@@ -3,59 +3,62 @@ apply plugin: 'kotlin-android'
 apply plugin: 'kotlin-android-extensions'
 
 apply plugin: 'maven-publish'
-apply plugin: 'com.jfrog.bintray'
 
 version '1.2.0'
-group 'com.algorigo.algorigoble'
 
-publishing {
-    publications {
-        AlgorigoBle(MavenPublication) {
-            artifact("$buildDir/outputs/aar/algorigoble-release.aar")
-            groupId this.group
-            artifactId 'AlgorigoBleLibrary'
-            version this.version
+if (project.parent.name.equals("AlgorigoBleLibrary")) {
+    apply plugin: 'com.jfrog.bintray'
+    group 'com.algorigo.algorigoble'
 
-            pom.withXml {
-                def dependenciesNode = asNode().appendNode('dependencies')
+    publishing {
+        publications {
+            AlgorigoBle(MavenPublication) {
+                artifact("$buildDir/outputs/aar/algorigoble-release.aar")
+                groupId this.group
+                artifactId 'AlgorigoBleLibrary'
+                version this.version
 
-                // Iterate over the implementation dependencies (we don't want the test ones), adding a <dependency> node for each
-                configurations.implementation.allDependencies.each {
-                    // Ensure dependencies such as fileTree are not included in the pom.
-                    if (it.name != 'unspecified') {
-                        def dependencyNode = dependenciesNode.appendNode('dependency')
-                        dependencyNode.appendNode('groupId', it.group)
-                        dependencyNode.appendNode('artifactId', it.name)
-                        dependencyNode.appendNode('version', it.version)
+                pom.withXml {
+                    def dependenciesNode = asNode().appendNode('dependencies')
+
+                    // Iterate over the implementation dependencies (we don't want the test ones), adding a <dependency> node for each
+                    configurations.implementation.allDependencies.each {
+                        // Ensure dependencies such as fileTree are not included in the pom.
+                        if (it.name != 'unspecified') {
+                            def dependencyNode = dependenciesNode.appendNode('dependency')
+                            dependencyNode.appendNode('groupId', it.group)
+                            dependencyNode.appendNode('artifactId', it.name)
+                            dependencyNode.appendNode('version', it.version)
+                        }
                     }
                 }
             }
         }
     }
-}
 
-bintray {
-    user = System.getenv('BINTRAY_USER')
-    key = System.getenv('BINTRAY_KEY')
-    publications = ['AlgorigoBle']
-    configurations = ['archives']
-    override = true
-    pkg {
-        repo = 'maven'
-        name = 'AlgorigoBle'
-        userOrg = 'chagilhwan'
-        description = "Algorigo Ble Library with rx"
-        publish = true
-        publicDownloadNumbers = true
-        licenses = ['Apache-2.0']
-        websiteUrl = 'https://github.com/Algorigo/AlgorigoBleLibrary'
-        vcsUrl = '${websiteUrl}.git'
-        dryRun = false
-        version {
-            name = this.version
-            desc = 'minor update'
-            released = new Date()
-            vcsTag = this.version
+    bintray {
+        user = System.getenv('BINTRAY_USER')
+        key = System.getenv('BINTRAY_KEY')
+        publications = ['AlgorigoBle']
+        configurations = ['archives']
+        override = true
+        pkg {
+            repo = 'maven'
+            name = 'AlgorigoBle'
+            userOrg = 'chagilhwan'
+            description = "Algorigo Ble Library with rx"
+            publish = true
+            publicDownloadNumbers = true
+            licenses = ['Apache-2.0']
+            websiteUrl = 'https://github.com/Algorigo/AlgorigoBleLibrary'
+            vcsUrl = '${websiteUrl}.git'
+            dryRun = false
+            version {
+                name = this.version
+                desc = 'minor update'
+                released = new Date()
+                vcsTag = this.version
+            }
         }
     }
 }
