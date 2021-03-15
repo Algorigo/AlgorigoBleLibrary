@@ -18,7 +18,12 @@ class SampleBleDeviceActivity : AppCompatActivity() {
         setContentView(R.layout.activity_sample_ble_device)
 
         val macAddress = intent.getStringExtra(NAME_MAC_ADDRESS)
-        sampleBleDevice = BleManager.getInstance().getDevice(macAddress) as? SampleBleDevice
+        if (macAddress != null) {
+            sampleBleDevice = BleManager.getInstance().getDevice(macAddress) as? SampleBleDevice
+        } else {
+            finish()
+            return
+        }
 
         dataText.setText("name:${sampleBleDevice?.name}\naddress:${sampleBleDevice?.macAddress}")
     }
