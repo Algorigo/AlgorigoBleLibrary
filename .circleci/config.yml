@@ -18,6 +18,12 @@ jobs:
         key: gradle-v1a-{{ arch }}-{{ checksum "/tmp/gradle_cache_seed" }}
         name: Restore gradle cache
     - run:
+        name: gradle.property
+        command: |
+          mkdir -p ~/.gradle
+          curl $GRADLE_PROPERTY_PATH --output ~/.gradle/gradle.properties
+          curl $SECRET_KEY_RING_PATH --output algorigoble/secret-keys.gpg
+    - run:
         command: |
           ./gradlew build
         name: 'Run: ./gradlew build'
@@ -45,8 +51,8 @@ jobs:
       - attach_workspace:
           at: .
       - run:
-          name: Upload Bintray
-          command: ./gradlew bintrayUpload -PbintrayUser=chagilhwan -PbintrayKey=$BINTRAY_API_KEY -PdryRun=false
+          name: Upload Maven Central
+          command: ./gradlew uploadArchives
 
 workflows:
   version: 2

@@ -2,64 +2,86 @@ apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
 apply plugin: 'kotlin-android-extensions'
 
-version '1.2.0'
+def versionStr = '1.2.0'
 
-if (project.parent.name.equals("AlgorigoBleLibrary")) {
-    apply plugin: 'maven-publish'
-    apply plugin: 'com.jfrog.bintray'
-    group 'com.algorigo.algorigoble'
+def getCurrentGitBranch() {
+    def gitBranch = "Unknown branch"
+    try {
+        def workingDir = new File("${project.projectDir}")
+        def result = 'git rev-parse --abbrev-ref HEAD'.execute(null, workingDir)
+        result.waitFor()
+        if (result.exitValue() == 0) {
+            gitBranch = result.text.trim()
+        }
+    } catch (e) {
+    }
+    return gitBranch
+}
 
-    publishing {
-        publications {
-            AlgorigoBle(MavenPublication) {
-                artifact("$buildDir/outputs/aar/algorigoble-release.aar")
-                groupId this.group
-                artifactId 'AlgorigoBleLibrary'
-                version this.version
+def getUserName() {
+    return System.properties['user.name']
+}
 
-                pom.withXml {
-                    def dependenciesNode = asNode().appendNode('dependencies')
+buildscript {
+    repositories {
+        jcenter()
+    }
+    dependencies {
+        classpath 'com.bmuschko:gradle-nexus-plugin:2.3.1'
+    }
+}
 
-                    // Iterate over the implementation dependencies (we don't want the test ones), adding a <dependency> node for each
-                    configurations.implementation.allDependencies.each {
-                        // Ensure dependencies such as fileTree are not included in the pom.
-                        if (it.name != 'unspecified') {
-                            def dependencyNode = dependenciesNode.appendNode('dependency')
-                            dependencyNode.appendNode('groupId', it.group)
-                            dependencyNode.appendNode('artifactId', it.name)
-                            dependencyNode.appendNode('version', it.version)
-                        }
-                    }
-                }
+apply plugin: 'com.bmuschko.nexus'
+
+group = "com.algorigo.rx"
+archivesBaseName = "algorigoble"
+if (getCurrentGitBranch().equals('master')) {
+    version = versionStr
+} else {
+    version = "${versionStr}-${getUserName()}-SNAPSHOT"
+}
+
+modifyPom {
+    project {
+        name 'AlgorigoBleLibrary'
+        description 'Ble Library for Android using ReactiveX'
+        url 'https://github.com/Algorigo/AlgorigoBleLibrary'
+        inceptionYear '2018'
+
+        scm {
+            url 'https://github.com/Algorigo/AlgorigoBleLibrary'
+            connection 'scm:https://github.com/Algorigo/AlgorigoBleLibrary.git'
+            developerConnection 'scm:git:https://github.com/Algorigo/AlgorigoBleLibrary.git'
+        }
+
+        licenses {
+            license {
+                name 'The Apache Software License, Version 2.0'
+                url 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+                distribution 'repo'
+            }
+        }
+
+        developers {
+            developer {
+                id 'rouddy'
+                name 'Rouddy'
+                email 'rouddy@naver.com'
             }
         }
     }
+}
 
-    bintray {
-        user = System.getenv('BINTRAY_USER')
-        key = System.getenv('BINTRAY_KEY')
-        publications = ['AlgorigoBle']
-        configurations = ['archives']
-        override = true
-        pkg {
-            repo = 'maven'
-            name = 'AlgorigoBle'
-            userOrg = 'chagilhwan'
-            description = "Algorigo Ble Library with rx"
-            publish = true
-            publicDownloadNumbers = true
-            licenses = ['Apache-2.0']
-            websiteUrl = 'https://github.com/Algorigo/AlgorigoBleLibrary'
-            vcsUrl = '${websiteUrl}.git'
-            dryRun = false
-            version {
-                name = this.version
-                desc = 'minor update'
-                released = new Date()
-                vcsTag = this.version
-            }
-        }
-    }
+extraArchive {
+    sources = true
+    tests = true
+    javadoc = true
+}
+
+nexus {
+    sign = true
+    repositoryUrl = NEXUS_REPOSITORY_URL
+    snapshotRepositoryUrl = NEXUS_SNAPSHOT_REPOSITORY_URL
 }
 
 android {
@@ -69,7 +91,7 @@ android {
         minSdkVersion 21
         targetSdkVersion 30
         versionCode 1
-        versionName this.version
+        versionName versionStr
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
