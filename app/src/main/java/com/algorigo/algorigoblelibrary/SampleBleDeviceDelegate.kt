@@ -1,6 +1,7 @@
 package com.algorigo.algorigoblelibrary
 
 import android.bluetooth.BluetoothDevice
+import android.util.Log
 import com.algorigo.algorigoble.BleDevice
 import com.algorigo.algorigoble.BleManager
 import com.algorigo.algorigoble.BleScanFilter
@@ -9,8 +10,7 @@ import com.algorigo.algorigoble.BleScanSettings
 class SampleBleDeviceDelegate: BleManager.BleDeviceDelegate() {
     override fun createBleDevice(bluetoothDevice: BluetoothDevice): BleDevice? {
         return when (bluetoothDevice.name) {
-            SampleBleDevice.BLE_NAME -> SampleBleDevice()
-            else -> null
+            else -> SampleBleDevice()
         }
     }
 
@@ -19,8 +19,6 @@ class SampleBleDeviceDelegate: BleManager.BleDeviceDelegate() {
     }
 
     override fun getBleScanFilters(): Array<BleScanFilter> {
-        return arrayOf(
-            BleScanFilter.Builder().setDeviceName(SampleBleDevice.BLE_NAME).build()
-        )
+        return arrayOf()
     }
 }

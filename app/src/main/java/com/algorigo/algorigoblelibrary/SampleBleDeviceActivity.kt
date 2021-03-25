@@ -18,39 +18,14 @@ class SampleBleDeviceActivity : AppCompatActivity() {
         setContentView(R.layout.activity_sample_ble_device)
 
         val macAddress = intent.getStringExtra(NAME_MAC_ADDRESS)
-        sampleBleDevice = BleManager.getInstance().getDevice(macAddress) as? SampleBleDevice
+        if (macAddress != null) {
+            sampleBleDevice = BleManager.getInstance().getDevice(macAddress) as? SampleBleDevice
+        } else {
+            finish()
+            return
+        }
 
-        periodEdit.setText(sampleBleDevice?.getVersion()?.toString())
-        setPeriodBtn.setOnClickListener {
-            val value = periodEdit.text.toString()
-            sampleBleDevice?.setVersionSingle(value)
-                    ?.observeOn(AndroidSchedulers.mainThread())
-                    ?.subscribe({
-                        periodEdit.setText(it.toString())
-                    }, {
-                        Log.e(TAG, "", it)
-                    })
-        }
-        getPeriodBtn.setOnClickListener {
-            periodEdit.setText(sampleBleDevice?.getVersion()?.toString())
-        }
-        sendOnBtn.setOnClickListener {
-            if (disposable == null) {
-                disposable = sampleBleDevice?.sendDataOn()
-                        ?.observeOn(AndroidSchedulers.mainThread())
-                        ?.subscribe({
-                            dataText.setText(it.contentToString())
-                        }, {
-                            Log.e(TAG, "", it)
-                        })
-            }
-        }
-        sendOffBtn.setOnClickListener {
-            disposable?.let {
-                it.dispose()
-                disposable = null
-            }
-        }
+        dataText.setText("name:${sampleBleDevice?.name}\naddress:${sampleBleDevice?.macAddress}")
     }
 
     companion object {

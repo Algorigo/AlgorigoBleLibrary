@@ -87,7 +87,7 @@ class MainActivity : AppCompatActivity() {
                 // 권한이 없음 -> 퍼미션을 요구
                 PermissionUtil.requestExternalPermissions(
                     this,
-                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                    arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
                     REQUEST_CODE
                 )
             }
