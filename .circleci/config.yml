@@ -1,8 +1,8 @@
 version: 2
 jobs:
   build:
-    machine:
-      image: android:202102-01
+    docker:
+      - image: circleci/android:api-30
     steps:
     - checkout
     - run:
@@ -12,10 +12,10 @@ jobs:
     - run:
         command: |
           find . -name 'build.gradle' | sort | xargs cat |
-          shasum | awk '{print $1}' > /tmp/gradle_cache_seed
+          shasum | awk '{print $1}' > ./tmp_gradle_cache_seed
         name: Generate cache checksum
     - restore_cache:
-        key: gradle-v1a-{{ arch }}-{{ checksum "/tmp/gradle_cache_seed" }}
+        key: gradle-v1a-{{ arch }}-{{ checksum "./tmp_gradle_cache_seed" }}
         name: Restore gradle cache
     - run:
         name: gradle.property
@@ -28,11 +28,16 @@ jobs:
           ./gradlew build
         name: 'Run: ./gradlew build'
     - save_cache:
-        key: gradle-v1a-{{ arch }}-{{ checksum "/tmp/gradle_cache_seed" }}
+        key: gradle-v1a-{{ arch }}-{{ checksum "./tmp_gradle_cache_seed" }}
         name: Save gradle cache
         paths:
-        - ~/.gradle/caches
-        - ~/.gradle/wrapper
+          - ~/.gradle/caches
+          - ~/.gradle/wrapper
+    - save_cache:
+        key: gradle-properties-${CIRCLE_WORKFLOW_ID}
+        name: Save gradle properties
+        paths:
+          - ~/.gradle/gradle.properties
     - store_artifacts:
         path: algorigoble/build/reports
         destination: reports
@@ -44,12 +49,18 @@ jobs:
           - .
     resource_class: medium
   deploy:
-    machine:
-      image: android:202102-01
+    docker:
+      - image: circleci/android:api-30
     working_directory: ~/code
     steps:
       - attach_workspace:
           at: .
+      - restore_cache:
+          key: gradle-v1a-{{ arch }}-{{ checksum "./tmp_gradle_cache_seed" }}
+          name: Restore gradle cache
+      - restore_cache:
+          key: gradle-properties-${CIRCLE_WORKFLOW_ID}
+          name: Restore gradle properties
       - run:
           name: Upload Maven Central
           command: ./gradlew uploadArchives
@@ -66,3 +77,4 @@ workflows:
           branches:
             only:
               - master
+              - /release\/.*/
