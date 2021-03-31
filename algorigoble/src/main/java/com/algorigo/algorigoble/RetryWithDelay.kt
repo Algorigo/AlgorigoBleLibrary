@@ -1,8 +1,8 @@
 package com.algorigo.algorigoble
 
 import android.util.Log
-import io.reactivex.Flowable
-import io.reactivex.functions.Function
+import io.reactivex.rxjava3.core.Flowable
+import io.reactivex.rxjava3.functions.Function
 import org.reactivestreams.Publisher
 import java.util.concurrent.TimeUnit
 import kotlin.reflect.KClass

@@ -1,11 +1,9 @@
 package com.algorigo.algorigoblelibrary
 
 import android.os.Bundle
-import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
 import com.algorigo.algorigoble.BleManager
-import io.reactivex.android.schedulers.AndroidSchedulers
-import io.reactivex.disposables.Disposable
+import io.reactivex.rxjava3.disposables.Disposable
 import kotlinx.android.synthetic.main.activity_sample_ble_device.*
 
 class SampleBleDeviceActivity : AppCompatActivity() {

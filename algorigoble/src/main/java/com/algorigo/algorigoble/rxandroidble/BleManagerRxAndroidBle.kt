@@ -6,19 +6,20 @@ import com.algorigo.algorigoble.BleDevice
 import com.algorigo.algorigoble.BleManager
 import com.algorigo.algorigoble.BleScanFilter
 import com.algorigo.algorigoble.BleScanSettings
-import com.jakewharton.rxrelay2.PublishRelay
+import com.jakewharton.rxrelay3.PublishRelay
 import com.polidea.rxandroidble2.RxBleClient
 import com.polidea.rxandroidble2.RxBleDevice
 import com.polidea.rxandroidble2.exceptions.BleException
 import com.polidea.rxandroidble2.scan.ScanFilter
 import com.polidea.rxandroidble2.scan.ScanSettings
-import io.reactivex.Completable
-import io.reactivex.Observable
-import io.reactivex.Observer
-import io.reactivex.disposables.Disposable
-import io.reactivex.exceptions.UndeliverableException
-import io.reactivex.plugins.RxJavaPlugins
-import io.reactivex.schedulers.Schedulers
+import hu.akarnokd.rxjava3.bridge.RxJavaBridge
+import io.reactivex.rxjava3.core.Completable
+import io.reactivex.rxjava3.core.Observable
+import io.reactivex.rxjava3.core.Observer
+import io.reactivex.rxjava3.disposables.Disposable
+import io.reactivex.rxjava3.exceptions.UndeliverableException
+import io.reactivex.rxjava3.plugins.RxJavaPlugins
+import io.reactivex.rxjava3.schedulers.Schedulers
 import java.util.concurrent.TimeUnit
 
 class BleManagerRxAndroidBle: BleManager() {
@@ -33,7 +34,7 @@ class BleManagerRxAndroidBle: BleManager() {
         override fun subscribeActual(observer: Observer<in List<BleDevice>>?) {
             this.observer = observer
 
-            disposable = rxAndroidBle.scanBleDevices(scanSettings, *scanFilters)
+            disposable = rxAndroidBle.scanBleDevices(scanSettings, *scanFilters).`as`(RxJavaBridge.toV3Observable())
                 .doFinally {
                     if (!completed) {
                         completed = true
@@ -95,7 +96,7 @@ class BleManagerRxAndroidBle: BleManager() {
 
     override fun scanObservable(scanSettings: BleScanSettings, vararg scanFilters: BleScanFilter): Observable<List<BleDevice>> {
         val bleDeviceList = mutableListOf<BleDevice>()
-        return rxAndroidBle.scanBleDevices(BleScanOptionsConverterRx.convertScanSettings(scanSettings), *BleScanOptionsConverterRx.convertScanFilters(scanFilters))
+        return rxAndroidBle.scanBleDevices(BleScanOptionsConverterRx.convertScanSettings(scanSettings), *BleScanOptionsConverterRx.convertScanFilters(scanFilters)).`as`(RxJavaBridge.toV3Observable())
             .map {
                 onDeviceFound(it.bleDevice)?.also {
                     if (!bleDeviceList.contains(it)) {
