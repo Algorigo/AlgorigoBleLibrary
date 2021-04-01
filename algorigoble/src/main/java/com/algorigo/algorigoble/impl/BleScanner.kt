@@ -5,13 +5,12 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.os.Build
-import android.util.Log
 import androidx.annotation.RequiresApi
 import com.algorigo.algorigoble.BleScanFilter
 import com.algorigo.algorigoble.BleScanSettings
-import io.reactivex.Completable
-import io.reactivex.Observable
-import io.reactivex.subjects.PublishSubject
+import io.reactivex.rxjava3.core.Completable
+import io.reactivex.rxjava3.core.Observable
+import io.reactivex.rxjava3.subjects.PublishSubject
 import java.util.concurrent.TimeUnit
 
 /**

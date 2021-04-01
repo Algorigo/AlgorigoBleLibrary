@@ -9,8 +9,8 @@ import androidx.appcompat.app.AppCompatActivity
 import com.algorigo.algorigoble.BleDevice
 import com.algorigo.algorigoble.BleManager
 import com.algorigo.algorigoblelibrary.util.PermissionUtil
-import io.reactivex.android.schedulers.AndroidSchedulers
-import io.reactivex.disposables.Disposable
+import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
+import io.reactivex.rxjava3.disposables.Disposable
 import kotlinx.android.synthetic.main.activity_main.*
 
 class MainActivity : AppCompatActivity() {

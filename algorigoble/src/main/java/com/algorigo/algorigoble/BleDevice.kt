@@ -2,9 +2,9 @@ package com.algorigo.algorigoble
 
 import android.bluetooth.BluetoothDevice
 import android.util.Log
-import io.reactivex.Completable
-import io.reactivex.Observable
-import io.reactivex.Single
+import io.reactivex.rxjava3.core.Completable
+import io.reactivex.rxjava3.core.Observable
+import io.reactivex.rxjava3.core.Single
 import java.util.*
 
 open class BleDevice {

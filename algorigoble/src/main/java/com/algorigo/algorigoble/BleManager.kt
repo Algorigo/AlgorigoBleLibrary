@@ -6,7 +6,7 @@ import com.algorigo.algorigoble.impl.BleDeviceEngineImpl
 import com.algorigo.algorigoble.impl.BleManagerImpl
 import com.algorigo.algorigoble.rxandroidble.BleDeviceEngineRxAndroidBle
 import com.algorigo.algorigoble.rxandroidble.BleManagerRxAndroidBle
-import io.reactivex.Observable
+import io.reactivex.rxjava3.core.Observable
 
 abstract class BleManager {
 
