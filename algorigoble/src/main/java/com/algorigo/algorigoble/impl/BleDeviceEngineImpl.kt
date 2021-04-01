@@ -6,14 +6,14 @@ import android.util.Log
 import com.algorigo.algorigoble.BleDevice
 import com.algorigo.algorigoble.BleDeviceEngine
 import com.algorigo.algorigoble.RetryWithDelay
-import com.jakewharton.rxrelay2.PublishRelay
-import io.reactivex.Completable
-import io.reactivex.Observable
-import io.reactivex.Single
-import io.reactivex.schedulers.Schedulers
-import io.reactivex.subjects.BehaviorSubject
-import io.reactivex.subjects.PublishSubject
-import io.reactivex.subjects.Subject
+import com.jakewharton.rxrelay3.PublishRelay
+import io.reactivex.rxjava3.core.Completable
+import io.reactivex.rxjava3.core.Observable
+import io.reactivex.rxjava3.core.Single
+import io.reactivex.rxjava3.schedulers.Schedulers
+import io.reactivex.rxjava3.subjects.BehaviorSubject
+import io.reactivex.rxjava3.subjects.PublishSubject
+import io.reactivex.rxjava3.subjects.Subject
 import java.util.*
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
@@ -244,7 +244,7 @@ class BleDeviceEngineImpl : BleDeviceEngine {
         return notificationObservableMap[characteristicUuid]!!.first
     }
 
-    override fun setupIndication(characteristicUuid: UUID): Observable<Observable<ByteArray>>? {
+    override fun setupIndication(characteristicUuid: UUID): Observable<Observable<ByteArray>> {
         if (!indicationObservableMap.containsKey(characteristicUuid)) {
             var isFirst = true
             BehaviorSubject.create<Observable<ByteArray>>().also { subject ->

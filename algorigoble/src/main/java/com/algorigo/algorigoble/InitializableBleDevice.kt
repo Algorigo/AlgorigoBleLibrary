@@ -1,9 +1,9 @@
 package com.algorigo.algorigoble
 
 import android.util.Log
-import com.jakewharton.rxrelay2.PublishRelay
-import io.reactivex.Completable
-import io.reactivex.Observable
+import com.jakewharton.rxrelay3.PublishRelay
+import io.reactivex.rxjava3.core.Completable
+import io.reactivex.rxjava3.core.Observable
 
 abstract class InitializableBleDevice: BleDevice() {
 

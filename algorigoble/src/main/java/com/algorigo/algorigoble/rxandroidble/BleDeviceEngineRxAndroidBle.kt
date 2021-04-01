@@ -7,11 +7,12 @@ import com.algorigo.algorigoble.BleDeviceEngine
 import com.polidea.rxandroidble2.RxBleConnection
 import com.polidea.rxandroidble2.RxBleDevice
 import com.polidea.rxandroidble2.Timeout
-import io.reactivex.Completable
-import io.reactivex.CompletableObserver
-import io.reactivex.Observable
-import io.reactivex.Single
-import io.reactivex.disposables.Disposable
+import hu.akarnokd.rxjava3.bridge.RxJavaBridge
+import io.reactivex.rxjava3.core.Completable
+import io.reactivex.rxjava3.core.CompletableObserver
+import io.reactivex.rxjava3.core.Observable
+import io.reactivex.rxjava3.core.Single
+import io.reactivex.rxjava3.disposables.Disposable
 import java.util.*
 import java.util.concurrent.TimeUnit
 
@@ -21,9 +22,9 @@ class BleDeviceEngineRxAndroidBle: BleDeviceEngine {
         override fun subscribeActual(observer: CompletableObserver?) {
             connectDisposable = (
                     if (milliSec == null)
-                        rxBleDevice.establishConnection(autoConnect)
+                        rxBleDevice.establishConnection(autoConnect).`as`(RxJavaBridge.toV3Observable())
                     else
-                        rxBleDevice.establishConnection(autoConnect, Timeout(milliSec, TimeUnit.MILLISECONDS))
+                        rxBleDevice.establishConnection(autoConnect, Timeout(milliSec, TimeUnit.MILLISECONDS)).`as`(RxJavaBridge.toV3Observable())
                     )
                 .doOnDispose {
                     onDisconnected()
@@ -88,6 +89,7 @@ class BleDeviceEngineRxAndroidBle: BleDeviceEngine {
 
     override fun getConnectionStateObservable(): Observable<BleDevice.ConnectionState> {
         return rxBleDevice.observeConnectionStateChanges()
+            .`as`(RxJavaBridge.toV3Observable())
             .map {
                 when (it) {
                     RxBleConnection.RxBleConnectionState.CONNECTING -> BleDevice.ConnectionState.CONNECTING
@@ -99,11 +101,11 @@ class BleDeviceEngineRxAndroidBle: BleDeviceEngine {
     }
 
     override fun readCharacteristic(characteristicUuid: UUID): Single<ByteArray>? {
-        return rxBleConnection?.readCharacteristic(characteristicUuid)
+        return rxBleConnection?.readCharacteristic(characteristicUuid)?.`as`(RxJavaBridge.toV3Single())
     }
 
     override fun writeCharacteristic(characteristicUuid: UUID, value: ByteArray): Single<ByteArray>? {
-        return rxBleConnection?.writeCharacteristic(characteristicUuid, value)
+        return rxBleConnection?.writeCharacteristic(characteristicUuid, value)?.`as`(RxJavaBridge.toV3Single())
     }
 
     override fun writeLongValue(characteristicUuid: UUID, value: ByteArray): Observable<ByteArray>? {
@@ -111,14 +113,15 @@ class BleDeviceEngineRxAndroidBle: BleDeviceEngine {
             ?.setCharacteristicUuid(characteristicUuid)
             ?.setBytes(value)
             ?.build()
+            ?.`as`(RxJavaBridge.toV3Observable())
     }
 
     override fun setupNotification(characteristicUuid: UUID): Observable<Observable<ByteArray>>? {
-        return rxBleConnection?.setupNotification(characteristicUuid)
+        return rxBleConnection?.setupNotification(characteristicUuid)?.`as`(RxJavaBridge.toV3Observable())?.map { it.`as`(RxJavaBridge.toV3Observable()) }
     }
 
     override fun setupIndication(characteristicUuid: UUID): Observable<Observable<ByteArray>>? {
-        return rxBleConnection?.setupIndication(characteristicUuid)
+        return rxBleConnection?.setupIndication(characteristicUuid)?.`as`(RxJavaBridge.toV3Observable())?.map { it.`as`(RxJavaBridge.toV3Observable()) }
     }
 
     companion object {
