@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context=".pdms.RxPDMSActivity">
+
+    <Button
+        android:id="@+id/startBtn"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Data"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <Button
+        android:id="@+id/batteryBtn"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Battery"
+        app:layout_constraintTop_toBottomOf="@+id/startBtn" />
+
+    <Button
+        android:id="@+id/firmwareVersionBtn"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Firmware Version"
+        app:layout_constraintTop_toBottomOf="@+id/batteryBtn" />
+
+    <Button
+        android:id="@+id/getAmpBtn"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Get Amp"
+        app:layout_constraintTop_toBottomOf="@+id/firmwareVersionBtn" />
+
+    <EditText
+        android:id="@+id/ampEditText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Amp"
+        android:inputType="number"
+        app:layout_constraintTop_toBottomOf="@+id/getAmpBtn" />
+
+    <Button
+        android:id="@+id/setAmpBtn"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Set Amp"
+        app:layout_constraintTop_toBottomOf="@+id/ampEditText" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>

@@ -12,6 +12,7 @@ import com.algorigo.algorigoblelibrary.smart_chair.SC01Device
 import com.algorigo.algorigoblelibrary.smart_chair.SC20Device
 import com.algorigo.algorigoblelibrary.smart_chair.SC21Device
 import com.algorigo.algorigoblelibrary.smart_chair.SC30Device
+import com.algorigo.pressurego.RxPDMSDevice
 
 class SampleBleDeviceDelegate: BleManager.BleDeviceDelegate() {
     override fun createBleDevice(bluetoothDevice: BluetoothDevice): BleDevice? {
@@ -20,6 +21,7 @@ class SampleBleDeviceDelegate: BleManager.BleDeviceDelegate() {
             SC20Device.isMatch(bluetoothDevice) -> SC20Device()
             SC21Device.isMatch(bluetoothDevice) -> SC21Device()
             SC30Device.isMatch(bluetoothDevice) -> SC30Device()
+            RxPDMSDevice.isMatch(bluetoothDevice) -> RxPDMSDevice()
             BruxweeperBleDevice.isMatch(bluetoothDevice) -> BruxweeperBleDevice()
             MLDPTerminal.MAC_ADDRESS.equals(bluetoothDevice.address) -> MLDPTerminal()
             CarSeatDevice.isMatch(bluetoothDevice) -> CarSeatDevice()
@@ -37,6 +39,7 @@ class SampleBleDeviceDelegate: BleManager.BleDeviceDelegate() {
             SC20Device.getScanFilter(),
             SC21Device.getScanFilter(),
             SC30Device.getScanFilter(),
+            RxPDMSDevice.getScanFilter(),
             BruxweeperBleDevice.getScanFilter(),
             MLDPTerminal.getScanFilter(),
             CarSeatDevice.getScanFilter()

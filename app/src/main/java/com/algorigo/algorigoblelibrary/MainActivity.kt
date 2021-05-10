@@ -14,8 +14,10 @@ import com.algorigo.algorigoblelibrary.carseat.CarSeatDevice
 import com.algorigo.algorigoblelibrary.carseat.CarSeatDeviceActivity
 import com.algorigo.algorigoblelibrary.mldp_terminal.MLDPTerminal
 import com.algorigo.algorigoblelibrary.mldp_terminal.MLDPTerminalActivity
+import com.algorigo.algorigoblelibrary.pdms.RxPDMSActivity
 import com.algorigo.algorigoblelibrary.smart_chair.*
 import com.algorigo.algorigoblelibrary.util.PermissionUtil
+import com.algorigo.pressurego.RxPDMSDevice
 import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
 import io.reactivex.rxjava3.disposables.Disposable
 import kotlinx.android.synthetic.main.activity_main.*
@@ -48,6 +50,12 @@ class MainActivity : AppCompatActivity() {
                     is SC30Device -> {
                         Intent(this@MainActivity, SC30DeviceActivity::class.java).apply {
                             putExtra(SC30DeviceActivity.NAME_MAC_ADDRESS, bleDevice.macAddress)
+                            startActivity(this)
+                        }
+                    }
+                    is RxPDMSDevice -> {
+                        Intent(this@MainActivity, RxPDMSActivity::class.java).apply {
+                            putExtra(RxPDMSActivity.NAME_MAC_ADDRESS, bleDevice.macAddress)
                             startActivity(this)
                         }
                     }
