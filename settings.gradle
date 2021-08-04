@@ -1,2 +1,3 @@
 rootProject.name = "AlgorigoBleLibrary"
 include ':app'
+include ':algorigoble2'
