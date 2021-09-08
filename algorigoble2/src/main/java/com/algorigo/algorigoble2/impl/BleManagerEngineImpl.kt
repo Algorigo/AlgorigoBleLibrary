@@ -3,6 +3,7 @@ package com.algorigo.algorigoble2.impl
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
 import android.content.Context
 import android.util.Log
 import com.algorigo.algorigoble2.*
@@ -11,10 +12,12 @@ import io.reactivex.rxjava3.core.Observable
 
 internal class BleManagerEngineImpl(private val context: Context, bleDeviceDelegate: BleManager.BleDeviceDelegate) : BleManagerEngine(bleDeviceDelegate) {
 
+    private val bluetoothManager: BluetoothManager
     private val bluetoothAdapter: BluetoothAdapter
 
     init {
-        bluetoothAdapter = (context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
+        bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        bluetoothAdapter = bluetoothManager.adapter
     }
 
     override fun scanObservable(
@@ -59,7 +62,9 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
     }
 
     override fun getConnectedDevices(): List<BleDevice> {
-        TODO("Not yet implemented")
+        return bluetoothManager.getConnectedDevices(BluetoothProfile.GATT).mapNotNull {
+            getBleDevice(it)
+        }
     }
 
     override fun getConnectionStateObservable(): Observable<BleManager.ConnectionStateData> {
