@@ -7,10 +7,8 @@ internal abstract class BleManagerEngine(private val bleDeviceDelegate: BleManag
 
     private val deviceMap: MutableMap<BluetoothDevice, BleDevice> = mutableMapOf()
 
-    abstract fun scanObservable(scanDuration: Long, scanSettings: BleScanSettings, vararg scanFilters: BleScanFilter): Observable<List<BleDevice>>
     abstract fun scanObservable(scanSettings: BleScanSettings, vararg scanFilters: BleScanFilter): Observable<List<BleDevice>>
-    abstract fun scanObservable(scanDuration: Long): Observable<List<BleDevice>>
-    abstract fun scanObservable(): Observable<List<BleDevice>>
+    fun scanObservable() = scanObservable(bleDeviceDelegate.getBleScanSettings(), *bleDeviceDelegate.getBleScanFilters())
     abstract fun getDevice(macAddress: String): BleDevice?
     abstract fun getBondedDevice(macAddress: String): BleDevice?
     abstract fun getBondedDevices(): List<BleDevice>

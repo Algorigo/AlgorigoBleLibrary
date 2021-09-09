@@ -21,26 +21,23 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
     }
 
     override fun scanObservable(
-        scanDuration: Long,
         scanSettings: BleScanSettings,
         vararg scanFilters: BleScanFilter
     ): Observable<List<BleDevice>> {
-        TODO("Not yet implemented")
-    }
+        if (!bluetoothAdapter.isEnabled) {
+            return Observable.error(BleManager.BleNotAvailableException())
+        }
 
-    override fun scanObservable(
-        scanSettings: BleScanSettings,
-        vararg scanFilters: BleScanFilter
-    ): Observable<List<BleDevice>> {
-        TODO("Not yet implemented")
-    }
-
-    override fun scanObservable(scanDuration: Long): Observable<List<BleDevice>> {
-        TODO("Not yet implemented")
-    }
-
-    override fun scanObservable(): Observable<List<BleDevice>> {
-        TODO("Not yet implemented")
+        val bleDeviceList = mutableListOf<BleDevice>()
+        return BleScanner.scanObservable(bluetoothAdapter, scanSettings, *scanFilters)
+            .map {
+                getBleDevice(it)?.also {
+                    if (!bleDeviceList.contains(it)) {
+                        bleDeviceList.add(it)
+                    }
+                }
+                bleDeviceList
+            }
     }
 
     override fun getDevice(macAddress: String): BleDevice? {

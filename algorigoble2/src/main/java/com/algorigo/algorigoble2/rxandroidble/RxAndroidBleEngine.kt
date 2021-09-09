@@ -28,25 +28,9 @@ internal class RxAndroidBleEngine(private val context: Context, bleDeviceDelegat
     }
 
     override fun scanObservable(
-        scanDuration: Long,
         scanSettings: BleScanSettings,
         vararg scanFilters: BleScanFilter
     ): Observable<List<BleDevice>> {
-        TODO("Not yet implemented")
-    }
-
-    override fun scanObservable(
-        scanSettings: BleScanSettings,
-        vararg scanFilters: BleScanFilter
-    ): Observable<List<BleDevice>> {
-        TODO("Not yet implemented")
-    }
-
-    override fun scanObservable(scanDuration: Long): Observable<List<BleDevice>> {
-        TODO("Not yet implemented")
-    }
-
-    override fun scanObservable(): Observable<List<BleDevice>> {
         val bleDeviceList = mutableListOf<BleDevice>()
         return rxAndroidBle.scanBleDevices(ScanSettings.Builder().build()).`as`(toV3Observable())
             .map {
