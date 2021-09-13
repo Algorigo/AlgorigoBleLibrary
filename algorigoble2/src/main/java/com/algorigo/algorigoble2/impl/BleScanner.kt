@@ -24,7 +24,6 @@ internal class BleScanner private constructor(private val bluetoothAdapter: Blue
     private inner class BleScanCallback(val scanFilters: Array<out BleScanFilter>) : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
             super.onScanResult(callbackType, result)
-            Log.e("!!!", "onScanResult:${result}")
             result?.let {
                 if (isOk(it)) {
                     scanSubject.onNext(it.device)
@@ -34,7 +33,6 @@ internal class BleScanner private constructor(private val bluetoothAdapter: Blue
 
         override fun onBatchScanResults(results: MutableList<ScanResult>?) {
             super.onBatchScanResults(results)
-            Log.e("!!!", "onBatchScanResults:${results}")
             results?.let {
                 it.forEach {
                     if (isOk(it)) {
@@ -59,7 +57,6 @@ internal class BleScanner private constructor(private val bluetoothAdapter: Blue
     @Suppress("deprecation")
     private inner class BleLeScanCallback(val scanFilters: Array<out BleScanFilter>) : BluetoothAdapter.LeScanCallback {
         override fun onLeScan(device: BluetoothDevice?, rssi: Int, scanRecord: ByteArray?) {
-            Log.e("!!!", "onLeScan:${device}")
             if (isOk(device, rssi, scanRecord)) {
                 device?.let {
                     scanSubject.onNext(it)
@@ -89,7 +86,6 @@ internal class BleScanner private constructor(private val bluetoothAdapter: Blue
         val scanCallback = BleScanCallback(scanFilters)
         return scanSubject
             .doOnSubscribe {
-                Log.e("!!!", "startScanObservable21 doOnSubscribe")
                 startScan21(scanCallback, scanSettings, *scanFilters)
             }
             .doFinally {
