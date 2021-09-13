@@ -1,23 +1,21 @@
 package com.algorigo.algorigoble2
 
+import android.Manifest
 import android.bluetooth.BluetoothDevice
 import android.content.Context
+import android.os.Build
 import com.algorigo.algorigoble2.impl.BleManagerEngineImpl
-import com.algorigo.algorigoble2.rxandroidble.RxAndroidBleEngine
 
-class BleManager(context: Context, delegate: BleDeviceDelegate = defaultBleDeviceDelegate, engine: Engine = Engine.RX_ANDROID_BLE) {
+class BleManager(context: Context, delegate: BleDeviceDelegate = defaultBleDeviceDelegate, engine: Engine = Engine.ALGORIGO_BLE) {
 
     class BleNotAvailableException: Exception()
 
     enum class Engine {
-        RX_ANDROID_BLE,
+//        RX_ANDROID_BLE,
         ALGORIGO_BLE,
     }
 
     abstract class BleDeviceDelegate {
-        fun createBleDeviceOuter(bluetoothDevice: BluetoothDevice): BleDevice? {
-            return createBleDevice(bluetoothDevice)
-        }
 
         abstract fun createBleDevice(bluetoothDevice: BluetoothDevice): BleDevice?
 
@@ -36,9 +34,9 @@ class BleManager(context: Context, delegate: BleDeviceDelegate = defaultBleDevic
 
     init {
         when (engine) {
-            Engine.RX_ANDROID_BLE -> {
-                this.engine = RxAndroidBleEngine(context.applicationContext, delegate)
-            }
+//            Engine.RX_ANDROID_BLE -> {
+//                this.engine = RxAndroidBleEngine(context.applicationContext, delegate)
+//            }
             Engine.ALGORIGO_BLE -> {
                 this.engine = BleManagerEngineImpl(context.applicationContext, delegate)
             }
@@ -58,8 +56,21 @@ class BleManager(context: Context, delegate: BleDeviceDelegate = defaultBleDevic
     companion object {
         private val defaultBleDeviceDelegate = object : BleDeviceDelegate() {
             override fun createBleDevice(bluetoothDevice: BluetoothDevice): BleDevice {
-                return BleDevice(bluetoothDevice)
+                return BleDevice()
             }
+        }
+
+        fun getPermissionsToRequest() = if (Build.VERSION.SDK_INT > Build.VERSION_CODES.Q) {
+            arrayOf(
+                Manifest.permission.ACCESS_BACKGROUND_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            )
+        } else {
+            arrayOf(
+                Manifest.permission.ACCESS_COARSE_LOCATION,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            )
         }
     }
 }

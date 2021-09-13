@@ -2,7 +2,7 @@ package com.algorigo.algorigoblelibrary
 
 import android.content.pm.PackageManager
 import android.os.Build
-import androidx.activity.result.contract.ActivityResultContracts
+import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -13,7 +13,7 @@ import kotlin.math.roundToInt
 
 open class RequestPermissionActivity : AppCompatActivity() {
 
-    class PermissionRationaleRequiredException(val permission: String): Exception()
+    class PermissionRationaleRequiredException(val permissions: List<String>): Exception()
     class PermissionNotGranted(val permissions: Array<String>): Exception()
 
     val subjects = mutableMapOf<Int, PublishSubject<Any>>()
@@ -29,7 +29,7 @@ open class RequestPermissionActivity : AppCompatActivity() {
                 .zip(grantResults.toTypedArray())
                 .toMap()
                 .filter { it.value != PackageManager.PERMISSION_GRANTED }
-            if (grantResultsMap.size > 0) {
+            if (grantResultsMap.isNotEmpty()) {
                 subject.onError(PermissionNotGranted(grantResultsMap.keys.toTypedArray()))
             } else {
                 subject.onComplete()
@@ -39,33 +39,33 @@ open class RequestPermissionActivity : AppCompatActivity() {
         }
     }
 
-    fun requestPermissionCompletable(permissions: Array<String>): Completable {
+    fun requestPermissionCompletable(permissions: Array<String>, rationaleExplained: Boolean = false): Completable {
         val applicationContext = applicationContext
-        return Completable.create {
-            var allGranted = true
-            for (permission in permissions) {
-                allGranted = allGranted && (ContextCompat.checkSelfPermission(applicationContext, permission) == PackageManager.PERMISSION_GRANTED)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && shouldShowRequestPermissionRationale(permission)) {
-                    it.onError(PermissionRationaleRequiredException(permission))
+        return Completable.create { emitter ->
+            val notGrantedList = permissions.filter { ContextCompat.checkSelfPermission(applicationContext, it) != PackageManager.PERMISSION_GRANTED }
+            if (notGrantedList.isNotEmpty()) {
+                if (!rationaleExplained &&
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+                    notGrantedList.any { shouldShowRequestPermissionRationale(it) }
+                ) {
+                    emitter.onError(PermissionRationaleRequiredException(notGrantedList))
                     return@create
                 }
-            }
-            if (!allGranted) {
-                it.onError(PermissionNotGranted(arrayOf()))
+                emitter.onError(PermissionNotGranted(notGrantedList.toTypedArray()))
                 return@create
             }
-            it.onComplete()
+            emitter.onComplete()
         }
             .subscribeOn(Schedulers.io())
-            .onErrorResumeNext {
-                if (it is PermissionNotGranted) {
+            .onErrorResumeNext { exception ->
+                if (exception is PermissionNotGranted) {
                     val pair = generateRequestCode()
                     pair.second.ignoreElements()
                         .doOnSubscribe {
-                            ActivityCompat.requestPermissions(this, permissions, pair.first)
+                            ActivityCompat.requestPermissions(this, exception.permissions, pair.first)
                         }
                 } else {
-                    Completable.error(it)
+                    Completable.error(exception)
                 }
             }
     }

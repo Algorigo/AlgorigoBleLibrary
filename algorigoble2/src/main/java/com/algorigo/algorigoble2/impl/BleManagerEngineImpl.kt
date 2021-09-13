@@ -4,21 +4,49 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.util.Log
 import com.algorigo.algorigoble2.*
 import com.algorigo.algorigoble2.BleManagerEngine
+import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Observable
 
 internal class BleManagerEngineImpl(private val context: Context, bleDeviceDelegate: BleManager.BleDeviceDelegate) : BleManagerEngine(bleDeviceDelegate) {
 
-    private val bluetoothManager: BluetoothManager
-    private val bluetoothAdapter: BluetoothAdapter
+    private val bluetoothManager: BluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+    private val bluetoothAdapter: BluetoothAdapter = bluetoothManager.adapter
 
-    init {
-        bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-        bluetoothAdapter = bluetoothManager.adapter
-    }
+//    private val broadcastReceiver = object : BroadcastReceiver() {
+//        override fun onReceive(context: Context?, intent: Intent?) {
+//            val device = intent?.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+//            when (intent?.action) {
+//                BluetoothDevice.ACTION_FOUND -> Log.e("!!!", "ACTION_FOUND:${device?.name}")
+//                BluetoothDevice.ACTION_BOND_STATE_CHANGED -> Log.e("!!!", "ACTION_BOND_STATE_CHANGED:${device?.name}")
+//                BluetoothDevice.ACTION_ACL_CONNECTED -> Log.e("!!!", "ACTION_ACL_CONNECTED:${device?.name}")
+//                BluetoothDevice.ACTION_ACL_DISCONNECT_REQUESTED -> Log.e("!!!", "ACTION_ACL_DISCONNECT_REQUESTED:${device?.name}")
+//                BluetoothDevice.ACTION_ACL_DISCONNECTED -> Log.e("!!!", "ACTION_ACL_DISCONNECTED:${device?.name}")
+//            }
+//        }
+//    }
+//
+//    init {
+//        IntentFilter().apply {
+//            addAction(BluetoothDevice.ACTION_FOUND)
+//            addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+//            addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
+//            addAction(BluetoothDevice.ACTION_ACL_DISCONNECT_REQUESTED)
+//            addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+//        }.also {
+//            context.registerReceiver(broadcastReceiver, it)
+//        }
+//    }
+//
+//    protected fun finalize() {
+//        context.unregisterReceiver(broadcastReceiver)
+//    }
 
     override fun scanObservable(
         scanSettings: BleScanSettings,
@@ -31,6 +59,7 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
         val bleDeviceList = mutableListOf<BleDevice>()
         return BleScanner.scanObservable(bluetoothAdapter, scanSettings, *scanFilters)
             .map {
+                Log.e("!!!", "scannedDevice:${it}")
                 getBleDevice(it)?.also {
                     if (!bleDeviceList.contains(it)) {
                         bleDeviceList.add(it)
@@ -64,19 +93,9 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
         }
     }
 
-    override fun getConnectionStateObservable(): Observable<BleManager.ConnectionStateData> {
-        TODO("Not yet implemented")
-    }
-
-    override fun getBleDevice(bluetoothDevice: BluetoothDevice): BleDevice? {
-        return super.getBleDevice(bluetoothDevice)?.apply {
-//            (bleDeviceEngine as BleDeviceEngineRxAndroidBle).rxBleDevice = rxBleDevice
-//            getConnectionStateObservable()
-//                .subscribe({ state ->
-//                    connectionStateRelay.accept(ConnectionStateData(this, state))
-//                }, {
-//                    Log.e(TAG, "", it)
-//                })
+    override fun createBleDevice(bluetoothDevice: BluetoothDevice): BleDevice? {
+        return super.createBleDevice(bluetoothDevice)?.apply {
+            engine = BleDeviceEngineImpl(context, bluetoothDevice)
         }
     }
 }
