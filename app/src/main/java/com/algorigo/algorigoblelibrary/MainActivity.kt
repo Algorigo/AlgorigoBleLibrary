@@ -1,5 +1,6 @@
 package com.algorigo.algorigoblelibrary
 
+import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.content.Intent
 import android.os.Bundle
@@ -86,7 +87,7 @@ class MainActivity : RequestPermissionActivity() {
     }
 
     private fun startScan() {
-        disposable = requestPermissionCompletable(BleManager.getPermissionsToRequest(), true)
+        disposable = requestPermissionCompletable(getPermissionsToRequest(), true)
             .andThen(bleManager.scanObservable())
             .take(3, TimeUnit.SECONDS)
             .observeOn(AndroidSchedulers.mainThread())
@@ -115,6 +116,9 @@ class MainActivity : RequestPermissionActivity() {
     companion object {
         private val TAG = MainActivity::class.java.simpleName
 
-        private const val REQUEST_CODE = 1
+        fun getPermissionsToRequest() = arrayOf(
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        )
     }
 }

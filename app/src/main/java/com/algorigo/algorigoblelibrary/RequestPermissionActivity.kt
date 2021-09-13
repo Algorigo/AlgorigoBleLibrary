@@ -45,11 +45,12 @@ open class RequestPermissionActivity : AppCompatActivity() {
             val notGrantedList = permissions.filter { ContextCompat.checkSelfPermission(applicationContext, it) != PackageManager.PERMISSION_GRANTED }
             if (notGrantedList.isNotEmpty()) {
                 if (!rationaleExplained &&
-                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
-                    notGrantedList.any { shouldShowRequestPermissionRationale(it) }
-                ) {
-                    emitter.onError(PermissionRationaleRequiredException(notGrantedList))
-                    return@create
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    val rationaleRequired = notGrantedList.filter { shouldShowRequestPermissionRationale(it) }
+                    if (rationaleRequired.isNotEmpty()) {
+                        emitter.onError(PermissionRationaleRequiredException(rationaleRequired))
+                        return@create
+                    }
                 }
                 emitter.onError(PermissionNotGranted(notGrantedList.toTypedArray()))
                 return@create
