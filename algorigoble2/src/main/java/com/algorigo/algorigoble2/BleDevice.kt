@@ -22,11 +22,16 @@ class BleDevice() {
     val deviceName: String?
         get() = engine.deviceName
 
+    val bondState: Int
+        get() = engine.bondState
+
     val connected: Boolean
         get() = engine.isConnected()
 
     val connectionState: ConnectionState
         get() = engine.getConnectionStateObservable().blockingFirst()
+
+    fun bondCompletable() = engine.bondCompletable()
 
     fun connectCompletable() = connectCompletableImpl()
 

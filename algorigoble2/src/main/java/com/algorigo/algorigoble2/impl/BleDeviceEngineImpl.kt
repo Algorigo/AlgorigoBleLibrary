@@ -5,9 +5,12 @@ import android.content.Context
 import android.util.Log
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleDeviceEngine
+import com.algorigo.algorigoble2.BleManager
 import io.reactivex.rxjava3.core.Completable
+import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.schedulers.Schedulers
 import io.reactivex.rxjava3.subjects.BehaviorSubject
+import java.util.concurrent.TimeUnit
 
 class BleDeviceEngineImpl(private val context: Context, private val bluetoothDevice: BluetoothDevice):
     BleDeviceEngine() {
@@ -99,14 +102,41 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
         get() = bluetoothDevice.address
     override val deviceName: String?
         get() = bluetoothDevice.name
+    override val bondState: Int
+        get() = bluetoothDevice.bondState
+
+    override fun bondCompletable(): Completable {
+        return Completable.defer {
+            if (bluetoothDevice.bondState == BluetoothDevice.BOND_BONDED) {
+                Completable.complete()
+            } else {
+                Observable.interval(1, TimeUnit.SECONDS)
+                    .doOnSubscribe {
+                        if (!bluetoothDevice.createBond()) {
+                            throw BleManager.BondFailedException()
+                        }
+                    }
+                    .map {
+                        Log.e("!!!", "bondState:${bluetoothDevice.bondState}")
+                        when (bluetoothDevice.bondState) {
+                            BluetoothDevice.BOND_BONDED -> true
+                            BluetoothDevice.BOND_BONDING -> false
+                            BluetoothDevice.BOND_NONE -> throw BleManager.BondFailedException()
+                            else -> throw IllegalStateException("bond state is wrong:${bluetoothDevice.bondState}")
+                        }
+                    }
+                    .filter { it }
+                    .firstOrError()
+                    .ignoreElement()
+            }
+        }
+    }
 
     override fun connectCompletable(): Completable = gattSubject.firstOrError()
         .ignoreElement()
         .subscribeOn(Schedulers.io())
         .observeOn(Schedulers.io())
         .doOnSubscribe {
-//            val bonded = bluetoothDevice.createBond()
-//            Log.e("!!!", "bonded:$bonded,${bluetoothDevice.bondState}")
             val gatt = bluetoothDevice.connectGatt(context, false, gattCallback)
             Log.e("!!!", "connectGatt:$gatt")
             connectionStateRelay.accept(BleDevice.ConnectionState.CONNECTING)

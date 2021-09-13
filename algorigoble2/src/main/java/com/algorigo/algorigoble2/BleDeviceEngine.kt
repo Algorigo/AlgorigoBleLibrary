@@ -8,8 +8,11 @@ abstract class BleDeviceEngine {
 
     abstract val deviceId: String
     abstract val deviceName: String?
+    abstract val bondState: Int
 
     protected val connectionStateRelay: BehaviorRelay<BleDevice.ConnectionState> = BehaviorRelay.create<BleDevice.ConnectionState>().apply { accept(BleDevice.ConnectionState.DISCONNECTED) }
+
+    abstract fun bondCompletable(): Completable
 
     fun isConnected(): Boolean = getConnectionStateObservable().firstOrError().map { it == BleDevice.ConnectionState.CONNECTED }.blockingGet()
     fun getConnectionStateObservable(): Observable<BleDevice.ConnectionState> = connectionStateRelay

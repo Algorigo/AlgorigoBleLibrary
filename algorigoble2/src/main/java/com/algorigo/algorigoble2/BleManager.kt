@@ -1,14 +1,13 @@
 package com.algorigo.algorigoble2
 
-import android.Manifest
 import android.bluetooth.BluetoothDevice
 import android.content.Context
-import android.os.Build
 import com.algorigo.algorigoble2.impl.BleManagerEngineImpl
 
 class BleManager(context: Context, delegate: BleDeviceDelegate = defaultBleDeviceDelegate, engine: Engine = Engine.ALGORIGO_BLE) {
 
     class BleNotAvailableException: Exception()
+    class BondFailedException: Exception()
 
     enum class Engine {
 //        RX_ANDROID_BLE,
