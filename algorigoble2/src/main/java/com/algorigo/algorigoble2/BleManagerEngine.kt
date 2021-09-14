@@ -12,7 +12,20 @@ internal abstract class BleManagerEngine(private val bleDeviceDelegate: BleManag
 
     abstract fun scanObservable(scanSettings: BleScanSettings, vararg scanFilters: BleScanFilter): Observable<List<BleDevice>>
     fun scanObservable() = scanObservable(bleDeviceDelegate.getBleScanSettings(), *bleDeviceDelegate.getBleScanFilters())
-    abstract fun getDevice(macAddress: String): BleDevice?
+
+    fun getDevice(macAddress: String): BleDevice? {
+        return deviceMap
+            .values
+            .filter { it.deviceId == macAddress }
+            .let {
+                return if (it.size == 1) {
+                    it.first()
+                } else {
+                    null
+                }
+            }
+    }
+
     abstract fun getBondedDevice(macAddress: String): BleDevice?
     abstract fun getBondedDevices(): List<BleDevice>
     abstract fun getConnectedDevice(macAddress: String): BleDevice?

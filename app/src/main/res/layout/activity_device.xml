@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    tools:context=".DeviceActivity">
+
+    <TextView
+        android:id="@+id/uuid_label"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="UUID"
+        android:textSize="24sp" />
+
+    <EditText
+        android:id="@+id/uuid_edit_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="00002B07-0000-1000-8000-00805F9B34FB" />
+
+    <Button
+        android:id="@+id/read_characteristic_btn"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Read" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="0x" />
+
+        <EditText
+            android:id="@+id/write_edit_text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+    </LinearLayout>
+
+    <Button
+        android:id="@+id/write_characteristic_btn"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Write" />
+
+    <TextView
+        android:id="@+id/result_text_view"
+        android:layout_width="match_parent"
+        android:layout_height="0px"
+        android:layout_weight="1" />
+
+</LinearLayout>

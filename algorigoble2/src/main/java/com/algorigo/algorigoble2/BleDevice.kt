@@ -1,9 +1,7 @@
 package com.algorigo.algorigoble2
 
 import android.util.Log
-import com.jakewharton.rxrelay3.BehaviorRelay
-import io.reactivex.rxjava3.core.Completable
-import io.reactivex.rxjava3.core.Observable
+import java.util.UUID
 
 class BleDevice() {
 
@@ -33,8 +31,8 @@ class BleDevice() {
 
     fun bondCompletable() = engine.bondCompletable()
 
+    fun getConnectionStateObservable() = engine.getConnectionStateObservable()
     fun connectCompletable() = connectCompletableImpl()
-
     internal open fun connectCompletableImpl() = engine.connectCompletable()
 
     fun connect() {
@@ -47,7 +45,10 @@ class BleDevice() {
 
     fun disconnect() = engine.disconnect()
 
-    fun getConnectionStateObservable() = engine.getConnectionStateObservable()
+    fun readCharacteristicSingle(characteristicUuid: UUID) =
+        engine.readCharacteristicSingle(characteristicUuid)
+    fun writeCharacteristicSingle(characteristicUuid: UUID, byteArray: ByteArray) =
+        engine.writeCharacteristicSingle(characteristicUuid, byteArray)
 
     override fun toString(): String {
         return "$deviceName($deviceId)"

@@ -68,10 +68,6 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
             }
     }
 
-    override fun getDevice(macAddress: String): BleDevice? {
-        TODO("Not yet implemented")
-    }
-
     override fun getBondedDevice(macAddress: String): BleDevice? {
         TODO("Not yet implemented")
     }

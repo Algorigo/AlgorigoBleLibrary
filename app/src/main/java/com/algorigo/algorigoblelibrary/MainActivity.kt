@@ -8,18 +8,21 @@ import android.util.Log
 import android.widget.Button
 import androidx.recyclerview.widget.RecyclerView
 import com.algorigo.algorigoble2.BleDevice
-import com.algorigo.algorigoble2.BleManager
+import com.algorigo.library.rx.Rx2ServiceBindingFactory
 import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
 import io.reactivex.rxjava3.disposables.Disposable
 import java.util.concurrent.TimeUnit
 
 class MainActivity : RequestPermissionActivity() {
 
-    private lateinit var bleManager: BleManager
     private val adapter = BleRecyclerAdapter(object : BleRecyclerAdapter.BleRecyclerListener {
         override fun onSelect(bleDevice: BleDevice) {
             if (bleDevice.connected) {
-
+                Intent(this@MainActivity, DeviceActivity::class.java).apply {
+                    putExtra(DeviceActivity.DEVICE_MAC_ADDRESS, bleDevice.deviceId)
+                }.also {
+                    startActivity(it)
+                }
             }
         }
 
@@ -45,14 +48,18 @@ class MainActivity : RequestPermissionActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Intent(this, BluetoothService::class.java).also {
+            startService(it)
+        }
         initView()
-
-        bleManager = BleManager(this)
     }
 
     override fun onResume() {
         super.onResume()
-        connectionStateDisposable = bleManager.getConnectionStateObservable()
+        connectionStateDisposable = Rx2ServiceBindingFactory.bind<BluetoothService.BluetoothBinder>(this, Intent(this, BluetoothService::class.java))
+            .flatMap {
+                it.getService().bleManager.getConnectionStateObservable()
+            }
             .observeOn(AndroidSchedulers.mainThread())
             .doFinally {
                 connectionStateDisposable = null
@@ -88,7 +95,8 @@ class MainActivity : RequestPermissionActivity() {
 
     private fun startScan() {
         disposable = requestPermissionCompletable(getPermissionsToRequest(), true)
-            .andThen(bleManager.scanObservable())
+            .andThen(Rx2ServiceBindingFactory.bind<BluetoothService.BluetoothBinder>(this, Intent(this, BluetoothService::class.java)))
+            .flatMap { it.getService().bleManager.scanObservable() }
             .take(3, TimeUnit.SECONDS)
             .observeOn(AndroidSchedulers.mainThread())
             .doOnSubscribe {
