@@ -59,7 +59,6 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
         val bleDeviceList = mutableListOf<BleDevice>()
         return BleScanner.scanObservable(bluetoothAdapter, scanSettings, *scanFilters)
             .map {
-                Log.e("!!!", "scannedDevice:${it}")
                 getBleDevice(it)?.also {
                     if (!bleDeviceList.contains(it)) {
                         bleDeviceList.add(it)

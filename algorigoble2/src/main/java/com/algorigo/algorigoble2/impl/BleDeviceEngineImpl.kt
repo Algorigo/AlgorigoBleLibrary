@@ -117,7 +117,6 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
                         }
                     }
                     .map {
-                        Log.e("!!!", "bondState:${bluetoothDevice.bondState}")
                         when (bluetoothDevice.bondState) {
                             BluetoothDevice.BOND_BONDED -> true
                             BluetoothDevice.BOND_BONDING -> false
@@ -132,15 +131,13 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
         }
     }
 
-    override fun connectCompletable(): Completable = gattSubject.firstOrError()
-        .ignoreElement()
-        .subscribeOn(Schedulers.io())
-        .observeOn(Schedulers.io())
+    override fun connectCompletable(): Completable = gattSubject
         .doOnSubscribe {
             val gatt = bluetoothDevice.connectGatt(context, false, gattCallback)
-            Log.e("!!!", "connectGatt:$gatt")
             connectionStateRelay.accept(BleDevice.ConnectionState.CONNECTING)
         }
+        .firstOrError()
+        .ignoreElement()
         .doOnComplete {
             connectionStateRelay.accept(BleDevice.ConnectionState.CONNECTED)
         }
