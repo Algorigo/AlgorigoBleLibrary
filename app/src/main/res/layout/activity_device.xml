@@ -17,7 +17,7 @@
         android:id="@+id/uuid_edit_text"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="00002B07-0000-1000-8000-00805F9B34FB" />
+        android:text="6E400003-B5A3-F393-E0A9-E50E24DCCA9E" />
 
     <Button
         android:id="@+id/read_characteristic_btn"
@@ -48,6 +48,12 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Write" />
+
+    <Button
+        android:id="@+id/notify_btn"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Notify" />
 
     <TextView
         android:id="@+id/result_text_view"

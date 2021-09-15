@@ -1,5 +1,6 @@
 package com.algorigo.algorigoble2
 
+import android.bluetooth.BluetoothGattDescriptor
 import android.util.Log
 import java.util.UUID
 
@@ -10,6 +11,11 @@ class BleDevice() {
         CONNECTED("CONNECTED"),
         DISCONNECTED("DISCONNECTED"),
         DISCONNECTING("DISCONNECTING")
+    }
+
+    enum class NotificationType(val byteArray: ByteArray) {
+        NOTIFICATION(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE),
+        INDICATION(BluetoothGattDescriptor.ENABLE_INDICATION_VALUE),
     }
 
     internal lateinit var engine: BleDeviceEngine
@@ -49,6 +55,8 @@ class BleDevice() {
         engine.readCharacteristicSingle(characteristicUuid)
     fun writeCharacteristicSingle(characteristicUuid: UUID, byteArray: ByteArray) =
         engine.writeCharacteristicSingle(characteristicUuid, byteArray)
+    fun setupNotification(type: NotificationType, characteristicUuid: UUID) =
+        engine.setupNotification(characteristicUuid, type.byteArray)
 
     override fun toString(): String {
         return "$deviceName($deviceId)"

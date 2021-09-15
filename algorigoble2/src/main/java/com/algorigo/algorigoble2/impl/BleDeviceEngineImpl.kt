@@ -94,6 +94,9 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
             characteristic: BluetoothGattCharacteristic?
         ) {
             super.onCharacteristicChanged(gatt, characteristic)
+            characteristic?.let {
+                notificationRelay.accept(Pair(it.uuid, it.value))
+            }
         }
 
         override fun onDescriptorRead(
@@ -102,6 +105,9 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
             status: Int
         ) {
             super.onDescriptorRead(gatt, descriptor, status)
+            descriptor?.let {
+                replyRelay.accept(ReplyData(Type.READ_DESCRIPTOR, it.characteristic.uuid, it.value))
+            }
         }
 
         override fun onDescriptorWrite(
@@ -110,6 +116,9 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
             status: Int
         ) {
             super.onDescriptorWrite(gatt, descriptor, status)
+            descriptor?.let {
+                replyRelay.accept(ReplyData(Type.WRITE_DESCRIPTOR, it.characteristic.uuid, it.value))
+            }
         }
 
         override fun onPhyUpdate(gatt: BluetoothGatt?, txPhy: Int, rxPhy: Int, status: Int) {
@@ -136,6 +145,7 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
     private val gattSubject = BehaviorSubject.create<BluetoothGatt>()
     private var serviceSingle: Single<List<BluetoothGattService>>? = null
     private val replyRelay = PublishRelay.create<ReplyData>()
+    private val notificationRelay = PublishRelay.create<Pair<UUID, ByteArray>>()
 
     override val deviceId: String
         get() = bluetoothDevice.address
@@ -247,6 +257,36 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
             }
     }
 
+    override fun setupNotification(characteristicUuid: UUID, byteArray: ByteArray): Observable<Observable<ByteArray>> {
+        var characteristic: BluetoothGattCharacteristic? = null
+        return getGattSingle()
+            .flatMapObservable { gatt ->
+                getCharacteristic(characteristicUuid)
+                    .flatMap {
+                        characteristic = it
+                        gatt.setCharacteristicNotification(it, true)
+                        writeDescriptor(gatt, it, byteArray)
+                    }
+                    .toObservable()
+                    .concatWith(Observable.never())
+                    .map {
+                        notificationRelay
+                            .filter { it.first == characteristicUuid }
+                            .map { it.second }
+                    }
+                    .doFinally {
+                        characteristic?.let { gattCharacteristic ->
+                            gatt.setCharacteristicNotification(gattCharacteristic, false)
+                            writeDescriptor(gatt, gattCharacteristic, BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE).subscribe({
+                                Log.d(LOG_TAG, "DISABLE_NOTIFICATION_VALUE:${it.contentToString()}")
+                            }, {
+                                Log.e(LOG_TAG, "DISABLE_NOTIFICATION_VALUE error", it)
+                            })
+                        }
+                    }
+            }
+    }
+
     private fun getGattSingle() = gattSubject
         .firstOrError()
 
@@ -279,5 +319,32 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
                 }
             }
             .subscribeOn(Schedulers.io())
+    }
+
+    private fun writeDescriptor(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, byteArray: ByteArray): Single<ByteArray> {
+        return Single.defer {
+            if (characteristic.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY == 0 &&
+                characteristic.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE == 0) {
+                Single.error(IllegalCharacteristicProperty(characteristic.properties, Type.WRITE_DESCRIPTOR))
+            } else {
+                replyRelay
+                    .doOnSubscribe {
+                        val descriptor = characteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG_UUID)
+                        descriptor.value = byteArray
+                        if (!gatt.writeDescriptor(descriptor)) {
+                            throw CommunicationFailedException()
+                        }
+                    }
+                    .filter { it.uuid == characteristic.uuid && it.type == Type.WRITE_DESCRIPTOR }
+                    .map { it.byteArray }
+                    .firstOrError()
+            }
+        }
+    }
+
+    companion object {
+        private val LOG_TAG = BleDeviceEngineImpl::class.java.simpleName
+
+        private val CLIENT_CHARACTERISTIC_CONFIG_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
     }
 }
