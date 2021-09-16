@@ -51,6 +51,8 @@ class BleDevice() {
 
     fun disconnect() = engine.disconnect()
 
+    fun getCharacteristicsSingle() = engine.getCharacteristicsSingle()
+
     fun readCharacteristicSingle(characteristicUuid: UUID) =
         engine.readCharacteristicSingle(characteristicUuid)
     fun writeCharacteristicSingle(characteristicUuid: UUID, byteArray: ByteArray) =

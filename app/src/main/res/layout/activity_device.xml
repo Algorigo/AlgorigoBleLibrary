@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -7,58 +8,17 @@
     tools:context=".DeviceActivity">
 
     <TextView
-        android:id="@+id/uuid_label"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="UUID"
-        android:textSize="24sp" />
-
-    <EditText
-        android:id="@+id/uuid_edit_text"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="6E400003-B5A3-F393-E0A9-E50E24DCCA9E" />
-
-    <Button
-        android:id="@+id/read_characteristic_btn"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Read" />
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center_vertical"
-        android:orientation="horizontal">
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="0x" />
-
-        <EditText
-            android:id="@+id/write_edit_text"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
-    </LinearLayout>
-
-    <Button
-        android:id="@+id/write_characteristic_btn"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Write" />
-
-    <Button
-        android:id="@+id/notify_btn"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Notify" />
-
-    <TextView
         android:id="@+id/result_text_view"
         android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/characteristic_list_view"
+        android:layout_width="match_parent"
         android:layout_height="0px"
-        android:layout_weight="1" />
+        android:layout_weight="1"
+        android:orientation="vertical"
+        app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
+        tools:listitem="@layout/item_characteristic" />
 
 </LinearLayout>

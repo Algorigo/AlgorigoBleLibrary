@@ -198,6 +198,13 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
         gattSubject.blockingFirst().disconnect()
     }
 
+    override fun getCharacteristicsSingle(): Single<List<BluetoothGattCharacteristic>> {
+        return getServices()
+            .map { services ->
+                services.map { it.characteristics }.flatten()
+            }
+    }
+
     override fun readCharacteristicSingle(characteristicUuid: UUID): Single<ByteArray> {
         return getGattSingle()
             .flatMap { gatt ->

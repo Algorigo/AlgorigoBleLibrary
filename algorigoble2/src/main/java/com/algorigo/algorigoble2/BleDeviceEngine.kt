@@ -1,5 +1,6 @@
 package com.algorigo.algorigoble2
 
+import android.bluetooth.BluetoothGattCharacteristic
 import com.jakewharton.rxrelay3.BehaviorRelay
 import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Observable
@@ -22,6 +23,8 @@ abstract class BleDeviceEngine {
     abstract fun connectCompletable(): Completable
 
     abstract fun disconnect()
+
+    abstract fun getCharacteristicsSingle(): Single<List<BluetoothGattCharacteristic>>
 
     abstract fun readCharacteristicSingle(characteristicUuid: UUID): Single<ByteArray>
     abstract fun writeCharacteristicSingle(characteristicUuid: UUID, byteArray: ByteArray): Single<ByteArray>
