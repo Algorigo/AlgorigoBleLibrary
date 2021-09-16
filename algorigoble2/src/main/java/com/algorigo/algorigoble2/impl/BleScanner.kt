@@ -5,14 +5,11 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.os.Build
-import android.util.Log
 import androidx.annotation.RequiresApi
 import com.algorigo.algorigoble2.BleScanFilter
 import com.algorigo.algorigoble2.BleScanSettings
-import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.subjects.PublishSubject
-import java.util.concurrent.TimeUnit
 
 /**
  * Created by jaehongyoo on 2018. 2. 14..
@@ -33,8 +30,8 @@ internal class BleScanner private constructor(private val bluetoothAdapter: Blue
 
         override fun onBatchScanResults(results: MutableList<ScanResult>?) {
             super.onBatchScanResults(results)
-            results?.let {
-                it.forEach {
+            results?.let { scanResults ->
+                scanResults.forEach {
                     if (isOk(it)) {
                         scanSubject.onNext(it.device)
                     }
@@ -48,7 +45,7 @@ internal class BleScanner private constructor(private val bluetoothAdapter: Blue
         }
 
         private fun isOk(result: ScanResult): Boolean {
-            if (scanFilters.size == 0) return true
+            if (scanFilters.isEmpty()) return true
             scanFilters.forEach { if (it.isOk(result.device, result.rssi, result.scanRecord?.bytes)) return true }
             return false
         }
@@ -65,8 +62,10 @@ internal class BleScanner private constructor(private val bluetoothAdapter: Blue
         }
 
         private fun isOk(device: BluetoothDevice?, rssi: Int, scanRecord: ByteArray?): Boolean {
-            if (scanFilters.size == 0) return true
-            scanFilters.forEach { if (it.isOk(device, rssi, scanRecord)) return true }
+            if (scanFilters.isEmpty()) return true
+            device?.let { d ->
+                scanFilters.forEach { if (it.isOk(d, rssi, scanRecord)) return true }
+            }
             return false
         }
     }
