@@ -10,6 +10,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.library.rx.Rx2ServiceBindingFactory
 import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
+import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.disposables.Disposable
 import java.util.concurrent.TimeUnit
 
@@ -26,7 +27,19 @@ class MainActivity : RequestPermissionActivity() {
             }
         }
 
-        override fun onButton(bleDevice: BleDevice) {
+        override fun onBindButton(bleDevice: BleDevice) {
+            if (!bleDevice.bonded) {
+                bleDevice.bondCompletable()
+                    .observeOn(AndroidSchedulers.mainThread())
+                    .subscribe({
+                        notifyDataSetChanged()
+                    }, {
+                        Log.e("!!!", "bondCompletable", it)
+                    })
+            }
+        }
+
+        override fun onConnectButton(bleDevice: BleDevice) {
             when (bleDevice.connectionState) {
                 BleDevice.ConnectionState.CONNECTED -> {
                     bleDevice.disconnect()
@@ -56,6 +69,7 @@ class MainActivity : RequestPermissionActivity() {
 
     override fun onResume() {
         super.onResume()
+        notifyDataSetChanged()
         connectionStateDisposable = Rx2ServiceBindingFactory.bind<BluetoothService.BluetoothBinder>(this, Intent(this, BluetoothService::class.java))
             .flatMap {
                 it.getService().bleManager.getConnectionStateObservable()
@@ -65,7 +79,7 @@ class MainActivity : RequestPermissionActivity() {
                 connectionStateDisposable = null
             }
             .subscribe({
-                adapter.notifyDataSetChanged()
+                notifyDataSetChanged()
             }, {
                 Log.e(TAG, "it")
                 connectionStateDisposable = null
@@ -96,7 +110,17 @@ class MainActivity : RequestPermissionActivity() {
     private fun startScan() {
         disposable = requestPermissionCompletable(getPermissionsToRequest(), true)
             .andThen(Rx2ServiceBindingFactory.bind<BluetoothService.BluetoothBinder>(this, Intent(this, BluetoothService::class.java)))
-            .flatMap { it.getService().bleManager.scanObservable() }
+            .flatMap { binder ->
+                binder.getService().bleManager.let { manager ->
+                    Observable.combineLatest(
+                        Observable.interval(1, TimeUnit.SECONDS).map { manager.getConnectedDevices() },
+                        manager.scanObservable(),
+                        { connected, scanned ->
+                            connected + scanned
+                        }
+                    )
+                }
+            }
             .take(3, TimeUnit.SECONDS)
             .observeOn(AndroidSchedulers.mainThread())
             .doOnSubscribe {
@@ -119,6 +143,10 @@ class MainActivity : RequestPermissionActivity() {
             }, {
                 startBtn.isEnabled = true
             })
+    }
+
+    private fun notifyDataSetChanged() {
+        adapter.notifyDataSetChanged()
     }
 
     companion object {

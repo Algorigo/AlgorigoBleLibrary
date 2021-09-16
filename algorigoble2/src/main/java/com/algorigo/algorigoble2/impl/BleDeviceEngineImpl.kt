@@ -151,8 +151,8 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
         get() = bluetoothDevice.address
     override val deviceName: String?
         get() = bluetoothDevice.name
-    override val bondState: Int
-        get() = bluetoothDevice.bondState
+    override val bonded: Boolean
+        get() = bluetoothDevice.bondState == BluetoothDevice.BOND_BONDED
 
     override fun bondCompletable(): Completable {
         return Completable.defer {
@@ -161,7 +161,8 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
             } else {
                 Observable.interval(1, TimeUnit.SECONDS)
                     .doOnSubscribe {
-                        if (!bluetoothDevice.createBond()) {
+                        if (bluetoothDevice.bondState == BluetoothDevice.BOND_NONE &&
+                            !bluetoothDevice.createBond()) {
                             throw BleManager.BondFailedException()
                         }
                     }

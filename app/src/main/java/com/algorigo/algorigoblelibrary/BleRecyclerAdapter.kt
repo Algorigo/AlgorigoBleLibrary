@@ -12,13 +12,15 @@ class BleRecyclerAdapter(private val bleRecyclerListener: BleRecyclerListener) :
 
     interface BleRecyclerListener {
         fun onSelect(bleDevice: BleDevice)
-        fun onButton(bleDevice: BleDevice)
+        fun onBindButton(bleDevice: BleDevice)
+        fun onConnectButton(bleDevice: BleDevice)
     }
 
     inner class BleRecyclerViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
 
-        val titleView: TextView = itemView.findViewById(R.id.title_view)
-        val connectBtn: Button = itemView.findViewById(R.id.connect_btn)
+        private val titleView: TextView = itemView.findViewById(R.id.title_view)
+        private val bindBtn: Button = itemView.findViewById(R.id.bond_btn)
+        private val connectBtn: Button = itemView.findViewById(R.id.connect_btn)
 
         init {
             itemView.setOnClickListener {
@@ -26,31 +28,45 @@ class BleRecyclerAdapter(private val bleRecyclerListener: BleRecyclerListener) :
                     bleRecyclerListener.onSelect(it)
                 }
             }
+            bindBtn.setOnClickListener {
+                bleDeviceList?.get(adapterPosition)?.let {
+                    bleRecyclerListener.onBindButton(it)
+                }
+            }
             connectBtn.setOnClickListener {
                 bleDeviceList?.get(adapterPosition)?.let {
-                    bleRecyclerListener.onButton(it)
+                    bleRecyclerListener.onConnectButton(it)
                 }
             }
         }
 
         fun setData(bleDevice: BleDevice?) {
-            titleView.text = bleDevice?.toString()
-            when (bleDevice?.connectionState) {
-                BleDevice.ConnectionState.CONNECTING -> {
-                    connectBtn.isEnabled = false
-                    connectBtn.text = itemView.context.getString(R.string.connecting, bleDevice.connectionState.status)
+            bleDevice?.let {
+                titleView.text = it.toString()
+                if (it.bonded) {
+                    bindBtn.text = "Bonded"
+                    bindBtn.isEnabled = false
+                } else {
+                    bindBtn.text = "Bond"
+                    bindBtn.isEnabled = true
                 }
-                BleDevice.ConnectionState.CONNECTED -> {
-                    connectBtn.isEnabled = true
-                    connectBtn.setText(R.string.disconnect)
-                }
-                BleDevice.ConnectionState.DISCONNECTED -> {
-                    connectBtn.isEnabled = true
-                    connectBtn.setText(R.string.connect)
-                }
-                BleDevice.ConnectionState.DISCONNECTING -> {
-                    connectBtn.isEnabled = false
-                    connectBtn.setText(R.string.disconnecting)
+                when (it.connectionState) {
+                    BleDevice.ConnectionState.CONNECTING -> {
+                        connectBtn.isEnabled = false
+                        connectBtn.text = itemView.context.getString(R.string.connecting, it.connectionState.status)
+                    }
+                    BleDevice.ConnectionState.CONNECTED -> {
+                        connectBtn.isEnabled = true
+                        connectBtn.setText(R.string.disconnect)
+                    }
+                    BleDevice.ConnectionState.DISCONNECTED -> {
+                        connectBtn.isEnabled = true
+                        connectBtn.setText(R.string.connect)
+                    }
+                    BleDevice.ConnectionState.DISCONNECTING -> {
+                        connectBtn.isEnabled = false
+                        connectBtn.setText(R.string.disconnecting)
+                    }
                 }
             }
         }

@@ -69,7 +69,15 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
     }
 
     override fun getBondedDevice(macAddress: String): BleDevice? {
-        TODO("Not yet implemented")
+        return getBondedDevices()
+            .filter { it.deviceId == macAddress }
+            .let {
+                if (it.size == 1) {
+                    it[0]
+                } else {
+                    null
+                }
+            }
     }
 
     override fun getBondedDevices(): List<BleDevice> {
@@ -79,7 +87,15 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
     }
 
     override fun getConnectedDevice(macAddress: String): BleDevice? {
-        TODO("Not yet implemented")
+        return getConnectedDevices()
+            .filter { it.deviceId == macAddress }
+            .let {
+                if (it.size == 1) {
+                    it[0]
+                } else {
+                    null
+                }
+            }
     }
 
     override fun getConnectedDevices(): List<BleDevice> {

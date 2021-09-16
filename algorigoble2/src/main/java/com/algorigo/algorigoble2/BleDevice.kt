@@ -26,8 +26,8 @@ class BleDevice() {
     val deviceName: String?
         get() = engine.deviceName
 
-    val bondState: Int
-        get() = engine.bondState
+    val bonded: Boolean
+        get() = engine.bonded
 
     val connected: Boolean
         get() = engine.isConnected()

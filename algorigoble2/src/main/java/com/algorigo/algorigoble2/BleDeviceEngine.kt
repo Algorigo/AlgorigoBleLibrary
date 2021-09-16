@@ -11,7 +11,7 @@ abstract class BleDeviceEngine {
 
     abstract val deviceId: String
     abstract val deviceName: String?
-    abstract val bondState: Int
+    abstract val bonded: Boolean
 
     protected val connectionStateRelay: BehaviorRelay<BleDevice.ConnectionState> = BehaviorRelay.create<BleDevice.ConnectionState>().apply { accept(BleDevice.ConnectionState.DISCONNECTED) }
 

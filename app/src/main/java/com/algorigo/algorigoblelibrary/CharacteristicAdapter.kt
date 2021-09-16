@@ -2,7 +2,6 @@ package com.algorigo.algorigoblelibrary
 
 import android.bluetooth.BluetoothGattCharacteristic
 import android.graphics.Color
-import android.os.Build
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
