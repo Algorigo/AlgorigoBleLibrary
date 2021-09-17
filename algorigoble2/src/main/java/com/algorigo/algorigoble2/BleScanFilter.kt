@@ -8,7 +8,7 @@ import androidx.annotation.RequiresApi
 import java.util.regex.Pattern
 
 class BleScanFilter private constructor(
-    val name: String?, private val namePattern: Pattern?,
+    val name: String?,
     val deviceAddress: String?,
     val uuid: ParcelUuid?, val uuidMask: ParcelUuid?,
     val solicitationUuid: ParcelUuid?, val solicitationUuidMask: ParcelUuid?,
@@ -18,8 +18,6 @@ class BleScanFilter private constructor(
 
     class Builder {
         private var deviceName: String? = null
-        private var deviceNamePattern: Pattern? = null
-
         private var deviceAddress: String? = null
 
         private var serviceUuid: ParcelUuid? = null
@@ -40,13 +38,6 @@ class BleScanFilter private constructor(
 
         fun setDeviceName(deviceName: String?): Builder {
             this.deviceName = deviceName
-            deviceNamePattern = null
-            return this
-        }
-
-        fun setDeviceNamePattern(deviceNamePattern: Pattern): Builder {
-            deviceName = null
-            this.deviceNamePattern = deviceNamePattern
             return this
         }
 
@@ -160,7 +151,7 @@ class BleScanFilter private constructor(
 
         fun build(): BleScanFilter {
             return BleScanFilter(
-                deviceName, deviceNamePattern, deviceAddress,
+                deviceName, deviceAddress,
                 serviceUuid, uuidMask, serviceSolicitationUuid,
                 serviceSolicitationUuidMask,
                 serviceDataUuid, serviceData, serviceDataMask,
@@ -183,11 +174,6 @@ class BleScanFilter private constructor(
                 if (device.address != it) {
                     return false
                 }
-            }
-        }
-        namePattern?.also {
-            if (device.name == null || !it.matcher(device.name).matches()) {
-                return false
             }
         }
         rssiThreshold?.also {

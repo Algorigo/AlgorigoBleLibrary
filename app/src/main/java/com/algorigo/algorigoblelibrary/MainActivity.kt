@@ -8,11 +8,14 @@ import android.util.Log
 import android.widget.Button
 import androidx.recyclerview.widget.RecyclerView
 import com.algorigo.algorigoble2.BleDevice
+import com.algorigo.algorigoble2.BleScanFilter
+import com.algorigo.algorigoble2.BleScanSettings
 import com.algorigo.library.rx.Rx2ServiceBindingFactory
 import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.disposables.Disposable
 import java.util.concurrent.TimeUnit
+import java.util.regex.Pattern
 
 class MainActivity : RequestPermissionActivity() {
 
@@ -114,11 +117,21 @@ class MainActivity : RequestPermissionActivity() {
                 binder.getService().bleManager.let { manager ->
                     Observable.combineLatest(
                         Observable.interval(1, TimeUnit.SECONDS).map { manager.getConnectedDevices() },
-                        manager.scanObservable(),
+                        manager.scanObservable(
+                            BleScanSettings.Builder().build(),
+                            BleScanFilter.Builder().build()
+                        ),
                         { connected, scanned ->
                             connected + scanned
                         }
-                    )
+                    ).map { devices ->
+                        val pattern = Pattern.compile("Algo")
+                        devices.filter { device ->
+                            device.deviceName?.let {
+                                pattern.matcher(it).find()
+                            } ?: false
+                        }
+                    }
                 }
             }
             .take(3, TimeUnit.SECONDS)
