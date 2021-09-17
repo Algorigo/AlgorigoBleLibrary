@@ -7,13 +7,14 @@ import android.os.ParcelUuid
 import androidx.annotation.RequiresApi
 import java.util.regex.Pattern
 
-class BleScanFilter(val name: String?, val namePattern: Pattern?,
-                    val deviceAddress: String?,
-                    val uuid: ParcelUuid?, val uuidMask: ParcelUuid?,
-                    val solicitationUuid: ParcelUuid?, val solicitationUuidMask: ParcelUuid?,
-                    val serviceDataUuid: ParcelUuid?, val serviceData: ByteArray?, val serviceDataMask: ByteArray?,
-                    val manufacturerId: Int?, val manufacturerData: ByteArray?, val manufacturerDataMask: ByteArray?,
-                    private val rssiThreshold: Int?) {
+class BleScanFilter private constructor(
+    val name: String?, private val namePattern: Pattern?,
+    val deviceAddress: String?,
+    val uuid: ParcelUuid?, val uuidMask: ParcelUuid?,
+    val solicitationUuid: ParcelUuid?, val solicitationUuidMask: ParcelUuid?,
+    val serviceDataUuid: ParcelUuid?, val serviceData: ByteArray?, val serviceDataMask: ByteArray?,
+    val manufacturerId: Int?, val manufacturerData: ByteArray?, val manufacturerDataMask: ByteArray?,
+    private val rssiThreshold: Int?) {
 
     class Builder {
         private var deviceName: String? = null

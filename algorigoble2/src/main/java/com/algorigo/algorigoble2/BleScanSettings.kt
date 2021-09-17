@@ -4,7 +4,7 @@ import android.bluetooth.le.ScanSettings
 import android.os.Build
 import androidx.annotation.RequiresApi
 
-class BleScanSettings(
+class BleScanSettings private constructor(
     val scanMode: ScanMode,
     val reportDelayMillis: Long,
     val numOfMatches: MatchNumber,

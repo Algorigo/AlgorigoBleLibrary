@@ -19,7 +19,7 @@ class BleManager(context: Context, delegate: BleDeviceDelegate = defaultBleDevic
         abstract fun createBleDevice(bluetoothDevice: BluetoothDevice): BleDevice?
 
         fun getBleScanSettings(): BleScanSettings {
-            return BleScanSettings()
+            return BleScanSettings.Builder().build()
         }
 
         fun getBleScanFilters(): Array<BleScanFilter> {
