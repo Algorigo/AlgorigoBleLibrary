@@ -47,11 +47,13 @@ class BleScanSettings(
         private var mLegacy = true
         private var mPhy = ScanSettings.PHY_LE_ALL_SUPPORTED
 
+        @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
         fun setScanMode(scanMode: ScanMode): Builder {
             this.scanMode = scanMode
             return this
         }
 
+        @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
         fun setReportDelay(reportDelayMillis: Long): Builder {
             require(reportDelayMillis >= 0) { "reportDelay must be > 0" }
             this.reportDelayMillis = reportDelayMillis

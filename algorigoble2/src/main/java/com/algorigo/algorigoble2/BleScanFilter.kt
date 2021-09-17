@@ -61,6 +61,7 @@ class BleScanFilter(val name: String?, val namePattern: Pattern?,
             return this
         }
 
+        @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
         fun setServiceUuid(serviceUuid: ParcelUuid?, uuidMask: ParcelUuid?): Builder {
             require(!(this.uuidMask != null && this.serviceUuid == null)) { "uuid is null while uuidMask is not null!" }
             this.serviceUuid = serviceUuid
@@ -90,6 +91,7 @@ class BleScanFilter(val name: String?, val namePattern: Pattern?,
             return this
         }
 
+        @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
         fun setServiceData(
             serviceDataUuid: ParcelUuid,
             serviceData: ByteArray?
@@ -100,6 +102,7 @@ class BleScanFilter(val name: String?, val namePattern: Pattern?,
             return this
         }
 
+        @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
         fun setServiceData(
             serviceDataUuid: ParcelUuid,
             serviceData: ByteArray, serviceDataMask: ByteArray
@@ -116,6 +119,7 @@ class BleScanFilter(val name: String?, val namePattern: Pattern?,
             return this
         }
 
+        @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
         fun setManufacturerData(
             manufacturerId: Int,
             manufacturerData: ByteArray?
@@ -127,6 +131,7 @@ class BleScanFilter(val name: String?, val namePattern: Pattern?,
             return this
         }
 
+        @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
         fun setManufacturerData(
             manufacturerId: Int,
             manufacturerData: ByteArray?,
@@ -165,6 +170,20 @@ class BleScanFilter(val name: String?, val namePattern: Pattern?,
     }
 
     fun isOk(device: BluetoothDevice, rssi: Int, scanRecord: ByteArray?): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            // bluetoothAdapter.bluetoothLeScanner.startScan contains name, address filter
+        } else {
+            name?.also {
+                if (device.name != it) {
+                    return false
+                }
+            }
+            deviceAddress?.also {
+                if (device.address != it) {
+                    return false
+                }
+            }
+        }
         namePattern?.also {
             if (device.name == null || !it.matcher(device.name).matches()) {
                 return false

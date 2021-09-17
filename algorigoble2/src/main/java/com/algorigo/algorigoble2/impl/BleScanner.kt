@@ -54,18 +54,16 @@ internal class BleScanner private constructor(private val bluetoothAdapter: Blue
     @Suppress("deprecation")
     private inner class BleLeScanCallback(val scanFilters: Array<out BleScanFilter>) : BluetoothAdapter.LeScanCallback {
         override fun onLeScan(device: BluetoothDevice?, rssi: Int, scanRecord: ByteArray?) {
-            if (isOk(device, rssi, scanRecord)) {
-                device?.let {
+            device?.let {
+                if (isOk(it, rssi, scanRecord)) {
                     scanSubject.onNext(it)
                 }
             }
         }
 
-        private fun isOk(device: BluetoothDevice?, rssi: Int, scanRecord: ByteArray?): Boolean {
+        private fun isOk(device: BluetoothDevice, rssi: Int, scanRecord: ByteArray?): Boolean {
             if (scanFilters.isEmpty()) return true
-            device?.let { d ->
-                scanFilters.forEach { if (it.isOk(d, rssi, scanRecord)) return true }
-            }
+            scanFilters.forEach { if (it.isOk(device, rssi, scanRecord)) return true }
             return false
         }
     }
@@ -111,7 +109,7 @@ internal class BleScanner private constructor(private val bluetoothAdapter: Blue
         val leCallback = BleLeScanCallback(scanFilters)
         return scanSubject
             .doOnSubscribe {
-                startScan18(leCallback, scanSettings, *scanFilters)
+                startScan18(leCallback, *scanFilters)
             }
             .doFinally {
                 stopScan18(leCallback)
@@ -119,8 +117,14 @@ internal class BleScanner private constructor(private val bluetoothAdapter: Blue
     }
 
     @Suppress("deprecation")
-    private fun startScan18(leCallback: BleLeScanCallback, bleScanSettings: BleScanSettings, vararg bleScanFilters: BleScanFilter) {
-        bluetoothAdapter.startLeScan(leCallback)
+    private fun startScan18(leCallback: BleLeScanCallback, vararg bleScanFilters: BleScanFilter) {
+        bleScanFilters.mapNotNull { it.uuid?.uuid }.also {
+            if (it.isNotEmpty()) {
+                bluetoothAdapter.startLeScan(it.toTypedArray(), leCallback)
+            } else {
+                bluetoothAdapter.startLeScan(leCallback)
+            }
+        }
     }
 
     @Suppress("deprecation")
