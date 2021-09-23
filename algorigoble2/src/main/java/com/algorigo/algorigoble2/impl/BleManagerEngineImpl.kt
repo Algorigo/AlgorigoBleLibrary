@@ -106,7 +106,7 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
 
     override fun createBleDevice(bluetoothDevice: BluetoothDevice): BleDevice? {
         return super.createBleDevice(bluetoothDevice)?.apply {
-            engine = BleDeviceEngineImpl(context, bluetoothDevice)
+            initEngine(BleDeviceEngineImpl(context, bluetoothDevice))
         }
     }
 }

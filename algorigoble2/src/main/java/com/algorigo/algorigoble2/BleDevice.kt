@@ -4,7 +4,7 @@ import android.bluetooth.BluetoothGattDescriptor
 import android.util.Log
 import java.util.UUID
 
-class BleDevice() {
+open class BleDevice {
 
     enum class ConnectionState(var status: String) {
         CONNECTING("CONNECTING"),
@@ -19,6 +19,11 @@ class BleDevice() {
     }
 
     internal lateinit var engine: BleDeviceEngine
+
+    fun initEngine(engine: BleDeviceEngine) {
+        engine.bleDevice = this
+        this.engine = engine
+    }
 
     val deviceId: String
         get() = engine.deviceId
@@ -37,8 +42,8 @@ class BleDevice() {
 
     fun bondCompletable() = engine.bondCompletable()
 
-    fun getConnectionStateObservable() = engine.getConnectionStateObservable()
-    fun connectCompletable() = connectCompletableImpl()
+    open fun getConnectionStateObservable() = engine.getConnectionStateObservable()
+    open fun connectCompletable() = connectCompletableImpl()
     internal open fun connectCompletableImpl() = engine.connectCompletable()
 
     fun connect() {
@@ -51,6 +56,10 @@ class BleDevice() {
 
     fun disconnect() = engine.disconnect()
 
+    open fun onDisconnected() {
+
+    }
+
     fun getCharacteristicsSingle() = engine.getCharacteristicsSingle()
 
     fun readCharacteristicSingle(characteristicUuid: UUID) =
@@ -61,7 +70,7 @@ class BleDevice() {
         engine.setupNotification(characteristicUuid, type.byteArray)
 
     override fun toString(): String {
-        return "$deviceName($deviceId)"
+        return "${javaClass.simpleName} $deviceName($deviceId)"
     }
 
     override fun equals(other: Any?): Boolean {

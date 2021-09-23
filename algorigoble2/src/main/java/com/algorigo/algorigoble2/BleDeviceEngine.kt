@@ -9,6 +9,8 @@ import java.util.UUID
 
 abstract class BleDeviceEngine {
 
+    lateinit var bleDevice: BleDevice
+
     abstract val deviceId: String
     abstract val deviceName: String?
     abstract val bonded: Boolean
