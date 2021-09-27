@@ -186,11 +186,11 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
         }
     }
 
-    override fun connectCompletable(): Completable = gattSubject
-        .doOnSubscribe {
+    override fun connectCompletable(): Completable = checkConnectionState(BleDevice.ConnectionState.DISCONNECTED)
+        .andThen(gattSubject.doOnSubscribe {
             val gatt = bluetoothDevice.connectGatt(context, false, gattCallback)
             connectionStateRelay.accept(BleDevice.ConnectionState.CONNECTING)
-        }
+        })
         .firstOrError()
         .ignoreElement()
         .doOnComplete {
@@ -200,8 +200,19 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
             connectionStateRelay.accept(BleDevice.ConnectionState.DISCONNECTED)
         }
 
+    private fun checkConnectionState(connectionState: BleDevice.ConnectionState): Completable {
+        return connectionStateRelay.doOnNext {
+            if (it != connectionState) {
+                throw IllegalStateException("Connection state is $it not $connectionState")
+            }
+        }.firstOrError().ignoreElement()
+    }
+
     override fun disconnect() {
-        gattSubject.blockingFirst().disconnect()
+        checkConnectionState(BleDevice.ConnectionState.CONNECTED)
+            .andThen(gattSubject)
+            .blockingFirst()
+            .disconnect()
     }
 
     override fun getCharacteristicsSingle(): Single<List<BluetoothGattCharacteristic>> {
@@ -322,18 +333,19 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
         .firstOrError()
 
     private fun getServices(): Single<List<BluetoothGattService>> {
-        return Single.defer {
-            if (serviceSingle != null) {
-                serviceSingle
-            } else {
-                getGattSingle()
-                    .flatMap { gatt ->
-                        Single.fromCallable(gatt::getServices).cache().also {
-                            serviceSingle = it
+        return checkConnectionState(BleDevice.ConnectionState.CONNECTED)
+            .andThen(Single.defer {
+                if (serviceSingle != null) {
+                    serviceSingle
+                } else {
+                    getGattSingle()
+                        .flatMap { gatt ->
+                            Single.fromCallable(gatt::getServices).cache().also {
+                                serviceSingle = it
+                            }
                         }
-                    }
-            }
-        }
+                }
+            })
     }
 
     private fun getCharacteristic(characteristicUuid: UUID): Single<BluetoothGattCharacteristic> {
@@ -384,15 +396,16 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
 
     override fun connectSppSocket(uuid: UUID?): Observable<BleSppSocket> {
         var socket: BleSppSocket? = null
-        return Observable.create<BleSppSocket> {
-            connectionStateRelay.accept(BleDevice.ConnectionState.CONNECTING)
-            val aUuid = uuid ?: bluetoothDevice.uuids.first().uuid
-            BleSppSocket(bluetoothDevice.createRfcommSocketToServiceRecord(aUuid)).also { theSocket ->
-                socket = theSocket
-                connectionStateRelay.accept(BleDevice.ConnectionState.CONNECTED)
-                it.onNext(theSocket)
-            }
-        }
+        return checkConnectionState(BleDevice.ConnectionState.DISCONNECTED)
+            .andThen(Observable.create<BleSppSocket> {
+                connectionStateRelay.accept(BleDevice.ConnectionState.SPP_CONNECTING)
+                val aUuid = uuid ?: bluetoothDevice.uuids.first().uuid
+                BleSppSocket(bluetoothDevice.createRfcommSocketToServiceRecord(aUuid)).also { theSocket ->
+                    socket = theSocket
+                    connectionStateRelay.accept(BleDevice.ConnectionState.SPP_CONNECTED)
+                    it.onNext(theSocket)
+                }
+            })
             .doFinally {
                 connectionStateRelay.accept(BleDevice.ConnectionState.DISCONNECTED)
                 socket?.close()
