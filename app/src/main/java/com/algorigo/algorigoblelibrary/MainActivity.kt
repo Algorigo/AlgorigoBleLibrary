@@ -60,7 +60,7 @@ class MainActivity : RequestPermissionActivity() {
                 socketDisposables[bleDevice.deviceId] = bleDevice.connectSppSocket()
                     .flatMap { socket ->
                         Observable.interval(100, TimeUnit.MILLISECONDS)
-                            .flatMapSingle { socket.readSingle() }
+                            .flatMapMaybe { socket.readSingle().onErrorComplete { it is NoSuchElementException } }
                     }
                     .observeOn(AndroidSchedulers.mainThread())
                     .subscribe({
