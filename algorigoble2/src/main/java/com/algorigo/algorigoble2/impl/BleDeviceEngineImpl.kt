@@ -7,7 +7,6 @@ import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleDeviceEngine
 import com.algorigo.algorigoble2.BleManager
 import com.algorigo.algorigoble2.BleSppSocket
-import com.jakewharton.rxrelay3.BehaviorRelay
 import com.jakewharton.rxrelay3.PublishRelay
 import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Flowable
@@ -15,6 +14,7 @@ import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Single
 import io.reactivex.rxjava3.schedulers.Schedulers
 import java.util.UUID
+import io.reactivex.rxjava3.subjects.BehaviorSubject
 import java.util.concurrent.TimeUnit
 
 class BleDeviceEngineImpl(private val context: Context, private val bluetoothDevice: BluetoothDevice):
@@ -57,7 +57,8 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
                 }
 
                 BluetoothProfile.STATE_DISCONNECTED -> {
-                    gattRelay = BehaviorRelay.create()
+                    gattSubject.onError(BleManager.DisconnectedException())
+                    gattSubject = BehaviorSubject.create()
                     connectionStateRelay.accept(BleDevice.ConnectionState.DISCONNECTED)
                     bleDevice.onDisconnected()
                 }
@@ -67,7 +68,7 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
         override fun onServicesDiscovered(gatt: BluetoothGatt?, status: Int) {
             super.onServicesDiscovered(gatt, status)
             gatt?.let {
-                gattRelay.accept(it)
+                gattSubject.onNext(it)
             }
         }
 
@@ -146,7 +147,7 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
         }
     }
 
-    private var gattRelay = BehaviorRelay.create<BluetoothGatt>()
+    private var gattSubject = BehaviorSubject.create<BluetoothGatt>()
     private var serviceSingle: Single<List<BluetoothGattService>>? = null
     private val replyRelay = PublishRelay.create<ReplyData>()
     private val notificationRelay = PublishRelay.create<Pair<UUID, ByteArray>>()
@@ -185,7 +186,7 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
         }
     }
 
-    override fun connectCompletable(): Completable = gattRelay
+    override fun connectCompletable(): Completable = gattSubject
         .doOnSubscribe {
             val gatt = bluetoothDevice.connectGatt(context, false, gattCallback)
             connectionStateRelay.accept(BleDevice.ConnectionState.CONNECTING)
@@ -200,7 +201,7 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
         }
 
     override fun disconnect() {
-        gattRelay.blockingFirst().disconnect()
+        gattSubject.blockingFirst().disconnect()
     }
 
     override fun getCharacteristicsSingle(): Single<List<BluetoothGattCharacteristic>> {
@@ -317,7 +318,7 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
             }
     }
 
-    private fun getGattSingle() = gattRelay
+    private fun getGattSingle() = gattSubject
         .firstOrError()
 
     private fun getServices(): Single<List<BluetoothGattService>> {

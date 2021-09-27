@@ -8,6 +8,7 @@ class BleManager(context: Context, delegate: BleDeviceDelegate = defaultBleDevic
 
     class BleNotAvailableException: Exception()
     class BondFailedException: Exception()
+    class DisconnectedException: Exception()
 
     enum class Engine {
 //        RX_ANDROID_BLE,
