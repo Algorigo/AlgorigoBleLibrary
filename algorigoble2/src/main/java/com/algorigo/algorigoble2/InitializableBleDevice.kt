@@ -16,7 +16,6 @@ abstract class InitializableBleDevice : BleDevice() {
             super.getConnectionStateObservable(),
             initializeRelay,
             { connectionState, initialized ->
-                Log.e("!!!", "getConnectionStateObservable:$connectionState, $initialized")
                 if (connectionState == ConnectionState.CONNECTED && !initialized) {
                     ConnectionState.CONNECTING.apply {
                         status = "INITIALING"
@@ -37,7 +36,6 @@ abstract class InitializableBleDevice : BleDevice() {
         return Completable.defer {
             initializeCompletable()
                 .doOnComplete {
-                    Log.e("!!!", "initializeCompletable doOnComplete")
                     initializeRelay.accept(true)
                 }
                 .doOnError {
@@ -50,7 +48,6 @@ abstract class InitializableBleDevice : BleDevice() {
     abstract fun initializeCompletable(): Completable
 
     override fun onDisconnected() {
-        Log.e("!!!", "onDisconnected")
         super.onDisconnected()
         initializeRelay.accept(false)
     }

@@ -13,35 +13,6 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
     private val bluetoothManager: BluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private val bluetoothAdapter: BluetoothAdapter = bluetoothManager.adapter
 
-//    private val broadcastReceiver = object : BroadcastReceiver() {
-//        override fun onReceive(context: Context?, intent: Intent?) {
-//            val device = intent?.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
-//            when (intent?.action) {
-//                BluetoothDevice.ACTION_FOUND -> Log.e("!!!", "ACTION_FOUND:${device?.name}")
-//                BluetoothDevice.ACTION_BOND_STATE_CHANGED -> Log.e("!!!", "ACTION_BOND_STATE_CHANGED:${device?.name}")
-//                BluetoothDevice.ACTION_ACL_CONNECTED -> Log.e("!!!", "ACTION_ACL_CONNECTED:${device?.name}")
-//                BluetoothDevice.ACTION_ACL_DISCONNECT_REQUESTED -> Log.e("!!!", "ACTION_ACL_DISCONNECT_REQUESTED:${device?.name}")
-//                BluetoothDevice.ACTION_ACL_DISCONNECTED -> Log.e("!!!", "ACTION_ACL_DISCONNECTED:${device?.name}")
-//            }
-//        }
-//    }
-//
-//    init {
-//        IntentFilter().apply {
-//            addAction(BluetoothDevice.ACTION_FOUND)
-//            addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
-//            addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
-//            addAction(BluetoothDevice.ACTION_ACL_DISCONNECT_REQUESTED)
-//            addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
-//        }.also {
-//            context.registerReceiver(broadcastReceiver, it)
-//        }
-//    }
-//
-//    protected fun finalize() {
-//        context.unregisterReceiver(broadcastReceiver)
-//    }
-
     override fun scanObservable(
         scanSettings: BleScanSettings,
         vararg scanFilters: BleScanFilter
