@@ -209,10 +209,14 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
     }
 
     override fun disconnect() {
-        checkConnectionState(BleDevice.ConnectionState.CONNECTED)
-            .andThen(gattSubject)
-            .blockingFirst()
-            .disconnect()
+        try {
+            checkConnectionState(BleDevice.ConnectionState.CONNECTED)
+                .andThen(gattSubject)
+                .blockingFirst()
+                .disconnect()
+        } catch (exception: Exception) {
+            Log.e(LOG_TAG, "Device Disconnect Error", exception)
+        }
     }
 
     override fun getCharacteristicsSingle(): Single<List<BluetoothGattCharacteristic>> {
