@@ -34,7 +34,7 @@ apply plugin: 'com.bmuschko.nexus'
 
 group = "com.algorigo.rx"
 archivesBaseName = "algorigoble2"
-if (getCurrentGitBranch().equals('master')) {
+if (getCurrentGitBranch().contains('master')) {
     version = versionStr
 } else {
     version = "${versionStr}-${getUserName()}-SNAPSHOT"
@@ -135,4 +135,14 @@ dependencies {
 
     // gson
     implementation 'com.google.code.gson:gson:2.8.7'
+}
+
+repositories {
+    mavenCentral()
+}
+
+buildscript {
+    repositories {
+        jcenter()
+    }
 }
