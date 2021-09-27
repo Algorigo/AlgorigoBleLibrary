@@ -14,6 +14,7 @@ class BleRecyclerAdapter(private val bleRecyclerListener: BleRecyclerListener) :
         fun onSelect(bleDevice: BleDevice)
         fun onBindButton(bleDevice: BleDevice)
         fun onConnectButton(bleDevice: BleDevice)
+        fun onConnectSppButton(bleDevice: BleDevice)
     }
 
     inner class BleRecyclerViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
@@ -21,6 +22,7 @@ class BleRecyclerAdapter(private val bleRecyclerListener: BleRecyclerListener) :
         private val titleView: TextView = itemView.findViewById(R.id.title_view)
         private val bindBtn: Button = itemView.findViewById(R.id.bond_btn)
         private val connectBtn: Button = itemView.findViewById(R.id.connect_btn)
+        private val connectSppBtn: Button = itemView.findViewById(R.id.connect_spp_btn)
 
         init {
             itemView.setOnClickListener {
@@ -36,6 +38,11 @@ class BleRecyclerAdapter(private val bleRecyclerListener: BleRecyclerListener) :
             connectBtn.setOnClickListener {
                 bleDeviceList?.get(adapterPosition)?.let {
                     bleRecyclerListener.onConnectButton(it)
+                }
+            }
+            connectSppBtn.setOnClickListener {
+                bleDeviceList?.get(adapterPosition)?.let {
+                    bleRecyclerListener.onConnectSppButton(it)
                 }
             }
         }

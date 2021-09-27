@@ -2,7 +2,6 @@ package com.algorigo.algorigoble2
 
 import android.bluetooth.BluetoothDevice
 import com.jakewharton.rxrelay3.PublishRelay
-import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Observable
 
 internal abstract class BleManagerEngine(private val bleDeviceDelegate: BleManager.BleDeviceDelegate) {

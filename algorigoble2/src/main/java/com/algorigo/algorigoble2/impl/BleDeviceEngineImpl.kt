@@ -6,6 +6,7 @@ import android.util.Log
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleDeviceEngine
 import com.algorigo.algorigoble2.BleManager
+import com.algorigo.algorigoble2.BleSppSocket
 import com.jakewharton.rxrelay3.BehaviorRelay
 import com.jakewharton.rxrelay3.PublishRelay
 import io.reactivex.rxjava3.core.Completable
@@ -378,6 +379,24 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
                     }
             }
         }
+    }
+
+    override fun connectSppSocket(uuid: UUID?): Observable<BleSppSocket> {
+        var socket: BleSppSocket? = null
+        return Observable.create<BleSppSocket> {
+            connectionStateRelay.accept(BleDevice.ConnectionState.CONNECTING)
+            val aUuid = uuid ?: bluetoothDevice.uuids.first().uuid
+            BleSppSocket(bluetoothDevice.createRfcommSocketToServiceRecord(aUuid)).also { theSocket ->
+                socket = theSocket
+                connectionStateRelay.accept(BleDevice.ConnectionState.CONNECTED)
+                it.onNext(theSocket)
+            }
+        }
+            .doFinally {
+                connectionStateRelay.accept(BleDevice.ConnectionState.DISCONNECTED)
+                socket?.close()
+            }
+            .subscribeOn(Schedulers.io())
     }
 
     companion object {

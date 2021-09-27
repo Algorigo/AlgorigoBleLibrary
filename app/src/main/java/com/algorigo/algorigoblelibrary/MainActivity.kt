@@ -15,7 +15,6 @@ import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.disposables.Disposable
 import java.util.concurrent.TimeUnit
-import java.util.regex.Pattern
 
 class MainActivity : RequestPermissionActivity() {
 
@@ -53,6 +52,24 @@ class MainActivity : RequestPermissionActivity() {
                 else -> {}
             }
         }
+
+        override fun onConnectSppButton(bleDevice: BleDevice) {
+            if (socketDisposables.containsKey(bleDevice.deviceId)) {
+                socketDisposables.remove(bleDevice.deviceId)?.dispose()
+            } else {
+                socketDisposables[bleDevice.deviceId] = bleDevice.connectSppSocket()
+                    .flatMap { socket ->
+                        Observable.interval(100, TimeUnit.MILLISECONDS)
+                            .flatMapSingle { socket.readSingle() }
+                    }
+                    .observeOn(AndroidSchedulers.mainThread())
+                    .subscribe({
+                        Log.e("!!!", "${it.size}:${it.contentToString()}")
+                    }, {
+                        Log.e("!!!", "", it)
+                    })
+            }
+        }
     })
 
     private var disposable: Disposable? = null
@@ -61,6 +78,8 @@ class MainActivity : RequestPermissionActivity() {
     private lateinit var bleRecycler: RecyclerView
     private lateinit var startBtn: Button
     private lateinit var stopBtn: Button
+
+    private val socketDisposables = mutableMapOf<String, Disposable>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -116,22 +135,24 @@ class MainActivity : RequestPermissionActivity() {
             .flatMap { binder ->
                 binder.getService().bleManager.let { manager ->
                     Observable.combineLatest(
-                        Observable.interval(1, TimeUnit.SECONDS).map { manager.getConnectedDevices() },
+                        Observable.just(manager.getConnectedDevices()),
+                        Observable.just(manager.getBondedDevices()),
                         manager.scanObservable(
                             BleScanSettings.Builder().build(),
                             BleScanFilter.Builder().build()
                         ),
-                        { connected, scanned ->
-                            connected + scanned
+                        { connected, bonded, scanned ->
+                            connected + bonded + scanned
                         }
-                    ).map { devices ->
-                        val pattern = Pattern.compile("Algo")
-                        devices.filter { device ->
-                            device.deviceName?.let {
-                                pattern.matcher(it).find()
-                            } ?: false
-                        }
-                    }
+                    )
+//                        .map { devices ->
+//                            val pattern = Pattern.compile("Algo")
+//                            devices.filter { device ->
+//                                device.deviceName?.let {
+//                                    pattern.matcher(it).find()
+//                                } ?: false
+//                            }
+//                        }
                 }
             }
             .take(3, TimeUnit.SECONDS)

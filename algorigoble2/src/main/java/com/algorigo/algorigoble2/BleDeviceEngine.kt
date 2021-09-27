@@ -31,4 +31,6 @@ abstract class BleDeviceEngine {
     abstract fun readCharacteristicSingle(characteristicUuid: UUID): Single<ByteArray>
     abstract fun writeCharacteristicSingle(characteristicUuid: UUID, byteArray: ByteArray): Single<ByteArray>
     abstract fun setupNotification(characteristicUuid: UUID, byteArray: ByteArray): Observable<Observable<ByteArray>>
+
+    abstract fun connectSppSocket(uuid: UUID? = null): Observable<BleSppSocket>
 }

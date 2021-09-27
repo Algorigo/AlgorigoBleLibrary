@@ -10,7 +10,9 @@ open class BleDevice {
         CONNECTING("CONNECTING"),
         CONNECTED("CONNECTED"),
         DISCONNECTED("DISCONNECTED"),
-        DISCONNECTING("DISCONNECTING")
+        DISCONNECTING("DISCONNECTING"),
+        SPP_CONNECTING("SPP CONNECTING"),
+        SPP_CONNECTED("SPP CONNECTED"),
     }
 
     enum class NotificationType(val byteArray: ByteArray) {
@@ -68,6 +70,8 @@ open class BleDevice {
         engine.writeCharacteristicSingle(characteristicUuid, byteArray)
     fun setupNotification(type: NotificationType, characteristicUuid: UUID) =
         engine.setupNotification(characteristicUuid, type.byteArray)
+
+    fun connectSppSocket(uuid: UUID? = null) = engine.connectSppSocket()
 
     override fun toString(): String {
         return "${javaClass.simpleName} $deviceName($deviceId)"
