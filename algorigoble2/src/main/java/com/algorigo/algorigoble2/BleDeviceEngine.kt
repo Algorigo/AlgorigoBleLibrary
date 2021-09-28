@@ -1,7 +1,6 @@
 package com.algorigo.algorigoble2
 
 import android.bluetooth.BluetoothGattCharacteristic
-import com.jakewharton.rxrelay3.BehaviorRelay
 import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Single
@@ -15,12 +14,10 @@ abstract class BleDeviceEngine {
     abstract val deviceName: String?
     abstract val bonded: Boolean
 
-    protected val connectionStateRelay: BehaviorRelay<BleDevice.ConnectionState> = BehaviorRelay.create<BleDevice.ConnectionState>().apply { accept(BleDevice.ConnectionState.DISCONNECTED) }
-
     abstract fun bondCompletable(): Completable
 
     fun isConnected(): Boolean = getConnectionStateObservable().firstOrError().map { it == BleDevice.ConnectionState.CONNECTED }.blockingGet()
-    fun getConnectionStateObservable(): Observable<BleDevice.ConnectionState> = connectionStateRelay
+    abstract fun getConnectionStateObservable(): Observable<BleDevice.ConnectionState>
 
     abstract fun connectCompletable(): Completable
 

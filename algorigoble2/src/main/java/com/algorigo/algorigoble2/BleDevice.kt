@@ -40,7 +40,7 @@ open class BleDevice {
         get() = engine.isConnected()
 
     val connectionState: ConnectionState
-        get() = engine.getConnectionStateObservable().blockingFirst()
+        get() = getConnectionStateObservable().blockingFirst()
 
     fun bondCompletable() = engine.bondCompletable()
 
