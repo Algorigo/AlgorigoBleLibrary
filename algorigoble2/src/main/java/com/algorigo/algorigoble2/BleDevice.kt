@@ -45,8 +45,7 @@ open class BleDevice {
     fun bondCompletable() = engine.bondCompletable()
 
     open fun getConnectionStateObservable() = engine.getConnectionStateObservable()
-    open fun connectCompletable() = connectCompletableImpl()
-    internal open fun connectCompletableImpl() = engine.connectCompletable()
+    open fun connectCompletable() = engine.connectCompletable()
 
     fun connect() {
         connectCompletable().subscribe({
