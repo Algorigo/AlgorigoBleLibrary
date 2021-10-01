@@ -1,0 +1,144 @@
+apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
+
+def versionStr = '2.0.0'
+
+def getCurrentGitBranch() {
+    def gitBranch = "Unknown branch"
+    try {
+        def workingDir = new File("${project.projectDir}")
+        def result = 'git rev-parse --abbrev-ref HEAD'.execute(null, workingDir)
+        result.waitFor()
+        if (result.exitValue() == 0) {
+            gitBranch = result.text.trim()
+        }
+    } catch (e) {
+    }
+    return gitBranch
+}
+
+def getUserName() {
+    return System.properties['user.name']
+}
+
+buildscript {
+    repositories {
+        maven {
+            url "https://plugins.gradle.org/m2/"
+        }
+    }
+    dependencies {
+        classpath 'com.bmuschko:gradle-nexus-plugin:2.3.1'
+    }
+}
+
+apply plugin: 'com.bmuschko.nexus'
+
+group = "com.algorigo.rx"
+archivesBaseName = "algorigoble2"
+if (getCurrentGitBranch().contains('master')) {
+    version = versionStr
+} else {
+    version = "${versionStr}-${getUserName()}-SNAPSHOT"
+}
+
+modifyPom {
+    project {
+        name 'AlgorigoBleLibrary'
+        description 'Ble Library for Android using ReactiveX'
+        url 'https://github.com/Algorigo/AlgorigoBleLibrary'
+        inceptionYear '2018'
+
+        scm {
+            url 'https://github.com/Algorigo/AlgorigoBleLibrary'
+            connection 'scm:https://github.com/Algorigo/AlgorigoBleLibrary.git'
+            developerConnection 'scm:git:https://github.com/Algorigo/AlgorigoBleLibrary.git'
+        }
+
+        licenses {
+            license {
+                name 'The Apache Software License, Version 2.0'
+                url 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+                distribution 'repo'
+            }
+        }
+
+        developers {
+            developer {
+                id 'rouddy'
+                name 'Rouddy'
+                email 'rouddy@naver.com'
+            }
+        }
+    }
+}
+
+extraArchive {
+    sources = true
+    tests = true
+    javadoc = true
+}
+
+nexus {
+    sign = true
+    repositoryUrl = NEXUS_REPOSITORY_URL
+    snapshotRepositoryUrl = NEXUS_SNAPSHOT_REPOSITORY_URL
+}
+
+android {
+    compileSdkVersion 30
+    buildToolsVersion "30.0.3"
+
+    defaultConfig {
+        minSdkVersion 21
+        targetSdkVersion 30
+        versionCode 1
+        versionName versionStr
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        consumerProguardFiles "consumer-rules.pro"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    kotlinOptions {
+        jvmTarget = '1.8'
+    }
+}
+
+dependencies {
+
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
+    implementation 'androidx.core:core-ktx:1.6.0'
+    implementation 'androidx.appcompat:appcompat:1.3.1'
+    implementation 'com.google.android.material:material:1.4.0'
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.1.3'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.4.0'
+
+    //ReactiveX
+    implementation 'io.reactivex.rxjava3:rxkotlin:3.0.1'
+    implementation 'io.reactivex.rxjava3:rxandroid:3.0.0'
+    //ReactiveX Relay
+    implementation 'com.jakewharton.rxrelay3:rxrelay:3.0.0'
+
+    //RxAndroidBle
+    implementation "com.polidea.rxandroidble2:rxandroidble:1.11.1"
+    //RxJava2, RxJava3 bridge
+    implementation "com.github.akarnokd:rxjava3-bridge:3.0.0"
+
+    // gson
+    implementation 'com.google.code.gson:gson:2.8.7'
+}
+
+repositories {
+    mavenCentral()
+}
