@@ -62,4 +62,35 @@ internal object BleScanOptionsConverter {
                 .build()
         }
     }
+
+    fun convertRxScanSettings(scanSettings: BleScanSettings): com.polidea.rxandroidble2.scan.ScanSettings {
+        return com.polidea.rxandroidble2.scan.ScanSettings.Builder()
+            .setScanMode(scanSettings.scanMode.value)
+            .setCallbackType(scanSettings.callbackType.value)
+            .build()
+    }
+
+    fun convertRxScanFilters(filters: Array<out BleScanFilter>): Array<com.polidea.rxandroidble2.scan.ScanFilter> {
+        return filters.map { filter ->
+            com.polidea.rxandroidble2.scan.ScanFilter.Builder().apply {
+                filter.name?.also {
+                    setDeviceName(it)
+                }
+                filter.deviceAddress?.also {
+                    setDeviceAddress(it)
+                }
+                filter.uuid?.also {
+                    setServiceUuid(it, filter.uuidMask)
+                }
+                filter.serviceDataUuid?.also {
+                    setServiceData(it, filter.serviceData, filter.serviceDataMask)
+                }
+                filter.manufacturerId?.also {
+                    setManufacturerData(it, filter.manufacturerData, filter.manufacturerDataMask)
+                }
+            }
+                .build()
+        }
+            .toTypedArray()
+    }
 }

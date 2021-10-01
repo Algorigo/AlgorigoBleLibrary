@@ -3,6 +3,7 @@ package com.algorigo.algorigoble2
 import android.bluetooth.BluetoothDevice
 import android.content.Context
 import com.algorigo.algorigoble2.impl.BleManagerEngineImpl
+import com.algorigo.algorigoble2.rxandroidble.RxAndroidBleEngine
 
 class BleManager(context: Context, delegate: BleDeviceDelegate = defaultBleDeviceDelegate, engine: Engine = Engine.ALGORIGO_BLE) {
 
@@ -11,7 +12,7 @@ class BleManager(context: Context, delegate: BleDeviceDelegate = defaultBleDevic
     class DisconnectedException: Exception()
 
     enum class Engine {
-//        RX_ANDROID_BLE,
+        RX_ANDROID_BLE,
         ALGORIGO_BLE,
     }
 
@@ -34,7 +35,7 @@ class BleManager(context: Context, delegate: BleDeviceDelegate = defaultBleDevic
 
     init {
         when (engine) {
-//            Engine.RX_ANDROID_BLE -> this.engine = RxAndroidBleEngine(context.applicationContext, delegate)
+            Engine.RX_ANDROID_BLE -> this.engine = RxAndroidBleEngine(context.applicationContext, delegate)
             Engine.ALGORIGO_BLE -> this.engine = BleManagerEngineImpl(context.applicationContext, delegate)
         }
     }
