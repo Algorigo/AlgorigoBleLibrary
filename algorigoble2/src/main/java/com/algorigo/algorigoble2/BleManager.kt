@@ -34,12 +34,8 @@ class BleManager(context: Context, delegate: BleDeviceDelegate = defaultBleDevic
 
     init {
         when (engine) {
-//            Engine.RX_ANDROID_BLE -> {
-//                this.engine = RxAndroidBleEngine(context.applicationContext, delegate)
-//            }
-            Engine.ALGORIGO_BLE -> {
-                this.engine = BleManagerEngineImpl(context.applicationContext, delegate)
-            }
+//            Engine.RX_ANDROID_BLE -> this.engine = RxAndroidBleEngine(context.applicationContext, delegate)
+            Engine.ALGORIGO_BLE -> this.engine = BleManagerEngineImpl(context.applicationContext, delegate)
         }
     }
 
