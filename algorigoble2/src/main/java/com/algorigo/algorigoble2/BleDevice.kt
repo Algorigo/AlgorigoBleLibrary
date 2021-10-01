@@ -68,7 +68,7 @@ open class BleDevice {
     fun writeCharacteristicSingle(characteristicUuid: UUID, byteArray: ByteArray) =
         engine.writeCharacteristicSingle(characteristicUuid, byteArray)
     fun setupNotification(type: NotificationType, characteristicUuid: UUID) =
-        engine.setupNotification(characteristicUuid, type.byteArray)
+        engine.setupNotification(type, characteristicUuid)
 
     fun connectSppSocket(uuid: UUID? = null) = engine.connectSppSocket()
 
