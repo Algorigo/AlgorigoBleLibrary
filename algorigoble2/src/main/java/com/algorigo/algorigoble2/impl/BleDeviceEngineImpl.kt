@@ -17,7 +17,7 @@ import io.reactivex.rxjava3.schedulers.Schedulers
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
-class BleDeviceEngineImpl(private val context: Context, private val bluetoothDevice: BluetoothDevice):
+internal open class BleDeviceEngineImpl(private val context: Context, protected val bluetoothDevice: BluetoothDevice):
     BleDeviceEngine() {
 
     class CommunicationFailedException: Exception()

@@ -8,12 +8,12 @@ import android.content.Context
 import com.algorigo.algorigoble2.*
 import io.reactivex.rxjava3.core.Observable
 
-internal class BleManagerEngineImpl(private val context: Context, bleDeviceDelegate: BleManager.BleDeviceDelegate) : BleManagerEngine(bleDeviceDelegate) {
+internal open class BleManagerEngineImpl(protected val context: Context, bleDeviceDelegate: BleManager.BleDeviceDelegate) : BleManagerEngine(bleDeviceDelegate) {
 
     private val bluetoothManager: BluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private val bluetoothAdapter: BluetoothAdapter = bluetoothManager.adapter
 
-    private val deviceMap: MutableMap<BluetoothDevice, BleDevice> = mutableMapOf()
+    protected val deviceMap: MutableMap<BluetoothDevice, BleDevice> = mutableMapOf()
 
     override fun scanObservable(
         scanSettings: BleScanSettings,
@@ -61,7 +61,7 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
         })
     }
 
-    private fun createBleDevice(bluetoothDevice: BluetoothDevice): BleDevice? {
+    protected open fun createBleDevice(bluetoothDevice: BluetoothDevice): BleDevice? {
         return bleDeviceDelegate.createBleDevice(bluetoothDevice)?.also { device ->
             deviceMap[bluetoothDevice] = device
         }?.apply {

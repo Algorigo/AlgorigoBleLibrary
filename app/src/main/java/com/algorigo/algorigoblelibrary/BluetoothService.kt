@@ -18,7 +18,7 @@ class BluetoothService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        bleManager = BleManager(applicationContext)
+        bleManager = BleManager(applicationContext, engine = BleManager.Engine.NORDIC_BLE)
     }
 
     override fun onBind(intent: Intent): IBinder {

@@ -135,6 +135,10 @@ dependencies {
 //    //RxJava2, RxJava3 bridge
 //    implementation "com.github.akarnokd:rxjava3-bridge:3.0.0"
 
+    //Nordic Ble
+    implementation 'no.nordicsemi.android:ble:2.3.1'
+    implementation 'no.nordicsemi.android:ble-ktx:2.3.1'
+
     // gson
     implementation 'com.google.code.gson:gson:2.8.7'
 }

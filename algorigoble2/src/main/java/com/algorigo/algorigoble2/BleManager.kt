@@ -3,6 +3,7 @@ package com.algorigo.algorigoble2
 import android.bluetooth.BluetoothDevice
 import android.content.Context
 import com.algorigo.algorigoble2.impl.BleManagerEngineImpl
+import com.algorigo.algorigoble2.nordic.BleManagerEngineNordic
 
 class BleManager(context: Context, delegate: BleDeviceDelegate = defaultBleDeviceDelegate, engine: Engine = Engine.ALGORIGO_BLE) {
 
@@ -13,6 +14,7 @@ class BleManager(context: Context, delegate: BleDeviceDelegate = defaultBleDevic
     enum class Engine {
 //        RX_ANDROID_BLE,
         ALGORIGO_BLE,
+        NORDIC_BLE,
     }
 
     abstract class BleDeviceDelegate {
@@ -36,6 +38,7 @@ class BleManager(context: Context, delegate: BleDeviceDelegate = defaultBleDevic
         when (engine) {
 //            Engine.RX_ANDROID_BLE -> this.engine = RxAndroidBleEngine(context.applicationContext, delegate)
             Engine.ALGORIGO_BLE -> this.engine = BleManagerEngineImpl(context.applicationContext, delegate)
+            Engine.NORDIC_BLE -> this.engine = BleManagerEngineNordic(context.applicationContext, delegate)
         }
     }
 
