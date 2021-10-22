@@ -13,6 +13,8 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
     private val bluetoothManager: BluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private val bluetoothAdapter: BluetoothAdapter = bluetoothManager.adapter
 
+    private val deviceMap: MutableMap<BluetoothDevice, BleDevice> = mutableMapOf()
+
     override fun scanObservable(
         scanSettings: BleScanSettings,
         vararg scanFilters: BleScanFilter
@@ -34,16 +36,8 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
             })
     }
 
-    override fun getBondedDevice(macAddress: String): BleDevice? {
-        return getBondedDevices()
-            .filter { it.deviceId == macAddress }
-            .let {
-                if (it.size == 1) {
-                    it[0]
-                } else {
-                    null
-                }
-            }
+    override fun getDevices(): Collection<BleDevice> {
+        return deviceMap.values
     }
 
     override fun getBondedDevices(): List<BleDevice> {
@@ -52,26 +46,25 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
         }
     }
 
-    override fun getConnectedDevice(macAddress: String): BleDevice? {
-        return getConnectedDevices()
-            .filter { it.deviceId == macAddress }
-            .let {
-                if (it.size == 1) {
-                    it[0]
-                } else {
-                    null
-                }
-            }
-    }
-
     override fun getConnectedDevices(): List<BleDevice> {
         return bluetoothManager.getConnectedDevices(BluetoothProfile.GATT).mapNotNull {
             getBleDevice(it)
         }
     }
 
-    override fun createBleDevice(bluetoothDevice: BluetoothDevice): BleDevice? {
-        return super.createBleDevice(bluetoothDevice)?.apply {
+    private fun getBleDevice(bluetoothDevice: BluetoothDevice): BleDevice? {
+        return deviceMap[bluetoothDevice] ?: (createBleDevice(bluetoothDevice)?.also { device ->
+            device.getConnectionStateObservable()
+                .subscribe({
+                    connectionStateRelay.accept(Pair(device, it))
+                }, {})
+        })
+    }
+
+    private fun createBleDevice(bluetoothDevice: BluetoothDevice): BleDevice? {
+        return bleDeviceDelegate.createBleDevice(bluetoothDevice)?.also { device ->
+            deviceMap[bluetoothDevice] = device
+        }?.apply {
             initEngine(BleDeviceEngineImpl(context, bluetoothDevice))
         }
     }
