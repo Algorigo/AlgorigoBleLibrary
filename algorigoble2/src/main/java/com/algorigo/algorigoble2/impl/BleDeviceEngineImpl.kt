@@ -159,19 +159,23 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
         accept(State.DISCONNECTED())
     }
     private val connectCompletable: Completable
-        get() = Observable.zip(
-            Observable.just(0, 1),
-            stateRelay.filter { it is State.DISCONNECTED || it is State.CONNECTED },
-            { count, state ->
-                if (state is State.DISCONNECTED && count != 0) {
-                    throw BleManager.DisconnectedException()
-                } else {
-                    state
-                }
+        get() = Completable.defer {
+            if (isConnected()) {
+                Completable.complete()
+            } else {
+                stateRelay.skip(1)
+                    .doOnNext {
+                        if (it is State.DISCONNECTED) {
+                            throw BleManager.DisconnectedException()
+                        }
+                    }
+                    .filter {
+                        it is State.CONNECTED
+                    }
+                    .firstOrError()
+                    .ignoreElement()
             }
-        ).filter {
-            it is State.CONNECTED
-        }.firstOrError().ignoreElement()
+        }
     private val gattObservable: Observable<BluetoothGatt>
         get() = stateRelay.map {
             if (it is State.CONNECTED) {
