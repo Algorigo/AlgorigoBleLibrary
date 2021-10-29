@@ -333,8 +333,8 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
 
     override fun setupNotification(type: BleDevice.NotificationType, characteristicUuid: UUID): Observable<Observable<ByteArray>> {
         var characteristic: BluetoothGattCharacteristic? = null
-        return getGattSingle()
-            .flatMapObservable { gatt ->
+        return gattObservable
+            .flatMap { gatt ->
                 getCharacteristic(characteristicUuid)
                     .flatMap {
                         characteristic = it
