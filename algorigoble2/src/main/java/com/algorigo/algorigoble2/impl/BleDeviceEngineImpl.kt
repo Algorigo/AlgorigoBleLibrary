@@ -68,6 +68,7 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     stateRelay.accept(State.DISCONNECTED())
                     bleDevice.onDisconnected()
+                    gatt?.close()
                 }
             }
         }
