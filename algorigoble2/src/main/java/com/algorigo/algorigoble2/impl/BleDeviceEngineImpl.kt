@@ -371,16 +371,13 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
     private fun getServices(): Single<List<BluetoothGattService>> {
         return checkConnectionState(BleDevice.ConnectionState.CONNECTED)
             .andThen(Single.defer {
-                if (serviceSingle != null) {
-                    serviceSingle
-                } else {
-                    getGattSingle()
+                serviceSingle
+                    ?: getGattSingle()
                         .flatMap { gatt ->
                             Single.fromCallable(gatt::getServices).cache().also {
                                 serviceSingle = it
                             }
                         }
-                }
             })
     }
 
