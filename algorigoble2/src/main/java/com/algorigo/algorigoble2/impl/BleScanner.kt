@@ -4,8 +4,6 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
-import android.os.Build
-import androidx.annotation.RequiresApi
 import com.algorigo.algorigoble2.BleScanFilter
 import com.algorigo.algorigoble2.BleScanSettings
 import io.reactivex.rxjava3.core.Observable
@@ -17,7 +15,6 @@ import io.reactivex.rxjava3.subjects.PublishSubject
 
 internal class BleScanner private constructor(private val bluetoothAdapter: BluetoothAdapter){
 
-    @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
     private inner class BleScanCallback(val scanFilters: Array<out BleScanFilter>) : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
             super.onScanResult(callbackType, result)
@@ -51,47 +48,20 @@ internal class BleScanner private constructor(private val bluetoothAdapter: Blue
         }
     }
 
-    @Suppress("deprecation")
-    private inner class BleLeScanCallback(val scanFilters: Array<out BleScanFilter>) : BluetoothAdapter.LeScanCallback {
-        override fun onLeScan(device: BluetoothDevice?, rssi: Int, scanRecord: ByteArray?) {
-            device?.let {
-                if (isOk(it, rssi, scanRecord)) {
-                    scanSubject.onNext(it)
-                }
-            }
-        }
-
-        private fun isOk(device: BluetoothDevice, rssi: Int, scanRecord: ByteArray?): Boolean {
-            if (scanFilters.isEmpty()) return true
-            scanFilters.forEach { if (it.isOk(device, rssi, scanRecord)) return true }
-            return false
-        }
-    }
-
     private val scanSubject = PublishSubject.create<BluetoothDevice>()
 
     private fun startScanObservable(scanSettings: BleScanSettings, vararg scanFilters: BleScanFilter): Observable<BluetoothDevice> {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            startScanObservable21(scanSettings, *scanFilters)
-        } else {
-            startScanObservable18(scanSettings, *scanFilters)
-        }
-    }
-
-    @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
-    private fun startScanObservable21(scanSettings: BleScanSettings, vararg scanFilters: BleScanFilter): Observable<BluetoothDevice> {
         val scanCallback = BleScanCallback(scanFilters)
         return scanSubject
             .doOnSubscribe {
-                startScan21(scanCallback, scanSettings, *scanFilters)
+                startScan(scanCallback, scanSettings, *scanFilters)
             }
             .doFinally {
-                stopScan21(scanCallback)
+                stopScan(scanCallback)
             }
     }
 
-    @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
-    private fun startScan21(scanCallback: ScanCallback, bleScanSettings: BleScanSettings, vararg bleScanFilters: BleScanFilter) {
+    private fun startScan(scanCallback: ScanCallback, bleScanSettings: BleScanSettings, vararg bleScanFilters: BleScanFilter) {
         bluetoothAdapter.bluetoothLeScanner.startScan(
             BleScanOptionsConverter.convertScanFilters(bleScanFilters),
             BleScanOptionsConverter.convertScanSettings(bleScanSettings),
@@ -99,37 +69,8 @@ internal class BleScanner private constructor(private val bluetoothAdapter: Blue
         )
     }
 
-    @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
-    private fun stopScan21(scanCallback: ScanCallback) {
+    private fun stopScan(scanCallback: ScanCallback) {
         bluetoothAdapter.bluetoothLeScanner.stopScan(scanCallback)
-    }
-
-    @Suppress("deprecation")
-    private fun startScanObservable18(scanSettings: BleScanSettings, vararg scanFilters: BleScanFilter): Observable<BluetoothDevice> {
-        val leCallback = BleLeScanCallback(scanFilters)
-        return scanSubject
-            .doOnSubscribe {
-                startScan18(leCallback, *scanFilters)
-            }
-            .doFinally {
-                stopScan18(leCallback)
-            }
-    }
-
-    @Suppress("deprecation")
-    private fun startScan18(leCallback: BleLeScanCallback, vararg bleScanFilters: BleScanFilter) {
-        bleScanFilters.mapNotNull { it.uuid?.uuid }.also {
-            if (it.isNotEmpty()) {
-                bluetoothAdapter.startLeScan(it.toTypedArray(), leCallback)
-            } else {
-                bluetoothAdapter.startLeScan(leCallback)
-            }
-        }
-    }
-
-    @Suppress("deprecation")
-    private fun stopScan18(leCallback: BleLeScanCallback) {
-        bluetoothAdapter.stopLeScan(leCallback)
     }
 
     companion object {
