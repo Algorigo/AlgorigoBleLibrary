@@ -70,7 +70,7 @@ open class BleDevice {
     fun setupNotification(type: NotificationType, characteristicUuid: UUID) =
         engine.setupNotification(type, characteristicUuid)
 
-    fun connectSppSocket(uuid: UUID? = null) = engine.connectSppSocket()
+    fun connectSppSocket(uuid: UUID? = null) = engine.connectSppSocket(uuid)
 
     override fun toString(): String {
         return "${javaClass.simpleName} $deviceName($deviceId)"
