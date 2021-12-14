@@ -454,6 +454,17 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
             .subscribeOn(Schedulers.io())
     }
 
+    internal fun onBluetoothDisabled() {
+        getGattSingle()
+            .subscribe({
+                stateRelay.accept(State.DISCONNECTED())
+                bleDevice.onDisconnected()
+                it.close()
+            }, {
+                Log.d(LOG_TAG, "onBluetoothDisabled error:$deviceId", it)
+            })
+    }
+
     companion object {
         private val LOG_TAG = BleDeviceEngineImpl::class.java.simpleName
 

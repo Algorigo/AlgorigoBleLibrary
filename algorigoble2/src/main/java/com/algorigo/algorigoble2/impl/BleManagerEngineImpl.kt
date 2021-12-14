@@ -4,9 +4,17 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
+import android.util.Log
 import com.algorigo.algorigoble2.*
+import com.algorigo.algorigoble2.rx_util.collectList
+import com.jakewharton.rxrelay3.BehaviorRelay
 import io.reactivex.rxjava3.core.Observable
+import java.util.*
 
 internal class BleManagerEngineImpl(private val context: Context, bleDeviceDelegate: BleManager.BleDeviceDelegate) : BleManagerEngine(bleDeviceDelegate) {
 
@@ -15,25 +23,71 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
 
     private val deviceMap: MutableMap<BluetoothDevice, BleDevice> = mutableMapOf()
 
+    private val bluetoothStateRelay = BehaviorRelay.create<Boolean>().apply {
+        accept(bluetoothAdapter.isEnabled)
+    }
+    private val bluetoothStateObservable = bluetoothStateRelay
+        .doOnNext {
+            if (!it) {
+                throw BleManager.BleNotAvailableException()
+            }
+        }
+    private val bluetoothReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                BluetoothAdapter.ACTION_STATE_CHANGED -> {
+                    when (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1)) {
+                        BluetoothAdapter.STATE_ON -> {
+                            bluetoothStateRelay.accept(true)
+                        }
+                        BluetoothAdapter.STATE_OFF -> {
+                            bluetoothStateRelay.accept(false)
+                            getDevices()
+                                .forEach {
+                                    (it.engine as? BleDeviceEngineImpl)?.onBluetoothDisabled()
+                                }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    init {
+        context.registerReceiver(
+            bluetoothReceiver,
+            IntentFilter().apply { addAction(BluetoothAdapter.ACTION_STATE_CHANGED) }
+        )
+    }
+
+    protected fun finalize() {
+        context.unregisterReceiver(bluetoothReceiver)
+    }
+
     override fun scanObservable(
         scanSettings: BleScanSettings,
         vararg scanFilters: BleScanFilter
     ): Observable<List<BleDevice>> {
-        if (!bluetoothAdapter.isEnabled) {
-            return Observable.error(BleManager.BleNotAvailableException())
-        }
-
-        val bleDeviceList = mutableListOf<BleDevice>()
-        return Observable.just(listOf<BleDevice>())
-            .concatWith(BleScanner.scanObservable(bluetoothAdapter, scanSettings, *scanFilters)
-            .map {
-                getBleDevice(it)?.also {
-                    if (!bleDeviceList.contains(it)) {
-                        bleDeviceList.add(it)
-                    }
-                }
-                bleDeviceList
-            })
+        return bluetoothStateObservable
+            .flatMap {
+                Observable.just(listOf<BleDevice>())
+                    .concatWith(
+                        BleScanner.scanObservable(bluetoothAdapter, scanSettings, *scanFilters)
+                            .distinct { it.address }
+                            .run {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                                    mapOptional {
+                                        getBleDevice(it)?.let { Optional.of(it) } ?: Optional.empty()
+                                    }
+                                } else {
+                                    map { listOf(getBleDevice(it)) }
+                                        .filter { it[0] != null }
+                                        .map { it[0]!! }
+                                }
+                            }
+                            .collectList()
+                    )
+            }
     }
 
     override fun getDevices(): Collection<BleDevice> {
