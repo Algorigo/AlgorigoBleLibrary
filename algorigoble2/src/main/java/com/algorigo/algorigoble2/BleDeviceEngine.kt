@@ -19,7 +19,7 @@ abstract class BleDeviceEngine {
     fun isConnected(): Boolean = getConnectionStateObservable().firstOrError().map { it == BleDevice.ConnectionState.CONNECTED }.blockingGet()
     abstract fun getConnectionStateObservable(): Observable<BleDevice.ConnectionState>
 
-    abstract fun connectCompletable(): Completable
+    abstract fun connectCompletable(timeoutMillis: Long): Completable
 
     abstract fun disconnect()
 
