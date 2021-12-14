@@ -3,6 +3,7 @@ package com.algorigo.algorigoblelibrary
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.widget.Button
@@ -12,6 +13,7 @@ import com.algorigo.algorigoble2.BleScanFilter
 import com.algorigo.algorigoble2.BleScanSettings
 import com.algorigo.library.rx.Rx2ServiceBindingFactory
 import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
+import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.disposables.Disposable
 import java.util.concurrent.TimeUnit
@@ -130,7 +132,7 @@ class MainActivity : RequestPermissionActivity() {
     }
 
     private fun startScan() {
-        disposable = requestPermissionCompletable(getPermissionsToRequest(), true)
+        disposable = requestPermission()
             .andThen(Rx2ServiceBindingFactory.bind<BluetoothService.BluetoothBinder>(this, Intent(this, BluetoothService::class.java)))
             .flatMap { binder ->
                 binder.getService().bleManager.let { manager ->
@@ -179,16 +181,22 @@ class MainActivity : RequestPermissionActivity() {
             })
     }
 
+    private fun requestPermission(): Completable {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            requestPermissionCompletable(arrayOf(
+                Manifest.permission.BLUETOOTH_SCAN,
+                Manifest.permission.BLUETOOTH_CONNECT,
+            ), true)
+        } else {
+            Completable.complete()
+        }
+    }
+
     private fun notifyDataSetChanged() {
         adapter.notifyDataSetChanged()
     }
 
     companion object {
         private val TAG = MainActivity::class.java.simpleName
-
-        fun getPermissionsToRequest() = arrayOf(
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.ACCESS_FINE_LOCATION
-        )
     }
 }

@@ -27,8 +27,8 @@ abstract class InitializableBleDevice : BleDevice() {
         )
     }
 
-    final override fun connectCompletable(): Completable {
-        return super.connectCompletable()
+    final override fun connectCompletable(timeoutMillis: Long): Completable {
+        return super.connectCompletable(timeoutMillis)
             .concatWith(getInitializeCompletable())
     }
 

@@ -45,7 +45,7 @@ open class BleDevice {
     fun bondCompletable() = engine.bondCompletable()
 
     open fun getConnectionStateObservable() = engine.getConnectionStateObservable()
-    open fun connectCompletable() = engine.connectCompletable()
+    open fun connectCompletable(timeoutMillis: Long = 10000L) = engine.connectCompletable(timeoutMillis)
 
     fun connect() {
         connectCompletable().subscribe({
@@ -70,7 +70,7 @@ open class BleDevice {
     fun setupNotification(type: NotificationType, characteristicUuid: UUID) =
         engine.setupNotification(type, characteristicUuid)
 
-    fun connectSppSocket(uuid: UUID? = null) = engine.connectSppSocket()
+    fun connectSppSocket(uuid: UUID? = null) = engine.connectSppSocket(uuid)
 
     override fun toString(): String {
         return "${javaClass.simpleName} $deviceName($deviceId)"

@@ -16,6 +16,7 @@ import io.reactivex.rxjava3.core.Single
 import io.reactivex.rxjava3.schedulers.Schedulers
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 class BleDeviceEngineImpl(private val context: Context, private val bluetoothDevice: BluetoothDevice):
     BleDeviceEngine() {
@@ -158,24 +159,6 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
     private val stateRelay = BehaviorRelay.create<State>().apply {
         accept(State.DISCONNECTED())
     }
-    private val connectCompletable: Completable
-        get() = Completable.defer {
-            if (isConnected()) {
-                Completable.complete()
-            } else {
-                stateRelay.skip(1)
-                    .doOnNext {
-                        if (it is State.DISCONNECTED) {
-                            throw BleManager.DisconnectedException()
-                        }
-                    }
-                    .filter {
-                        it is State.CONNECTED
-                    }
-                    .firstOrError()
-                    .ignoreElement()
-            }
-        }
     private val gattObservable: Observable<BluetoothGatt>
         get() = stateRelay.map {
             if (it is State.CONNECTED) {
@@ -226,10 +209,35 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
         return stateRelay.map { it.connectionState }
     }
 
-    override fun connectCompletable(): Completable = checkConnectionState(BleDevice.ConnectionState.DISCONNECTED)
-        .andThen(connectCompletable.doOnSubscribe {
-            val gatt = bluetoothDevice.connectGatt(context, false, gattCallback)
-            stateRelay.accept(State.CONNECTING())
+    override fun connectCompletable(timeoutMillis: Long): Completable = checkConnectionState(BleDevice.ConnectionState.DISCONNECTED)
+        .andThen(Completable.defer {
+            if (isConnected()) {
+                Completable.complete()
+            } else {
+                var gatt: BluetoothGatt? = null
+                stateRelay
+                    .doOnSubscribe {
+                        gatt = bluetoothDevice.connectGatt(context, false, gattCallback)
+                        stateRelay.accept(State.CONNECTING())
+                    }
+                    .doOnNext {
+                        if (it is State.DISCONNECTED) {
+                            throw BleManager.DisconnectedException()
+                        }
+                    }
+                    .filter { it is State.CONNECTED }
+                    .firstOrError()
+                    .ignoreElement()
+                    .timeout(timeoutMillis, TimeUnit.MILLISECONDS)
+                    .doOnError {
+                        if (it is TimeoutException) {
+                            stateRelay.accept(State.DISCONNECTED())
+                            bleDevice.onDisconnected()
+                            gatt?.disconnect()
+                            gatt?.close()
+                        }
+                    }
+            }
         })
 
     private fun checkConnectionState(connectionState: BleDevice.ConnectionState): Completable {
@@ -371,16 +379,13 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
     private fun getServices(): Single<List<BluetoothGattService>> {
         return checkConnectionState(BleDevice.ConnectionState.CONNECTED)
             .andThen(Single.defer {
-                if (serviceSingle != null) {
-                    serviceSingle
-                } else {
-                    getGattSingle()
+                serviceSingle
+                    ?: getGattSingle()
                         .flatMap { gatt ->
                             Single.fromCallable(gatt::getServices).cache().also {
                                 serviceSingle = it
                             }
                         }
-                }
             })
     }
 
@@ -447,6 +452,17 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
                 socket?.close()
             }
             .subscribeOn(Schedulers.io())
+    }
+
+    internal fun onBluetoothDisabled() {
+        getGattSingle()
+            .subscribe({
+                stateRelay.accept(State.DISCONNECTED())
+                bleDevice.onDisconnected()
+                it.close()
+            }, {
+                Log.d(LOG_TAG, "onBluetoothDisabled error:$deviceId", it)
+            })
     }
 
     companion object {
