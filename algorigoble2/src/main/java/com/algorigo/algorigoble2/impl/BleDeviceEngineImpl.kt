@@ -9,6 +9,7 @@ import com.algorigo.algorigoble2.BleManager
 import com.algorigo.algorigoble2.BleSppSocket
 import com.jakewharton.rxrelay3.BehaviorRelay
 import com.jakewharton.rxrelay3.PublishRelay
+import enumerated
 import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Flowable
 import io.reactivex.rxjava3.core.Observable
@@ -211,33 +212,33 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
 
     override fun connectCompletable(timeoutMillis: Long): Completable = checkConnectionState(BleDevice.ConnectionState.DISCONNECTED)
         .andThen(Completable.defer {
-            if (isConnected()) {
-                Completable.complete()
-            } else {
-                var gatt: BluetoothGatt? = null
-                stateRelay
-                    .doOnSubscribe {
-                        gatt = bluetoothDevice.connectGatt(context, false, gattCallback)
-                        stateRelay.accept(State.CONNECTING())
-                    }
-                    .doOnNext {
-                        if (it is State.DISCONNECTED) {
+            var gatt: BluetoothGatt? = null
+            stateRelay
+                .enumerated()
+                .doOnNext {
+                    if (it.second is State.DISCONNECTED) {
+                        if (it.first == 0) {
+                            gatt = bluetoothDevice.connectGatt(context, false, gattCallback)
+                            stateRelay.accept(State.CONNECTING())
+                        } else {
                             throw BleManager.DisconnectedException()
                         }
                     }
-                    .filter { it is State.CONNECTED }
-                    .firstOrError()
-                    .ignoreElement()
-                    .timeout(timeoutMillis, TimeUnit.MILLISECONDS)
-                    .doOnError {
-                        if (it is TimeoutException) {
+                }
+                .filter { it.second is State.CONNECTED }
+                .firstOrError()
+                .ignoreElement()
+                .timeout(timeoutMillis, TimeUnit.MILLISECONDS)
+                .doOnError {
+                    if (it is TimeoutException) {
+                        gatt?.also {
+                            it.disconnect()
+                            it.close()
                             stateRelay.accept(State.DISCONNECTED())
                             bleDevice.onDisconnected()
-                            gatt?.disconnect()
-                            gatt?.close()
                         }
                     }
-            }
+                }
         })
 
     private fun checkConnectionState(connectionState: BleDevice.ConnectionState): Completable {
