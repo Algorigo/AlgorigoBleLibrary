@@ -13,7 +13,6 @@ import com.algorigo.algorigoble2.BleScanFilter
 import com.algorigo.algorigoble2.BleScanSettings
 import com.algorigo.library.rx.Rx2ServiceBindingFactory
 import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
-import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.disposables.Disposable
 import java.util.concurrent.TimeUnit
@@ -132,7 +131,7 @@ class MainActivity : RequestPermissionActivity() {
     }
 
     private fun startScan() {
-        disposable = requestPermission()
+        disposable = requestPermissionCompletable(getPermissions(), true)
             .andThen(Rx2ServiceBindingFactory.bind<BluetoothService.BluetoothBinder>(this, Intent(this, BluetoothService::class.java)))
             .flatMap { binder ->
                 binder.getService().bleManager.let { manager ->
@@ -181,14 +180,17 @@ class MainActivity : RequestPermissionActivity() {
             })
     }
 
-    private fun requestPermission(): Completable {
+    private fun getPermissions(): Array<String> {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            requestPermissionCompletable(arrayOf(
+            arrayOf(
                 Manifest.permission.BLUETOOTH_SCAN,
                 Manifest.permission.BLUETOOTH_CONNECT,
-            ), true)
+            )
         } else {
-            Completable.complete()
+            arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION,
+            )
         }
     }
 
