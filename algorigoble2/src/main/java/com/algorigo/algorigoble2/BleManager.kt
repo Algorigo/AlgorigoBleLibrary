@@ -42,7 +42,10 @@ class BleManager(context: Context, delegate: BleDeviceDelegate = defaultBleDevic
     fun scanObservable(scanSettings: BleScanSettings, vararg scanFilters: BleScanFilter) =
         engine.scanObservable(scanSettings, *scanFilters)
     fun scanObservable() = engine.scanObservable()
-    fun getDevice(macAddress: String) = engine.getDevice(macAddress)
+    fun getDevice(macAddress: String) = engine.getDevice<BleDevice>(macAddress)
+    fun <T : BleDevice> getDevice(macAddress: String, clazz: Class<T>): T? {
+        return engine.getDevice(macAddress, clazz) as? T
+    }
     fun getBondedDevice(macAddress: String) = engine.getBondedDevice(macAddress)
     fun getBondedDevices() = engine.getBondedDevices()
     fun getConnectedDevice(macAddress: String) = engine.getConnectedDevice(macAddress)
