@@ -39,7 +39,7 @@ abstract class InitializableBleDevice : BleDevice() {
                     initializeRelay.accept(true)
                 }
                 .doOnError {
-                    Log.e(TAG, "", it)
+                    Log.e(TAG, "getInitializeCompletable", it)
                     disconnect()
                 }
         }
