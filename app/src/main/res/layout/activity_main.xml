@@ -6,6 +6,20 @@
     android:layout_height="match_parent"
     tools:context=".MainActivity">
 
+    <EditText
+        android:id="@+id/mac_address_edittext"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Mac Address (12:34:56:78:90:AB) or (1234567890AB)"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <Button
+        android:id="@+id/mac_address_btn"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Connect Device"
+        app:layout_constraintTop_toBottomOf="@+id/mac_address_edittext" />
+
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/ble_recycler"
         android:layout_width="match_parent"
@@ -15,7 +29,7 @@
         app:layout_constraintBottom_toTopOf="@+id/start_btn"
         app:layout_constraintLeft_toLeftOf="parent"
         app:layout_constraintRight_toRightOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/mac_address_btn"
         tools:listitem="@layout/item_ble_device_list" />
 
     <Button

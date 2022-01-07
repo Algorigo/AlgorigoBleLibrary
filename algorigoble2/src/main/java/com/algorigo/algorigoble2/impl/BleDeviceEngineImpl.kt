@@ -290,7 +290,7 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
                     .retryWhen {
                         it.take(5).flatMap { throwable ->
                             if (throwable is CommunicationFailedException) {
-                                Flowable.timer(100, TimeUnit.MILLISECONDS)
+                                Flowable.timer(500, TimeUnit.MILLISECONDS)
                             } else {
                                 Flowable.error(throwable)
                             }
@@ -335,7 +335,7 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
                     .retryWhen {
                         it.take(5).flatMap { throwable ->
                             if (throwable is CommunicationFailedException) {
-                                Flowable.timer(100, TimeUnit.MILLISECONDS)
+                                Flowable.timer(500, TimeUnit.MILLISECONDS)
                             } else {
                                 Flowable.error(throwable)
                             }
@@ -426,7 +426,7 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
                     .retryWhen {
                         it.take(5).flatMap { throwable ->
                             if (throwable is CommunicationFailedException) {
-                                Flowable.timer(100, TimeUnit.MILLISECONDS)
+                                Flowable.timer(500, TimeUnit.MILLISECONDS)
                             } else {
                                 Flowable.error(throwable)
                             }

@@ -106,20 +106,35 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
         }
     }
 
-    private fun getBleDevice(bluetoothDevice: BluetoothDevice): BleDevice? {
-        return deviceMap[bluetoothDevice] ?: (createBleDevice(bluetoothDevice)?.also { device ->
-            device.getConnectionStateObservable()
-                .subscribe({
-                    connectionStateRelay.accept(Pair(device, it))
-                }, {})
-        })
+    override fun <T : BleDevice> getDevice(macAddress: String, clazz: Class<T>?): BleDevice? {
+        val device = super.getDevice(macAddress, clazz)
+        if (device != null) {
+            return device
+        }
+
+        Log.e("!!!", "getDevice:$macAddress")
+        val bluetoothDevice = bluetoothAdapter.getRemoteDevice(macAddress)
+        Log.e("!!!", "bluetoothDevice:${bluetoothDevice.name}")
+        return createBleDevice(bluetoothDevice, clazz)
     }
 
-    private fun createBleDevice(bluetoothDevice: BluetoothDevice): BleDevice? {
-        return bleDeviceDelegate.createBleDevice(bluetoothDevice)?.also { device ->
-            deviceMap[bluetoothDevice] = device
-        }?.apply {
-            initEngine(BleDeviceEngineImpl(context, bluetoothDevice))
+    private fun getBleDevice(bluetoothDevice: BluetoothDevice): BleDevice? {
+        return deviceMap[bluetoothDevice] ?: (createBleDevice<BleDevice>(bluetoothDevice))
+    }
+
+    private fun <T : BleDevice> createBleDevice(bluetoothDevice: BluetoothDevice, clazz: Class<T>? = null): BleDevice? {
+        return if (clazz != null) {
+            clazz.newInstance()
+        } else {
+            bleDeviceDelegate.createBleDevice(bluetoothDevice)
         }
+            ?.also { device ->
+                deviceMap[bluetoothDevice] = device
+                device.initEngine(BleDeviceEngineImpl(context, bluetoothDevice))
+                device.getConnectionStateObservable()
+                    .subscribe({
+                        connectionStateRelay.accept(Pair(device, it))
+                    }, {})
+            }
     }
 }

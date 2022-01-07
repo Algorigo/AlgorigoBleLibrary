@@ -7,6 +7,8 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.widget.Button
+import android.widget.EditText
+import android.widget.Toast
 import androidx.recyclerview.widget.RecyclerView
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleScanFilter
@@ -76,6 +78,8 @@ class MainActivity : RequestPermissionActivity() {
     private var disposable: Disposable? = null
     private var connectionStateDisposable: Disposable? = null
 
+    private lateinit var macAddressEditText: EditText
+    private lateinit var macAddressButton: Button
     private lateinit var bleRecycler: RecyclerView
     private lateinit var startBtn: Button
     private lateinit var stopBtn: Button
@@ -117,10 +121,40 @@ class MainActivity : RequestPermissionActivity() {
     private fun initView() {
         setContentView(R.layout.activity_main)
 
+        macAddressEditText = findViewById(R.id.mac_address_edittext)
+        macAddressButton = findViewById(R.id.mac_address_btn)
         bleRecycler = findViewById(R.id.ble_recycler)
         startBtn = findViewById(R.id.start_btn)
         stopBtn = findViewById(R.id.stop_btn)
 
+        macAddressButton.setOnClickListener {
+            macAddressEditText.text.toString().also { str ->
+                Rx2ServiceBindingFactory.bind<BluetoothService.BluetoothBinder>(this, Intent(this, BluetoothService::class.java))
+                    .map { binder ->
+                        val macAddress =
+                            when {
+                                Regex("[0-9A-Fa-f]{12}").matches(str) -> {
+                                    str.split(2).joinToString(":")
+                                }
+                                Regex("[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}").matches(str) -> {
+                                    str
+                                }
+                                else -> {
+                                    throw IllegalArgumentException("mac address pattern wrong")
+                                }
+                            }
+                        binder.getService().bleManager.getDevice(macAddress)!!
+                    }
+                    .firstOrError()
+                    .flatMapCompletable { it.connectCompletable() }
+                    .subscribe({
+                        Log.e(TAG, "device connected")
+                    }, {
+                        Log.e(TAG, "", it)
+                        Toast.makeText(this, it.localizedMessage, Toast.LENGTH_LONG).show()
+                    })
+            }
+        }
         bleRecycler.adapter = adapter
         startBtn.setOnClickListener {
             startScan()
@@ -200,5 +234,14 @@ class MainActivity : RequestPermissionActivity() {
 
     companion object {
         private val TAG = MainActivity::class.java.simpleName
+    }
+}
+
+fun String.split(size: Int): Array<String> {
+    if (this.count() % size != 0) {
+        throw IllegalStateException()
+    }
+    return Array(this.count() / size) {
+        substring(it*2, it*2+2)
     }
 }

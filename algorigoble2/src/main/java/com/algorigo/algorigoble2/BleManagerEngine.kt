@@ -14,7 +14,7 @@ internal abstract class BleManagerEngine(protected val bleDeviceDelegate: BleMan
     abstract fun getBondedDevices(): List<BleDevice>
     abstract fun getConnectedDevices(): List<BleDevice>
 
-    open fun getDevice(macAddress: String): BleDevice? {
+    open fun <T : BleDevice> getDevice(macAddress: String, clazz: Class<T>? = null): BleDevice? {
         return getDevices()
             .filter { it.deviceId == macAddress }
             .let {
