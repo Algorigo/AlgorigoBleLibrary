@@ -119,12 +119,7 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
     }
 
     private fun getBleDevice(bluetoothDevice: BluetoothDevice): BleDevice? {
-        return deviceMap[bluetoothDevice] ?: (createBleDevice<BleDevice>(bluetoothDevice)?.also { device ->
-            device.getConnectionStateObservable()
-                .subscribe({
-                    connectionStateRelay.accept(Pair(device, it))
-                }, {})
-        })
+        return deviceMap[bluetoothDevice] ?: (createBleDevice<BleDevice>(bluetoothDevice))
     }
 
     private fun <T : BleDevice> createBleDevice(bluetoothDevice: BluetoothDevice, clazz: Class<T>? = null): BleDevice? {
@@ -136,6 +131,10 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
             ?.also { device ->
                 deviceMap[bluetoothDevice] = device
                 device.initEngine(BleDeviceEngineImpl(context, bluetoothDevice))
+                device.getConnectionStateObservable()
+                    .subscribe({
+                        connectionStateRelay.accept(Pair(device, it))
+                    }, {})
             }
     }
 }
