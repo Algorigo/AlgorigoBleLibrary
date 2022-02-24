@@ -134,15 +134,6 @@ dependencies {
     //ReactiveX Relay
     implementation 'com.jakewharton.rxrelay3:rxrelay:3.0.0'
 
-//    //RxAndroidBle
-//    implementation "com.polidea.rxandroidble2:rxandroidble:1.11.1"
-//    //RxJava2, RxJava3 bridge
-//    implementation "com.github.akarnokd:rxjava3-bridge:3.0.0"
-
     // gson
-    implementation 'com.google.code.gson:gson:2.8.7'
-}
-
-repositories {
-    mavenCentral()
+    implementation 'com.google.code.gson:gson:2.8.9'
 }
