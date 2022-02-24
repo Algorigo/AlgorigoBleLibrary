@@ -2,7 +2,7 @@ version: 2
 jobs:
   build:
     docker:
-      - image: circleci/android:api-30
+      - image: ccistaging/android:api-30
     steps:
     - checkout
     - run:
@@ -64,7 +64,7 @@ jobs:
           name: Restore gradle properties
       - run:
           name: Upload Maven Central
-          command: ./gradlew uploadArchives
+          command: ./gradlew publish
 
 workflows:
   version: 2
