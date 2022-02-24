@@ -32,7 +32,8 @@ buildscript {
     }
 }
 
-apply plugin: 'com.bmuschko.nexus'
+apply plugin: 'maven-publish'
+apply plugin: 'signing'
 
 group = "com.algorigo.rx"
 archivesBaseName = "algorigoble2"
@@ -42,47 +43,52 @@ if (getCurrentGitBranch().contains('master')) {
     version = "${versionStr}-${getUserName()}-SNAPSHOT"
 }
 
-modifyPom {
-    project {
-        name 'AlgorigoBleLibrary'
-        description 'Ble Library for Android using ReactiveX'
-        url 'https://github.com/Algorigo/AlgorigoBleLibrary'
-        inceptionYear '2018'
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            artifactId = archivesBaseName
+            pom {
+                name = 'AlgorigoBleLibrary'
+                description = 'Ble Library for Android using ReactiveX'
+                url = 'https://github.com/Algorigo/AlgorigoBleLibrary'
+                artifact("$buildDir/outputs/aar/algorigoble2-release.aar")
 
-        scm {
-            url 'https://github.com/Algorigo/AlgorigoBleLibrary'
-            connection 'scm:https://github.com/Algorigo/AlgorigoBleLibrary.git'
-            developerConnection 'scm:git:https://github.com/Algorigo/AlgorigoBleLibrary.git'
-        }
+                licenses {
+                    license {
+                        name = 'The Apache Software License, Version 2.0'
+                        url = 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+                    }
+                }
 
-        licenses {
-            license {
-                name 'The Apache Software License, Version 2.0'
-                url 'http://www.apache.org/licenses/LICENSE-2.0.txt'
-                distribution 'repo'
+                developers {
+                    developer {
+                        id = 'rouddy'
+                        name = 'Rouddy'
+                        email = 'rouddy@naver.com'
+                    }
+                }
+
+                scm {
+                    connection = 'scm:https://github.com/Algorigo/AlgorigoBleLibrary.git'
+                    developerConnection = 'scm:git:https://github.com/Algorigo/AlgorigoBleLibrary.git'
+                    url = 'https://github.com/Algorigo/AlgorigoBleLibrary'
+                }
             }
         }
-
-        developers {
-            developer {
-                id 'rouddy'
-                name 'Rouddy'
-                email 'rouddy@naver.com'
+    }
+    repositories {
+        maven {
+            url = version.endsWith('SNAPSHOT') ? NEXUS_SNAPSHOT_REPOSITORY_URL : NEXUS_REPOSITORY_URL
+            credentials {
+                username = findProperty('nexusUsername')
+                password = findProperty('nexusPassword')
             }
         }
     }
 }
 
-extraArchive {
-    sources = true
-    tests = true
-    javadoc = true
-}
-
-nexus {
-    sign = true
-    repositoryUrl = NEXUS_REPOSITORY_URL
-    snapshotRepositoryUrl = NEXUS_SNAPSHOT_REPOSITORY_URL
+signing {
+    sign publishing.publications.mavenJava
 }
 
 android {
@@ -106,8 +112,8 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
     }
     kotlinOptions {
         jvmTarget = '1.8'
