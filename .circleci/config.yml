@@ -64,7 +64,7 @@ jobs:
           name: Restore gradle properties
       - run:
           name: Upload Maven Central
-          command: ./gradlew uploadArchives
+          command: ./gradlew publish
 
 workflows:
   version: 2
