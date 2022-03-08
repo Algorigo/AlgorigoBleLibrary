@@ -5,9 +5,7 @@ internal class Logging(logger: Logger?) {
     internal val d: (String) -> Unit
     internal val i: (String) -> Unit
     internal val w: (String) -> Unit
-    internal val e: (String) -> Unit
-
-
+    internal val e: (String, Throwable?) -> Unit
 
     init {
         if (logger != null) {
@@ -33,22 +31,23 @@ internal class Logging(logger: Logger?) {
                 NOT_LOG
             }
             e = if (logger.logLevel >= Logger.LOG_LEVEL_ERROR) {
-                { log: String ->
-                    logger.logError(LOG_TAG, log)
+                { log: String, throwable: Throwable? ->
+                    logger.logError(LOG_TAG, log, throwable)
                 }
             } else {
-                NOT_LOG
+                NOT_LOG_THR
             }
         } else {
             d = NOT_LOG
             i = NOT_LOG
             w = NOT_LOG
-            e = NOT_LOG
+            e = NOT_LOG_THR
         }
     }
 
     companion object {
         private const val LOG_TAG = "AlgorigoBle2"
         private val NOT_LOG = { _: String -> }
+        private val NOT_LOG_THR = { _: String, _: Throwable? -> }
     }
 }

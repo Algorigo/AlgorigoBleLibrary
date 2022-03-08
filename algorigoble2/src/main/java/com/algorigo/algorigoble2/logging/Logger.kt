@@ -5,7 +5,7 @@ abstract class Logger {
     abstract fun logDebug(tag: String, log: String)
     abstract fun logInfo(tag: String, log: String)
     abstract fun logWarning(tag: String, log: String)
-    abstract fun logError(tag: String, log: String)
+    abstract fun logError(tag: String, log: String, throwable: Throwable?)
 
     companion object {
         const val LOG_LEVEL_DEBUG = 3
