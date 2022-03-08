@@ -11,12 +11,13 @@ import android.content.IntentFilter
 import android.os.Build
 import android.util.Log
 import com.algorigo.algorigoble2.*
+import com.algorigo.algorigoble2.logging.Logging
 import com.algorigo.algorigoble2.rx_util.collectList
 import com.jakewharton.rxrelay3.BehaviorRelay
 import io.reactivex.rxjava3.core.Observable
 import java.util.*
 
-internal class BleManagerEngineImpl(private val context: Context, bleDeviceDelegate: BleManager.BleDeviceDelegate) : BleManagerEngine(bleDeviceDelegate) {
+internal class BleManagerEngineImpl(private val context: Context, bleDeviceDelegate: BleManager.BleDeviceDelegate, logging: Logging) : BleManagerEngine(bleDeviceDelegate, logging) {
 
     private val bluetoothManager: BluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private val bluetoothAdapter: BluetoothAdapter = bluetoothManager.adapter
@@ -130,7 +131,7 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
         }
             ?.also { device ->
                 deviceMap[bluetoothDevice] = device
-                device.initEngine(BleDeviceEngineImpl(context, bluetoothDevice))
+                device.initEngine(BleDeviceEngineImpl(context, bluetoothDevice, logging))
                 device.getConnectionStateObservable()
                     .subscribe({
                         connectionStateRelay.accept(Pair(device, it))

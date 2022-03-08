@@ -22,7 +22,7 @@ open class BleDevice {
 
     internal lateinit var engine: BleDeviceEngine
 
-    fun initEngine(engine: BleDeviceEngine) {
+    internal fun initEngine(engine: BleDeviceEngine) {
         engine.bleDevice = this
         this.engine = engine
     }

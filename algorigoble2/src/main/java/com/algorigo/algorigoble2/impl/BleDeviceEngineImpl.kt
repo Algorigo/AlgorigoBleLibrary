@@ -7,6 +7,7 @@ import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleDeviceEngine
 import com.algorigo.algorigoble2.BleManager
 import com.algorigo.algorigoble2.BleSppSocket
+import com.algorigo.algorigoble2.logging.Logging
 import com.jakewharton.rxrelay3.BehaviorRelay
 import com.jakewharton.rxrelay3.PublishRelay
 import enumerated
@@ -19,8 +20,8 @@ import java.util.UUID
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 
-class BleDeviceEngineImpl(private val context: Context, private val bluetoothDevice: BluetoothDevice):
-    BleDeviceEngine() {
+internal class BleDeviceEngineImpl(private val context: Context, private val bluetoothDevice: BluetoothDevice, logging: Logging):
+    BleDeviceEngine(logging) {
 
     class CommunicationFailedException: Exception()
     class IllegalCharacteristicProperty(val property: Int, val type: String): Exception()
@@ -62,6 +63,7 @@ class BleDeviceEngineImpl(private val context: Context, private val bluetoothDev
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
             super.onConnectionStateChange(gatt, status, newState)
+            logging.d("onConnectionStateChange $status -> $newState")
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     gatt?.discoverServices()

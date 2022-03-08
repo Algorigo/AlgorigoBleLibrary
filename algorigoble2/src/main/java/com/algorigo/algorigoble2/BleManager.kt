@@ -3,8 +3,10 @@ package com.algorigo.algorigoble2
 import android.bluetooth.BluetoothDevice
 import android.content.Context
 import com.algorigo.algorigoble2.impl.BleManagerEngineImpl
+import com.algorigo.algorigoble2.logging.Logger
+import com.algorigo.algorigoble2.logging.Logging
 
-class BleManager(context: Context, delegate: BleDeviceDelegate = defaultBleDeviceDelegate, engine: Engine = Engine.ALGORIGO_BLE) {
+class BleManager(context: Context, delegate: BleDeviceDelegate = defaultBleDeviceDelegate, engine: Engine = Engine.ALGORIGO_BLE, logger: Logger? = null) {
 
     class BleNotAvailableException: Exception()
     class BondFailedException: Exception()
@@ -33,9 +35,10 @@ class BleManager(context: Context, delegate: BleDeviceDelegate = defaultBleDevic
     private val engine: BleManagerEngine
 
     init {
+        val logging = Logging(logger)
         when (engine) {
 //            Engine.RX_ANDROID_BLE -> this.engine = RxAndroidBleEngine(context.applicationContext, delegate)
-            Engine.ALGORIGO_BLE -> this.engine = BleManagerEngineImpl(context.applicationContext, delegate)
+            Engine.ALGORIGO_BLE -> this.engine = BleManagerEngineImpl(context.applicationContext, delegate, logging)
         }
     }
 
