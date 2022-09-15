@@ -1,7 +1,7 @@
 apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
 
-def versionStr = '2.1.0'
+def versionStr = '2.2.0'
 
 def getCurrentGitBranch() {
     def gitBranch = "Unknown branch"
@@ -19,17 +19,6 @@ def getCurrentGitBranch() {
 
 def getUserName() {
     return System.properties['user.name']
-}
-
-buildscript {
-    repositories {
-        maven {
-            url "https://plugins.gradle.org/m2/"
-        }
-    }
-    dependencies {
-        classpath 'com.bmuschko:gradle-nexus-plugin:2.3.1'
-    }
 }
 
 apply plugin: 'maven-publish'
@@ -116,7 +105,7 @@ android {
         targetCompatibility JavaVersion.VERSION_11
     }
     kotlinOptions {
-        jvmTarget = '1.8'
+        jvmTarget = '11'
     }
 }
 

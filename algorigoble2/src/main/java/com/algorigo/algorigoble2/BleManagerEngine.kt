@@ -1,9 +1,10 @@
 package com.algorigo.algorigoble2
 
+import com.algorigo.algorigoble2.logging.Logging
 import com.jakewharton.rxrelay3.PublishRelay
 import io.reactivex.rxjava3.core.Observable
 
-internal abstract class BleManagerEngine(protected val bleDeviceDelegate: BleManager.BleDeviceDelegate) {
+internal abstract class BleManagerEngine(protected val bleDeviceDelegate: BleManager.BleDeviceDelegate, protected val logging: Logging) {
 
     protected val connectionStateRelay = PublishRelay.create<Pair<BleDevice, BleDevice.ConnectionState>>()
 
