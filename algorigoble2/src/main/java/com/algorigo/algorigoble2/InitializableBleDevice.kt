@@ -14,17 +14,16 @@ abstract class InitializableBleDevice : BleDevice() {
     final override fun getConnectionStateObservable(): Observable<ConnectionState> {
         return Observable.combineLatest(
             super.getConnectionStateObservable(),
-            initializeRelay,
-            { connectionState, initialized ->
-                if (connectionState == ConnectionState.CONNECTED && !initialized) {
-                    ConnectionState.CONNECTING.apply {
-                        status = "INITIALING"
-                    }
-                } else {
-                    connectionState
+            initializeRelay
+        ) { connectionState, initialized ->
+            if (connectionState == ConnectionState.CONNECTED && !initialized) {
+                ConnectionState.CONNECTING.apply {
+                    status = "INITIALING"
                 }
+            } else {
+                connectionState
             }
-        )
+        }
     }
 
     final override fun connectCompletable(timeoutMillis: Long): Completable {
