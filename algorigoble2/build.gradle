@@ -1,7 +1,7 @@
 apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
 
-def versionStr = '2.1.0'
+def versionStr = '2.2.0'
 
 def getCurrentGitBranch() {
     def gitBranch = "Unknown branch"
