@@ -1,5 +1,6 @@
 package com.algorigo.algorigoble2.impl
 
+import android.annotation.SuppressLint
 import android.bluetooth.*
 import android.content.Context
 import android.util.Log
@@ -20,6 +21,7 @@ import java.util.UUID
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 
+@SuppressLint("MissingPermission")
 internal class BleDeviceEngineImpl(private val context: Context, private val bluetoothDevice: BluetoothDevice, logging: Logging):
     BleDeviceEngine(logging) {
 

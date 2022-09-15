@@ -1,5 +1,6 @@
 package com.algorigo.algorigoble2.impl
 
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
@@ -17,6 +18,7 @@ import com.jakewharton.rxrelay3.BehaviorRelay
 import io.reactivex.rxjava3.core.Observable
 import java.util.*
 
+@SuppressLint("MissingPermission")
 internal class BleManagerEngineImpl(private val context: Context, bleDeviceDelegate: BleManager.BleDeviceDelegate, logging: Logging) : BleManagerEngine(bleDeviceDelegate, logging) {
 
     private val bluetoothManager: BluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
