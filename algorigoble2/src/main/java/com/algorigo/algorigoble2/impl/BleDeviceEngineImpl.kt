@@ -496,5 +496,5 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
 }
 
 fun ByteArray.toHexString(): String {
-    return joinToString { String.format("%2x", it.toInt()) }
+    return joinToString(separator = "") { String.format("%02x", it) }
 }
