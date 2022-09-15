@@ -3,6 +3,7 @@ package com.algorigo.algorigoble2
 import android.bluetooth.BluetoothDevice
 import android.content.Context
 import com.algorigo.algorigoble2.impl.BleManagerEngineImpl
+import com.algorigo.algorigoble2.logging.DefaultLogger
 import com.algorigo.algorigoble2.logging.Logger
 import com.algorigo.algorigoble2.logging.Logging
 
@@ -35,7 +36,11 @@ class BleManager(context: Context, delegate: BleDeviceDelegate = defaultBleDevic
     private val engine: BleManagerEngine
 
     init {
-        val logging = Logging(logger)
+        val logging = if (logger != null) {
+            Logging(logger)
+        } else {
+            Logging(DefaultLogger())
+        }
         when (engine) {
 //            Engine.RX_ANDROID_BLE -> this.engine = RxAndroidBleEngine(context.applicationContext, delegate)
             Engine.ALGORIGO_BLE -> this.engine = BleManagerEngineImpl(context.applicationContext, delegate, logging)

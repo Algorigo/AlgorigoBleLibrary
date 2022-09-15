@@ -1,53 +1,49 @@
 package com.algorigo.algorigoble2.logging
 
-internal class Logging(logger: Logger?) {
+internal class Logging(val logger: Logger) {
 
-    internal val d: (String) -> Unit
-    internal val i: (String) -> Unit
-    internal val w: (String) -> Unit
-    internal val e: (String, Throwable?) -> Unit
-
-    init {
-        if (logger != null) {
-            d = if (logger.logLevel >= Logger.LOG_LEVEL_DEBUG) {
-                { log: String ->
-                    logger.logDebug(LOG_TAG, log)
-                }
-            } else {
-                NOT_LOG
-            }
-            i = if (logger.logLevel >= Logger.LOG_LEVEL_INFO) {
-                { log: String ->
-                    logger.logInfo(LOG_TAG, log)
-                }
-            } else {
-                NOT_LOG
-            }
-            w = if (logger.logLevel >= Logger.LOG_LEVEL_WARNING) {
-                { log: String ->
-                    logger.logWarning(LOG_TAG, log)
-                }
-            } else {
-                NOT_LOG
-            }
-            e = if (logger.logLevel >= Logger.LOG_LEVEL_ERROR) {
-                { log: String, throwable: Throwable? ->
-                    logger.logError(LOG_TAG, log, throwable)
-                }
-            } else {
-                NOT_LOG_THR
-            }
-        } else {
-            d = NOT_LOG
-            i = NOT_LOG
-            w = NOT_LOG
-            e = NOT_LOG_THR
-        }
+    fun d(log: String) {
+        d { log }
     }
+
+    fun d(logBuilder: () -> String) {
+        logger.logDebug(LOG_TAG, logBuilder)
+    }
+
+    fun i(log: String) {
+        i { log }
+    }
+
+    fun i(logBuilder: () -> String) {
+        logger.logInfo(LOG_TAG, logBuilder)
+    }
+
+    fun w(log: String) {
+        w { log }
+    }
+
+    fun w(logBuilder: () -> String) {
+        logger.logInfo(LOG_TAG, logBuilder)
+    }
+
+    fun e(log: String, throwable: Throwable? = null) {
+        e({ log }, throwable)
+    }
+
+    fun e(logBuilder: () -> String, throwable: Throwable? = null) {
+        logger.logInfo(LOG_TAG, logBuilder)
+    }
+
+    fun c(log: String, throwable: Throwable? = null) {
+        c({ log }, throwable)
+    }
+
+    fun c(logBuilder: () -> String, throwable: Throwable? = null) {
+        logger.logInfo(LOG_TAG, logBuilder)
+    }
+
 
     companion object {
         private const val LOG_TAG = "AlgorigoBle2"
-        private val NOT_LOG = { _: String -> }
-        private val NOT_LOG_THR = { _: String, _: Throwable? -> }
     }
 }

@@ -10,7 +10,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
-import android.util.Log
 import com.algorigo.algorigoble2.*
 import com.algorigo.algorigoble2.logging.Logging
 import com.algorigo.algorigoble2.rx_util.collectList
@@ -115,9 +114,9 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
             return device
         }
 
-        Log.e("!!!", "getDevice:$macAddress")
+        logging.d("getDevice:$macAddress")
         val bluetoothDevice = bluetoothAdapter.getRemoteDevice(macAddress)
-        Log.e("!!!", "bluetoothDevice:${bluetoothDevice.name}")
+        logging.d("bluetoothDevice:${bluetoothDevice.name}")
         return createBleDevice(bluetoothDevice, clazz)
     }
 
@@ -133,7 +132,7 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
         }
             ?.also { device ->
                 deviceMap[bluetoothDevice] = device
-                device.initEngine(BleDeviceEngineImpl(context, bluetoothDevice, logging))
+                device.initEngine(BleDeviceEngineImpl(context, bluetoothDevice, logging), logging)
                 device.getConnectionStateObservable()
                     .subscribe({
                         connectionStateRelay.accept(Pair(device, it))
