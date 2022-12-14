@@ -105,7 +105,7 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
     override fun getConnectedDevices(): List<BleDevice> {
         return bluetoothManager.getConnectedDevices(BluetoothProfile.GATT).mapNotNull {
             getBleDevice(it)
-        }
+        } + deviceMap.values.filter { it.connectionState == BleDevice.ConnectionState.SPP_CONNECTED }
     }
 
     override fun <T : BleDevice> getDevice(macAddress: String, clazz: Class<T>?): BleDevice? {
