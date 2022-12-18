@@ -1,5 +1,6 @@
 package com.algorigo.algorigoble2
 
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.os.Build
@@ -161,6 +162,7 @@ class BleScanFilter private constructor(
         }
     }
 
+    @SuppressLint("MissingPermission")
     fun isOk(device: BluetoothDevice, rssi: Int, scanRecord: ByteArray?): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             // bluetoothAdapter.bluetoothLeScanner.startScan contains name, address filter
