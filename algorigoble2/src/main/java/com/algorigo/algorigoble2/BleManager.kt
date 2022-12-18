@@ -9,9 +9,9 @@ import com.algorigo.algorigoble2.logging.Logging
 
 class BleManager(context: Context, delegate: BleDeviceDelegate = defaultBleDeviceDelegate, engine: Engine = Engine.ALGORIGO_BLE, logger: Logger? = null) {
 
-    class BleNotAvailableException: Exception()
-    class BondFailedException: Exception()
-    class DisconnectedException: Exception()
+    class BleNotAvailableException : Exception()
+    class BondFailedException : Exception()
+    class DisconnectedException : Exception()
 
     enum class Engine {
 //        RX_ANDROID_BLE,
@@ -23,7 +23,9 @@ class BleManager(context: Context, delegate: BleDeviceDelegate = defaultBleDevic
         abstract fun createBleDevice(bluetoothDevice: BluetoothDevice): BleDevice?
 
         fun getBleScanSettings(): BleScanSettings {
-            return BleScanSettings.Builder().build()
+            return BleScanSettings
+                .Builder()
+                .build()
         }
 
         fun getBleScanFilters(): Array<BleScanFilter> {
