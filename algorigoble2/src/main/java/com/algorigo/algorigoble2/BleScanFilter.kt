@@ -185,4 +185,14 @@ class BleScanFilter private constructor(
         }
         return true
     }
+
+    fun isOk(name: String?, macAddress: String): Boolean {
+        if (this.name != null && this.name != name) {
+            return false
+        }
+        if (deviceAddress != null && deviceAddress != macAddress) {
+            return false
+        }
+        return true
+    }
 }

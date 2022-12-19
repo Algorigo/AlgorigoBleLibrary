@@ -1,6 +1,5 @@
 package com.algorigo.algorigoblelibrary
 
-import android.bluetooth.BluetoothGattCharacteristic
 import android.graphics.Color
 import android.view.LayoutInflater
 import android.view.View
@@ -9,7 +8,8 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import androidx.recyclerview.widget.RecyclerView
-import java.util.UUID
+import com.algorigo.algorigoble2.BleCharacterisic
+import java.util.*
 
 class CharacteristicAdapter(private val callback: DeviceActivity) : RecyclerView.Adapter<CharacteristicAdapter.CharacteristicViewHolder>() {
 
@@ -28,20 +28,19 @@ class CharacteristicAdapter(private val callback: DeviceActivity) : RecyclerView
         private val writeCharacteristicBtn: Button = itemView.findViewById(R.id.write_characteristic_btn)
         private val notifyBtn: Button = itemView.findViewById(R.id.notify_btn)
 
-        fun setCharacteristic(index: Int, characteristic: BluetoothGattCharacteristic) {
+        fun setCharacteristic(index: Int, characteristic: BleCharacterisic) {
             itemView.setBackgroundColor(getColor(index))
 
             uuidEditText.setText(characteristic.uuid.toString())
-            readCharacteristicBtn.visibility = if (characteristic.properties and BluetoothGattCharacteristic.PROPERTY_READ != 0) View.VISIBLE else View.GONE
-            if (characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE != 0 ||
-                characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0) {
+            readCharacteristicBtn.visibility = if (characteristic.isReadable()) View.VISIBLE else View.GONE
+            if (characteristic.isWritable()) {
                 writeCharacteristicLayout.visibility = View.VISIBLE
                 writeCharacteristicBtn.visibility = View.VISIBLE
             } else {
                 writeCharacteristicLayout.visibility = View.GONE
                 writeCharacteristicBtn.visibility = View.GONE
             }
-            notifyBtn.visibility = if (characteristic.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0 || characteristic.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0) View.VISIBLE else View.GONE
+            notifyBtn.visibility = if (characteristic.isNotifyAvailable()) View.VISIBLE else View.GONE
 
             readCharacteristicBtn.setOnClickListener {
                 callback.onReadCharacteristicBtn(characteristic.uuid)
@@ -56,7 +55,7 @@ class CharacteristicAdapter(private val callback: DeviceActivity) : RecyclerView
         }
     }
 
-    var characteristics = mutableListOf<BluetoothGattCharacteristic>()
+    var characteristics = mutableListOf<BleCharacterisic>()
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CharacteristicViewHolder {
         return LayoutInflater.from(parent.context).inflate(R.layout.item_characteristic, parent, false).let {

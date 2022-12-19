@@ -24,7 +24,7 @@ internal abstract class BleDeviceEngine(protected val logging: Logging) {
 
     abstract fun disconnect()
 
-    abstract fun getCharacteristicsSingle(): Single<List<BluetoothGattCharacteristic>>
+    abstract fun getCharacteristicsSingle(): Single<List<BleCharacterisic>>
 
     abstract fun readCharacteristicSingle(characteristicUuid: UUID): Single<ByteArray>
     abstract fun writeCharacteristicSingle(characteristicUuid: UUID, byteArray: ByteArray): Single<ByteArray>

@@ -13,6 +13,8 @@ import android.os.Build
 import com.algorigo.algorigoble2.*
 import com.algorigo.algorigoble2.logging.Logging
 import com.algorigo.algorigoble2.rx_util.collectList
+import com.algorigo.algorigoble2.virtual.VirtualDevice
+import com.algorigo.algorigoble2.virtual.VirtualDeviceEngine
 import com.jakewharton.rxrelay3.BehaviorRelay
 import io.reactivex.rxjava3.core.Observable
 import java.util.*
@@ -138,5 +140,15 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
                         connectionStateRelay.accept(Pair(device, it))
                     }, {})
             }
+    }
+
+    override fun initVirtualDevice(virtualDevice: VirtualDevice, bleDevice: BleDevice): BleDevice {
+        return bleDevice.also { device ->
+            device.initEngine(VirtualDeviceEngine(virtualDevice, logging), logging)
+            device.getConnectionStateObservable()
+                .subscribe({
+                    connectionStateRelay.accept(Pair(device, it))
+                }, {})
+        }
     }
 }

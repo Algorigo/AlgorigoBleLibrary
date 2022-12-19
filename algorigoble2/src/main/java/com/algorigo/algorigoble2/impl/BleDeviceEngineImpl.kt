@@ -1,9 +1,16 @@
 package com.algorigo.algorigoble2.impl
 
 import android.annotation.SuppressLint
-import android.bluetooth.*
+import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothGatt
+import android.bluetooth.BluetoothGattCallback
+import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothGattDescriptor
+import android.bluetooth.BluetoothGattService
+import android.bluetooth.BluetoothProfile
 import android.content.Context
 import android.util.Log
+import com.algorigo.algorigoble2.BleCharacterisic
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleDeviceEngine
 import com.algorigo.algorigoble2.BleManager
@@ -17,7 +24,7 @@ import io.reactivex.rxjava3.core.Flowable
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Single
 import io.reactivex.rxjava3.schedulers.Schedulers
-import java.util.UUID
+import java.util.*
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 
@@ -277,10 +284,13 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
         }
     }
 
-    override fun getCharacteristicsSingle(): Single<List<BluetoothGattCharacteristic>> {
+    override fun getCharacteristicsSingle(): Single<List<BleCharacterisic>> {
         return getServices()
             .map { services ->
                 services.map { it.characteristics }.flatten()
+            }
+            .map {
+                it.map { BleCharacteristicImpl(it) }
             }
     }
 
