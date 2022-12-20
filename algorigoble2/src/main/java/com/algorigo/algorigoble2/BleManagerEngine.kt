@@ -1,6 +1,7 @@
 package com.algorigo.algorigoble2
 
 import com.algorigo.algorigoble2.logging.Logging
+import com.algorigo.algorigoble2.virtual.VirtualDevice
 import com.jakewharton.rxrelay3.PublishRelay
 import io.reactivex.rxjava3.core.Observable
 
@@ -9,11 +10,11 @@ internal abstract class BleManagerEngine(protected val bleDeviceDelegate: BleMan
     protected val connectionStateRelay = PublishRelay.create<Pair<BleDevice, BleDevice.ConnectionState>>()
 
     abstract fun scanObservable(scanSettings: BleScanSettings, vararg scanFilters: BleScanFilter): Observable<List<BleDevice>>
-    fun scanObservable() = scanObservable(bleDeviceDelegate.getBleScanSettings(), *bleDeviceDelegate.getBleScanFilters())
 
     abstract fun getDevices(): Collection<BleDevice>
     abstract fun getBondedDevices(): List<BleDevice>
     abstract fun getConnectedDevices(): List<BleDevice>
+    abstract fun initVirtualDevice(deviceId: VirtualDevice, bleDevice: BleDevice): BleDevice
 
     open fun <T : BleDevice> getDevice(macAddress: String, clazz: Class<T>? = null): BleDevice? {
         return getDevices()
