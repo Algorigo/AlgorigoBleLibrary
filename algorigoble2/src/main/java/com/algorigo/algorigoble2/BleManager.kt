@@ -69,7 +69,7 @@ class BleManager(
 
     fun scanObservable(scanSettings: BleScanSettings, vararg scanFilters: BleScanFilter): Observable<List<BleDevice>> {
         val virtuals = virtualDevices.values.filter { device ->
-            scanFilters.size == 0 ||
+            scanFilters.isEmpty() ||
                     scanFilters.firstOrNull { it.isOk(device.deviceName, device.deviceId) } != null
         }
         return engine.scanObservable(scanSettings, *scanFilters)
