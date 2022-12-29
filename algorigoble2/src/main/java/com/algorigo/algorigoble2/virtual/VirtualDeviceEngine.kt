@@ -1,6 +1,5 @@
 package com.algorigo.algorigoble2.virtual
 
-import android.bluetooth.BluetoothGattCharacteristic
 import com.algorigo.algorigoble2.BleCharacterisic
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleDeviceEngine
@@ -34,7 +33,7 @@ internal class VirtualDeviceEngine(private val virtualDevice: VirtualDevice, log
             .doOnSubscribe {
                 virtualDevice.connectionStateRelay.accept(BleDevice.ConnectionState.CONNECTING)
             }
-            .doFinally {
+            .doOnComplete {
                 virtualDevice.connectionStateRelay.accept(BleDevice.ConnectionState.CONNECTED)
             }
     }
@@ -48,11 +47,11 @@ internal class VirtualDeviceEngine(private val virtualDevice: VirtualDevice, log
     }
 
     override fun readCharacteristicSingle(characteristicUuid: UUID): Single<ByteArray> {
-        return virtualDevice.readCharacteristicSingle(characteristicUuid)
+        return virtualDevice.readCharacteristicSingleExternal(characteristicUuid)
     }
 
     override fun writeCharacteristicSingle(characteristicUuid: UUID, byteArray: ByteArray): Single<ByteArray> {
-        return virtualDevice.writeCharacteristicSingle(characteristicUuid, byteArray)
+        return virtualDevice.writeCharacteristicSingleExternal(characteristicUuid, byteArray)
     }
 
     override fun setupNotification(type: BleDevice.NotificationType, characteristicUuid: UUID): Observable<Observable<ByteArray>> {
