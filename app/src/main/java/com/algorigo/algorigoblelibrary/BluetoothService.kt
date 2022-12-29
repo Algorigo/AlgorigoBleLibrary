@@ -4,6 +4,7 @@ import android.app.Service
 import android.content.Intent
 import android.os.Binder
 import android.os.IBinder
+import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleManager
 
 class BluetoothService : Service() {
@@ -18,7 +19,12 @@ class BluetoothService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        bleManager = BleManager(applicationContext)
+        bleManager = BleManager(
+            applicationContext,
+            virtualDevices = arrayOf(
+                VirtualBleDevice() to BleDevice(),
+            )
+        )
     }
 
     override fun onBind(intent: Intent): IBinder {
