@@ -117,7 +117,12 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
         }
 
         logging.d("getDevice:$macAddress")
-        val bluetoothDevice = bluetoothAdapter.getRemoteDevice(macAddress)
+        val bluetoothDevice = try {
+            bluetoothAdapter.getRemoteDevice(macAddress)
+        } catch (e: Exception) {
+            logging.e("getRemoteDevice error", e)
+            return null
+        }
         logging.d("bluetoothDevice:${bluetoothDevice.name}")
         return createBleDevice(bluetoothDevice, clazz)
     }
