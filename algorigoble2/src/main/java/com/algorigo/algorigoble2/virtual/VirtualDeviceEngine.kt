@@ -33,7 +33,7 @@ internal class VirtualDeviceEngine(private val virtualDevice: VirtualDevice, log
             .doOnSubscribe {
                 virtualDevice.connectionStateRelay.accept(BleDevice.ConnectionState.CONNECTING)
             }
-            .doFinally {
+            .doOnComplete {
                 virtualDevice.connectionStateRelay.accept(BleDevice.ConnectionState.CONNECTED)
             }
     }
