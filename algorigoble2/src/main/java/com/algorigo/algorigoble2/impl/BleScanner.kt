@@ -1,5 +1,6 @@
 package com.algorigo.algorigoble2.impl
 
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.le.ScanCallback
@@ -61,6 +62,7 @@ internal class BleScanner private constructor(private val bluetoothAdapter: Blue
             }
     }
 
+    @SuppressLint("MissingPermission")
     private fun startScan(scanCallback: ScanCallback, bleScanSettings: BleScanSettings, vararg bleScanFilters: BleScanFilter) {
         bluetoothAdapter.bluetoothLeScanner.startScan(
             BleScanOptionsConverter.convertScanFilters(bleScanFilters),
@@ -69,6 +71,7 @@ internal class BleScanner private constructor(private val bluetoothAdapter: Blue
         )
     }
 
+    @SuppressLint("MissingPermission")
     private fun stopScan(scanCallback: ScanCallback) {
         bluetoothAdapter.bluetoothLeScanner.stopScan(scanCallback)
     }
