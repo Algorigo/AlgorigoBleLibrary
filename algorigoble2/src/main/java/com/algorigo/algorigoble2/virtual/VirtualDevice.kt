@@ -24,7 +24,7 @@ abstract class VirtualDevice(
     private val notificationRelay = PublishRelay.create<Pair<UUID, ByteArray>>()
     private val notificationCountMap = mutableMapOf<UUID, Int>()
 
-    fun readCharacteristicSingleExternal(characteristicUuid: UUID) = connectionStateRelay
+    fun readCharacteristicSingleExternal(characteristicUuid: UUID): Single<ByteArray> = connectionStateRelay
         .firstOrError()
         .flatMap {
             if (it == BleDevice.ConnectionState.CONNECTED) {
@@ -34,7 +34,7 @@ abstract class VirtualDevice(
             }
         }
 
-    fun writeCharacteristicSingleExternal(characteristicUuid: UUID, byteArray: ByteArray) = connectionStateRelay
+    fun writeCharacteristicSingleExternal(characteristicUuid: UUID, byteArray: ByteArray): Single<ByteArray> = connectionStateRelay
         .firstOrError()
         .flatMap {
             if (it == BleDevice.ConnectionState.CONNECTED) {
@@ -44,7 +44,7 @@ abstract class VirtualDevice(
             }
         }
 
-    fun setupNotification(type: BleDevice.NotificationType, characteristicUuid: UUID) = connectionStateRelay
+    fun setupNotification(type: BleDevice.NotificationType, characteristicUuid: UUID): Observable<Observable<ByteArray>> = connectionStateRelay
         .switchMap {
             if (it == BleDevice.ConnectionState.CONNECTED) {
                 Observable.create<Observable<ByteArray>> {
