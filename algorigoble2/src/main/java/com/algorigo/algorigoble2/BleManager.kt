@@ -62,7 +62,7 @@ class BleManager(
         this.virtualDevices = virtualDevices.associate {
             Pair(
                 it.first.deviceId,
-                this.engine.initVirtualDevice(it.first, it.second)
+                this.engine.initVirtualDevice(it.first, it.second.apply { virtual = true })
             )
         }
     }

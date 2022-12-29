@@ -44,6 +44,9 @@ open class BleDevice {
     val connectionState: ConnectionState
         get() = getConnectionStateObservable().blockingFirst()
 
+    var virtual = false
+        internal set
+
     fun bondCompletable() = engine.bondCompletable()
 
     open fun getConnectionStateObservable() = engine.getConnectionStateObservable()
