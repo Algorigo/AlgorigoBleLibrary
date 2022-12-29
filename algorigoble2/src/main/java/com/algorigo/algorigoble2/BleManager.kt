@@ -62,7 +62,7 @@ class BleManager(
         this.virtualDevices = virtualDevices.associate {
             Pair(
                 it.first.deviceId,
-                this.engine.initVirtualDevice(it.first, it.second)
+                this.engine.initVirtualDevice(it.first, it.second.apply { virtual = true })
             )
         }
     }
@@ -83,14 +83,26 @@ class BleManager(
     fun scanObservable(): Observable<List<BleDevice>> {
         return scanObservable(delegate.getBleScanSettings(), *delegate.getBleScanFilters())
     }
-    fun getDevice(macAddress: String) = engine.getDevice<BleDevice>(macAddress)
-    fun <T : BleDevice> getDevice(macAddress: String, clazz: Class<T>): T? {
-        return engine.getDevice(macAddress, clazz) as? T
+    fun getDevice(macAddress: String) = getDeviceInner<BleDevice>(macAddress)
+    fun <T : BleDevice> getDevice(macAddress: String, clazz: Class<T>) = getDeviceInner(macAddress, clazz)
+    private fun <T : BleDevice> getDeviceInner(macAddress: String, clazz: Class<T>? = null): T? {
+        return (engine.getDevice(macAddress, clazz) as? T)
+            ?: virtualDevices[macAddress] as? T
     }
     fun getBondedDevice(macAddress: String) = engine.getBondedDevice(macAddress)
     fun getBondedDevices() = engine.getBondedDevices()
-    fun getConnectedDevice(macAddress: String) = engine.getConnectedDevice(macAddress)
-    fun getConnectedDevices() = engine.getConnectedDevices()
+    fun getConnectedDevice(macAddress: String): BleDevice? {
+        return engine.getConnectedDevice(macAddress)
+            ?: virtualDevices[macAddress]?.let { if (it.connected) it else null }
+    }
+    fun getConnectedDevices(): List<BleDevice> {
+        return engine.getConnectedDevices()
+            .let { devices ->
+                virtualDevices.values.filter { virtual ->
+                    devices.none { it.deviceId == virtual.deviceId }
+                }
+            }
+    }
     fun getConnectionStateObservable() = engine.getConnectionStateObservable()
 
     companion object {

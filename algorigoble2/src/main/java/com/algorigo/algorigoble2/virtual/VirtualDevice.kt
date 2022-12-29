@@ -4,9 +4,12 @@ import com.algorigo.algorigoble2.BleCharacterisic
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleManager
 import com.jakewharton.rxrelay3.BehaviorRelay
+import com.jakewharton.rxrelay3.PublishRelay
+import com.jakewharton.rxrelay3.Relay
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Single
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 
 abstract class VirtualDevice(
     val deviceId: String,
@@ -18,38 +21,68 @@ abstract class VirtualDevice(
         accept(BleDevice.ConnectionState.DISCONNECTED)
     }
 
-    fun readCharacteristicSingle(characteristicUuid: UUID) = connectionStateRelay
+    private val notificationRelay = PublishRelay.create<Pair<UUID, ByteArray>>()
+    private val notificationCountMap = mutableMapOf<UUID, Int>()
+
+    fun readCharacteristicSingleExternal(characteristicUuid: UUID): Single<ByteArray> = connectionStateRelay
         .firstOrError()
         .flatMap {
             if (it == BleDevice.ConnectionState.CONNECTED) {
-                readCharacteristicSingleInner(characteristicUuid)
+                readCharacteristicSingle(characteristicUuid)
             } else {
                 Single.error(BleManager.DisconnectedException())
             }
         }
 
-    fun writeCharacteristicSingle(characteristicUuid: UUID, byteArray: ByteArray) = connectionStateRelay
+    fun writeCharacteristicSingleExternal(characteristicUuid: UUID, byteArray: ByteArray): Single<ByteArray> = connectionStateRelay
         .firstOrError()
         .flatMap {
             if (it == BleDevice.ConnectionState.CONNECTED) {
-                writeCharacteristicSingleInner(characteristicUuid, byteArray)
+                writeCharacteristicSingle(characteristicUuid, byteArray)
             } else {
                 Single.error(BleManager.DisconnectedException())
             }
         }
 
-    fun setupNotification(type: BleDevice.NotificationType, characteristicUuid: UUID) = connectionStateRelay
+    fun setupNotification(type: BleDevice.NotificationType, characteristicUuid: UUID): Observable<Observable<ByteArray>> = connectionStateRelay
         .switchMap {
             if (it == BleDevice.ConnectionState.CONNECTED) {
-                setupNotificationInner(type, characteristicUuid)
+                Observable.create<Observable<ByteArray>> {
+                    it.onNext(
+                        notificationRelay
+                            .filter { it.first == characteristicUuid }
+                            .map { it.second }
+                    )
+                }
             } else {
                 Observable.error(BleManager.DisconnectedException())
             }
         }
+        .doOnSubscribe {
+            ((notificationCountMap[characteristicUuid] ?: 0) + 1).also {
+                notificationCountMap[characteristicUuid] = it
+                if (it == 1) {
+                    onNotificationStarted(type, characteristicUuid)
+                }
+            }
+        }
+        .doFinally {
+            (notificationCountMap[characteristicUuid]!! - 1).also {
+                notificationCountMap[characteristicUuid] = it
+                if (it == 0) {
+                    onNotificationStop(characteristicUuid)
+                }
+            }
+        }
+
+    protected fun notifyByteArray(characteristicUuid: UUID, byteArray: ByteArray) {
+        notificationRelay.accept(Pair(characteristicUuid, byteArray))
+    }
 
     abstract fun getCharacteristicsSingle(): Single<List<BleCharacterisic>>
-    abstract fun readCharacteristicSingleInner(characteristicUuid: UUID): Single<ByteArray>
-    abstract fun writeCharacteristicSingleInner(characteristicUuid: UUID, byteArray: ByteArray): Single<ByteArray>
-    abstract fun setupNotificationInner(type: BleDevice.NotificationType, characteristicUuid: UUID): Observable<Observable<ByteArray>>
+    abstract fun readCharacteristicSingle(characteristicUuid: UUID): Single<ByteArray>
+    abstract fun writeCharacteristicSingle(characteristicUuid: UUID, byteArray: ByteArray): Single<ByteArray>
+    abstract fun onNotificationStarted(type: BleDevice.NotificationType, characteristicUuid: UUID)
+    abstract fun onNotificationStop(characteristicUuid: UUID)
 
 }
