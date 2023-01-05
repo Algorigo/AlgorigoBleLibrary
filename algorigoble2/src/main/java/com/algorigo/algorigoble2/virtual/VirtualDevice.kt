@@ -5,11 +5,9 @@ import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleManager
 import com.jakewharton.rxrelay3.BehaviorRelay
 import com.jakewharton.rxrelay3.PublishRelay
-import com.jakewharton.rxrelay3.Relay
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Single
 import java.util.*
-import java.util.concurrent.ConcurrentHashMap
 
 abstract class VirtualDevice(
     val deviceId: String,
