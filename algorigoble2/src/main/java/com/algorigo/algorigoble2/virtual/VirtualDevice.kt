@@ -5,11 +5,9 @@ import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleManager
 import com.jakewharton.rxrelay3.BehaviorRelay
 import com.jakewharton.rxrelay3.PublishRelay
-import com.jakewharton.rxrelay3.Relay
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Single
 import java.util.*
-import java.util.concurrent.ConcurrentHashMap
 
 abstract class VirtualDevice(
     val deviceId: String,
@@ -76,7 +74,9 @@ abstract class VirtualDevice(
         }
 
     protected fun notifyByteArray(characteristicUuid: UUID, byteArray: ByteArray) {
-        notificationRelay.accept(Pair(characteristicUuid, byteArray))
+        Thread {
+            notificationRelay.accept(Pair(characteristicUuid, byteArray))
+        }.start()
     }
 
     abstract fun getCharacteristicsSingle(): Single<List<BleCharacterisic>>

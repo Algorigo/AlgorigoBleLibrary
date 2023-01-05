@@ -21,7 +21,7 @@ internal class VirtualDeviceEngine(private val virtualDevice: VirtualDevice, log
         get() = false
 
     override fun bondCompletable(): Completable {
-        return Completable.error(RuntimeException("Virtual device cannot be bonded"))
+        return Completable.complete()
     }
 
     override fun getConnectionStateObservable(): Observable<BleDevice.ConnectionState> {
