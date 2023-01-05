@@ -99,7 +99,7 @@ class BleManager(
         return engine.getConnectedDevices()
             .let { devices ->
                 virtualDevices.values.filter { virtual ->
-                    devices.none { it.deviceId == virtual.deviceId }
+                    devices.none { it.deviceId == virtual.deviceId && virtual.connected }
                 }
             }
     }
