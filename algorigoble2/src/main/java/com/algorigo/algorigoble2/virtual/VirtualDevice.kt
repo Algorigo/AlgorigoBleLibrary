@@ -76,7 +76,9 @@ abstract class VirtualDevice(
         }
 
     protected fun notifyByteArray(characteristicUuid: UUID, byteArray: ByteArray) {
-        notificationRelay.accept(Pair(characteristicUuid, byteArray))
+        Thread {
+            notificationRelay.accept(Pair(characteristicUuid, byteArray))
+        }.start()
     }
 
     abstract fun getCharacteristicsSingle(): Single<List<BleCharacterisic>>

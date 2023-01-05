@@ -90,7 +90,13 @@ class BleManager(
             ?: virtualDevices[macAddress] as? T
     }
     fun getBondedDevice(macAddress: String) = engine.getBondedDevice(macAddress)
+        ?: virtualDevices[macAddress]
     fun getBondedDevices() = engine.getBondedDevices()
+        .let { devices ->
+            virtualDevices.values.filter { virtual ->
+                devices.none { it.deviceId == virtual.deviceId }
+            }
+        }
     fun getConnectedDevice(macAddress: String): BleDevice? {
         return engine.getConnectedDevice(macAddress)
             ?: virtualDevices[macAddress]?.let { if (it.connected) it else null }
