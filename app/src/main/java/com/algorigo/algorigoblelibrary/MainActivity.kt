@@ -177,11 +177,10 @@ class MainActivity : RequestPermissionActivity() {
                         manager.scanObservable(
                             BleScanSettings.Builder().build(),
                             BleScanFilter.Builder().build()
-                        ),
-                        { connected, bonded, scanned ->
-                            connected + bonded + scanned
-                        }
-                    )
+                        )
+                    ) { connected, bonded, scanned ->
+                        connected + bonded + scanned.map { it.first }
+                    }
 //                        .map { devices ->
 //                            val pattern = Pattern.compile("Algo")
 //                            devices.filter { device ->

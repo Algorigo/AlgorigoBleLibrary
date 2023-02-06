@@ -9,7 +9,7 @@ internal abstract class BleManagerEngine(protected val bleDeviceDelegate: BleMan
 
     protected val connectionStateRelay = PublishRelay.create<Pair<BleDevice, BleDevice.ConnectionState>>()
 
-    abstract fun scanObservable(scanSettings: BleScanSettings, vararg scanFilters: BleScanFilter): Observable<List<BleDevice>>
+    abstract fun scanObservable(scanSettings: BleScanSettings, vararg scanFilters: BleScanFilter): Observable<List<Pair<BleDevice, ScanInfo>>>
 
     abstract fun getDevices(): Collection<BleDevice>
     abstract fun getBondedDevices(): List<BleDevice>
