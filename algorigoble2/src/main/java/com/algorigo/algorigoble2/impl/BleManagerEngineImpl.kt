@@ -12,7 +12,7 @@ import android.content.IntentFilter
 import android.os.Build
 import com.algorigo.algorigoble2.*
 import com.algorigo.algorigoble2.logging.Logging
-import com.algorigo.algorigoble2.rx_util.collectList
+import com.algorigo.algorigoble2.rx_util.collectListLastSortedIndex
 import com.algorigo.algorigoble2.virtual.VirtualDevice
 import com.algorigo.algorigoble2.virtual.VirtualDeviceEngine
 import com.jakewharton.rxrelay3.BehaviorRelay
@@ -77,7 +77,6 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
                 Observable.just(listOf<Pair<BleDevice, ScanInfo>>())
                     .concatWith(
                         BleScanner.scanObservable(bluetoothAdapter, scanSettings, *scanFilters)
-                            .distinct { it.device.address }
                             .run {
                                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                                     mapOptional { scanResult ->
@@ -93,7 +92,9 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
                                         .map { it[0]!! }
                                 }
                             }
-                            .collectList()
+                            .collectListLastSortedIndex {
+                                it.first.deviceId
+                            }
                     )
             }
     }
