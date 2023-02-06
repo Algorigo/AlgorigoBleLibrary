@@ -1,6 +1,7 @@
 package com.algorigo.algorigoblelibrary
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.content.Intent
 import android.os.Build
@@ -164,6 +165,7 @@ class MainActivity : RequestPermissionActivity() {
         }
     }
 
+    @SuppressLint("MissingPermission")
     private fun startScan() {
         disposable = requestPermissionCompletable(getPermissions(), true)
             .andThen(Rx2ServiceBindingFactory.bind<BluetoothService.BluetoothBinder>(this, Intent(this, BluetoothService::class.java)))
