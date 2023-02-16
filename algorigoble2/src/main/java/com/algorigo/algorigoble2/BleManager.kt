@@ -67,7 +67,7 @@ class BleManager(
         }
     }
 
-    fun scanObservable(scanSettings: BleScanSettings, vararg scanFilters: BleScanFilter): Observable<List<BleDevice>> {
+    fun scanObservable(scanSettings: BleScanSettings, vararg scanFilters: BleScanFilter): Observable<List<Pair<BleDevice, ScanInfo>>> {
         val virtuals = virtualDevices.values.filter { device ->
             scanFilters.isEmpty() ||
                     scanFilters.firstOrNull { it.isOk(device.deviceName, device.deviceId) } != null
@@ -75,12 +75,14 @@ class BleManager(
         return engine.scanObservable(scanSettings, *scanFilters)
             .map { devices ->
                 devices + virtuals.filter { virtual ->
-                    devices.firstOrNull { it.deviceId == virtual.deviceId } == null
+                    devices.firstOrNull { it.first.deviceId == virtual.deviceId } == null
+                }.map {
+                    Pair(it, ScanInfo(0))
                 }
             }
     }
 
-    fun scanObservable(): Observable<List<BleDevice>> {
+    fun scanObservable(): Observable<List<Pair<BleDevice, ScanInfo>>> {
         return scanObservable(delegate.getBleScanSettings(), *delegate.getBleScanFilters())
     }
     fun getDevice(macAddress: String) = getDeviceInner<BleDevice>(macAddress)

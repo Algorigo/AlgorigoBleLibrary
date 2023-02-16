@@ -2,7 +2,6 @@ package com.algorigo.algorigoble2.impl
 
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothDevice
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import com.algorigo.algorigoble2.BleScanFilter
@@ -17,11 +16,12 @@ import io.reactivex.rxjava3.subjects.PublishSubject
 internal class BleScanner private constructor(private val bluetoothAdapter: BluetoothAdapter){
 
     private inner class BleScanCallback(val scanFilters: Array<out BleScanFilter>) : ScanCallback() {
+        @SuppressLint("MissingPermission")
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
             super.onScanResult(callbackType, result)
             result?.let {
                 if (isOk(it)) {
-                    scanSubject.onNext(it.device)
+                    scanSubject.onNext(it)
                 }
             }
         }
@@ -31,7 +31,7 @@ internal class BleScanner private constructor(private val bluetoothAdapter: Blue
             results?.let { scanResults ->
                 scanResults.forEach {
                     if (isOk(it)) {
-                        scanSubject.onNext(it.device)
+                        scanSubject.onNext(it)
                     }
                 }
             }
@@ -49,9 +49,9 @@ internal class BleScanner private constructor(private val bluetoothAdapter: Blue
         }
     }
 
-    private val scanSubject = PublishSubject.create<BluetoothDevice>()
+    private val scanSubject = PublishSubject.create<ScanResult>()
 
-    private fun startScanObservable(scanSettings: BleScanSettings, vararg scanFilters: BleScanFilter): Observable<BluetoothDevice> {
+    private fun startScanObservable(scanSettings: BleScanSettings, vararg scanFilters: BleScanFilter): Observable<ScanResult> {
         val scanCallback = BleScanCallback(scanFilters)
         return scanSubject
             .doOnSubscribe {
@@ -77,7 +77,7 @@ internal class BleScanner private constructor(private val bluetoothAdapter: Blue
     }
 
     companion object {
-        internal fun scanObservable(bluetoothAdapter: BluetoothAdapter, bleScanSettings: BleScanSettings, vararg bleScanFilters: BleScanFilter): Observable<BluetoothDevice> {
+        internal fun scanObservable(bluetoothAdapter: BluetoothAdapter, bleScanSettings: BleScanSettings, vararg bleScanFilters: BleScanFilter): Observable<ScanResult> {
             return BleScanner(bluetoothAdapter)
                 .startScanObservable(bleScanSettings, *bleScanFilters)
         }

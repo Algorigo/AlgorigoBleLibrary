@@ -7,6 +7,7 @@ import android.widget.Button
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.algorigo.algorigoble2.BleDevice
+import com.algorigo.algorigoble2.ScanInfo
 
 class BleRecyclerAdapter(private val bleRecyclerListener: BleRecyclerListener) : RecyclerView.Adapter<BleRecyclerAdapter.BleRecyclerViewHolder>() {
 
@@ -20,34 +21,35 @@ class BleRecyclerAdapter(private val bleRecyclerListener: BleRecyclerListener) :
     inner class BleRecyclerViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
 
         private val titleView: TextView = itemView.findViewById(R.id.title_view)
+        private val rssiView: TextView = itemView.findViewById(R.id.rssi_view)
         private val bindBtn: Button = itemView.findViewById(R.id.bond_btn)
         private val connectBtn: Button = itemView.findViewById(R.id.connect_btn)
         private val connectSppBtn: Button = itemView.findViewById(R.id.connect_spp_btn)
 
         init {
             itemView.setOnClickListener {
-                bleDeviceList?.get(adapterPosition)?.let {
-                    bleRecyclerListener.onSelect(it)
+                bleDeviceList.get(adapterPosition).let {
+                    bleRecyclerListener.onSelect(it.first)
                 }
             }
             bindBtn.setOnClickListener {
-                bleDeviceList?.get(adapterPosition)?.let {
-                    bleRecyclerListener.onBindButton(it)
+                bleDeviceList.get(adapterPosition).let {
+                    bleRecyclerListener.onBindButton(it.first)
                 }
             }
             connectBtn.setOnClickListener {
-                bleDeviceList?.get(adapterPosition)?.let {
-                    bleRecyclerListener.onConnectButton(it)
+                bleDeviceList.get(adapterPosition).let {
+                    bleRecyclerListener.onConnectButton(it.first)
                 }
             }
             connectSppBtn.setOnClickListener {
-                bleDeviceList?.get(adapterPosition)?.let {
-                    bleRecyclerListener.onConnectSppButton(it)
+                bleDeviceList.get(adapterPosition).let {
+                    bleRecyclerListener.onConnectSppButton(it.first)
                 }
             }
         }
 
-        fun setData(bleDevice: BleDevice?) {
+        fun setData(bleDevice: BleDevice?, scanInfo: ScanInfo?) {
             bleDevice?.let {
                 titleView.text = it.toString()
                 if (it.bonded) {
@@ -75,11 +77,12 @@ class BleRecyclerAdapter(private val bleRecyclerListener: BleRecyclerListener) :
                         connectBtn.setText(R.string.disconnecting)
                     }
                 }
+                rssiView.text = scanInfo?.let { "${it.rssi} dBm" }
             }
         }
     }
 
-    var bleDeviceList: List<BleDevice>? = null
+    var bleDeviceList = listOf<Pair<BleDevice, ScanInfo?>>()
             set(value) {
                 field = value
                 notifyDataSetChanged()
@@ -92,10 +95,12 @@ class BleRecyclerAdapter(private val bleRecyclerListener: BleRecyclerListener) :
     }
 
     override fun getItemCount(): Int {
-        return bleDeviceList?.size ?: 0
+        return bleDeviceList.size
     }
 
     override fun onBindViewHolder(vh: BleRecyclerViewHolder, position: Int) {
-        vh.setData(bleDeviceList?.get(position))
+        bleDeviceList.get(position).also {
+            vh.setData(it.first, it.second)
+        }
     }
 }
