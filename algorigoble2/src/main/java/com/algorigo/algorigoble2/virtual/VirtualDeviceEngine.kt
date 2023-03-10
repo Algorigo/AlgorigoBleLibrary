@@ -24,6 +24,10 @@ internal class VirtualDeviceEngine(private val virtualDevice: VirtualDevice, log
         return Completable.complete()
     }
 
+    override fun unbondCompletable(): Completable {
+        return Completable.complete()
+    }
+
     override fun getConnectionStateObservable(): Observable<BleDevice.ConnectionState> {
         return virtualDevice.connectionStateRelay
     }

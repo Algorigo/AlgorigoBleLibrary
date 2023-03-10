@@ -1,6 +1,7 @@
 package com.algorigo.algorigoblelibrary
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.content.Intent
 import android.os.Build
@@ -13,6 +14,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleScanFilter
 import com.algorigo.algorigoble2.BleScanSettings
+import com.algorigo.algorigoble2.ScanInfo
 import com.algorigo.library.rx.Rx2ServiceBindingFactory
 import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
 import io.reactivex.rxjava3.core.Observable
@@ -164,6 +166,7 @@ class MainActivity : RequestPermissionActivity() {
         }
     }
 
+    @SuppressLint("MissingPermission")
     private fun startScan() {
         disposable = requestPermissionCompletable(getPermissions(), true)
             .andThen(Rx2ServiceBindingFactory.bind<BluetoothService.BluetoothBinder>(this, Intent(this, BluetoothService::class.java)))
@@ -175,11 +178,18 @@ class MainActivity : RequestPermissionActivity() {
                         manager.scanObservable(
                             BleScanSettings.Builder().build(),
                             BleScanFilter.Builder().build()
-                        ),
-                        { connected, bonded, scanned ->
-                            connected + bonded + scanned
-                        }
-                    )
+                        )
+                    ) { connected, bonded, scanned ->
+                        val map = (connected + bonded)
+                            .map { it.deviceId to Pair<BleDevice, ScanInfo?>(it, null) }
+                            .toMap()
+                            .toMutableMap()
+                        map.putAll(scanned
+                            .map { it.first.deviceId to Pair<BleDevice, ScanInfo?>(it.first, it.second) }
+                            .toMap()
+                            .toMutableMap())
+                        map.values.toList()
+                    }
 //                        .map { devices ->
 //                            val pattern = Pattern.compile("Algo")
 //                            devices.filter { device ->
@@ -190,7 +200,7 @@ class MainActivity : RequestPermissionActivity() {
 //                        }
                 }
             }
-            .take(3, TimeUnit.SECONDS)
+            .take(1, TimeUnit.MINUTES)
             .observeOn(AndroidSchedulers.mainThread())
             .doOnSubscribe {
                 disposable = it

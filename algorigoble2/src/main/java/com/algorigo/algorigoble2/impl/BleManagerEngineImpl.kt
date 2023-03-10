@@ -12,7 +12,7 @@ import android.content.IntentFilter
 import android.os.Build
 import com.algorigo.algorigoble2.*
 import com.algorigo.algorigoble2.logging.Logging
-import com.algorigo.algorigoble2.rx_util.collectList
+import com.algorigo.algorigoble2.rx_util.collectListLastSortedIndex
 import com.algorigo.algorigoble2.virtual.VirtualDevice
 import com.algorigo.algorigoble2.virtual.VirtualDeviceEngine
 import com.jakewharton.rxrelay3.BehaviorRelay
@@ -71,25 +71,30 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
     override fun scanObservable(
         scanSettings: BleScanSettings,
         vararg scanFilters: BleScanFilter
-    ): Observable<List<BleDevice>> {
+    ): Observable<List<Pair<BleDevice, ScanInfo>>> {
         return bluetoothStateObservable
             .flatMap {
-                Observable.just(listOf<BleDevice>())
+                Observable.just(listOf<Pair<BleDevice, ScanInfo>>())
                     .concatWith(
                         BleScanner.scanObservable(bluetoothAdapter, scanSettings, *scanFilters)
-                            .distinct { it.address }
                             .run {
                                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                                    mapOptional {
-                                        getBleDevice(it)?.let { Optional.of(it) } ?: Optional.empty()
+                                    mapOptional { scanResult ->
+                                        getBleDevice(scanResult.device)
+                                            ?.let { Optional.of(Pair(it, ScanInfo(scanResult))) }
+                                            ?: Optional.empty()
                                     }
                                 } else {
-                                    map { listOf(getBleDevice(it)) }
+                                    map { scanResult ->
+                                        listOf(getBleDevice(scanResult.device)?.let { Pair(it, ScanInfo(scanResult)) })
+                                    }
                                         .filter { it[0] != null }
                                         .map { it[0]!! }
                                 }
                             }
-                            .collectList()
+                            .collectListLastSortedIndex {
+                                it.first.deviceId
+                            }
                     )
             }
     }
