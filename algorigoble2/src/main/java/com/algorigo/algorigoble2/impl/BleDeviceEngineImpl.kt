@@ -228,6 +228,33 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
         }
     }
 
+    override fun unbondCompletable(): Completable {
+        return Completable.defer {
+            if (bluetoothDevice.bondState == BluetoothDevice.BOND_NONE) {
+                Completable.complete()
+            } else {
+                Observable.interval(1, TimeUnit.SECONDS)
+                    .doOnSubscribe {
+                        if (bluetoothDevice.bondState == BluetoothDevice.BOND_BONDED &&
+                            !bluetoothDevice.deleteBond()) {
+                            throw BleManager.BondFailedException()
+                        }
+                    }
+                    .map {
+                        when (bluetoothDevice.bondState) {
+                            BluetoothDevice.BOND_BONDED -> throw BleManager.BondFailedException()
+                            BluetoothDevice.BOND_BONDING -> false
+                            BluetoothDevice.BOND_NONE -> true
+                            else -> throw IllegalStateException("bond state is wrong:${bluetoothDevice.bondState}")
+                        }
+                    }
+                    .filter { it }
+                    .firstOrError()
+                    .ignoreElement()
+            }
+        }
+    }
+
     override fun getConnectionStateObservable(): Observable<BleDevice.ConnectionState> {
         return stateRelay.map { it.connectionState }
     }
@@ -507,4 +534,8 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
 
 fun ByteArray.toHexString(): String {
     return joinToString(separator = "") { String.format("%02x", it) }
+}
+
+fun BluetoothDevice.deleteBond(): Boolean {
+    return javaClass.getMethod("removeBond").invoke(this) as Boolean
 }
