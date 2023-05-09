@@ -7,6 +7,7 @@ import android.bluetooth.le.ScanResult
 import android.util.Log
 import com.algorigo.algorigoble2.BleScanFilter
 import com.algorigo.algorigoble2.BleScanSettings
+import com.algorigo.algorigoble2.ScanException
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.subjects.PublishSubject
 
@@ -40,7 +41,7 @@ internal class BleScanner private constructor(private val bluetoothAdapter: Blue
 
         override fun onScanFailed(errorCode: Int) {
             super.onScanFailed(errorCode)
-            scanSubject.onError(IllegalStateException("onScanFailed:$errorCode"))
+            scanSubject.onError(ScanException.fromValue(errorCode))
         }
 
         private fun isOk(result: ScanResult): Boolean {
