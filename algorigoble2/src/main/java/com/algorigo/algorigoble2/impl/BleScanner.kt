@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
+import android.util.Log
 import com.algorigo.algorigoble2.BleScanFilter
 import com.algorigo.algorigoble2.BleScanSettings
 import io.reactivex.rxjava3.core.Observable
@@ -64,11 +65,15 @@ internal class BleScanner private constructor(private val bluetoothAdapter: Blue
 
     @SuppressLint("MissingPermission")
     private fun startScan(scanCallback: ScanCallback, bleScanSettings: BleScanSettings, vararg bleScanFilters: BleScanFilter) {
-        bluetoothAdapter.bluetoothLeScanner.startScan(
-            BleScanOptionsConverter.convertScanFilters(bleScanFilters),
-            BleScanOptionsConverter.convertScanSettings(bleScanSettings),
-            scanCallback
-        )
+        try {
+            bluetoothAdapter.bluetoothLeScanner.startScan(
+                BleScanOptionsConverter.convertScanFilters(bleScanFilters),
+                BleScanOptionsConverter.convertScanSettings(bleScanSettings),
+                scanCallback
+            )
+        } catch (e: Exception) {
+            Log.e(LOG_TAG, "ScanException: $e")
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -77,6 +82,9 @@ internal class BleScanner private constructor(private val bluetoothAdapter: Blue
     }
 
     companion object {
+
+        private val LOG_TAG = BleScanner::class.java.simpleName
+
         internal fun scanObservable(bluetoothAdapter: BluetoothAdapter, bleScanSettings: BleScanSettings, vararg bleScanFilters: BleScanFilter): Observable<ScanResult> {
             return BleScanner(bluetoothAdapter)
                 .startScanObservable(bleScanSettings, *bleScanFilters)
