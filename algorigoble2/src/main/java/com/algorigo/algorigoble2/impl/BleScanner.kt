@@ -57,7 +57,9 @@ internal class BleScanner private constructor(private val bluetoothAdapter: Blue
         val scanCallback = BleScanCallback(scanFilters)
         return scanSubject
             .doOnSubscribe {
-                startScan(scanCallback, scanSettings, *scanFilters)
+                startScan(scanCallback, scanSettings, *scanFilters) {
+                    scanSubject.onError(it)
+                }
             }
             .doFinally {
                 stopScan(scanCallback)
@@ -65,7 +67,7 @@ internal class BleScanner private constructor(private val bluetoothAdapter: Blue
     }
 
     @SuppressLint("MissingPermission")
-    private fun startScan(scanCallback: ScanCallback, bleScanSettings: BleScanSettings, vararg bleScanFilters: BleScanFilter) {
+    private fun startScan(scanCallback: ScanCallback, bleScanSettings: BleScanSettings, vararg bleScanFilters: BleScanFilter, onError: ((Exception) -> Unit)? = null) {
         try {
             bluetoothAdapter.bluetoothLeScanner.startScan(
                 BleScanOptionsConverter.convertScanFilters(bleScanFilters),
@@ -74,6 +76,7 @@ internal class BleScanner private constructor(private val bluetoothAdapter: Blue
             )
         } catch (e: Exception) {
             Log.e(LOG_TAG, "ScanException: $e")
+            onError?.invoke(e)
         }
     }
 
