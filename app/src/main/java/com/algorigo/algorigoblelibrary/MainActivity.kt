@@ -10,15 +10,19 @@ import android.util.Log
 import android.widget.Button
 import android.widget.EditText
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.recyclerview.widget.RecyclerView
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleScanFilter
 import com.algorigo.algorigoble2.BleScanSettings
 import com.algorigo.algorigoble2.ScanInfo
+import com.algorigo.algorigoble2.exception.SystemServiceException
 import com.algorigo.library.rx.Rx2ServiceBindingFactory
 import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
+import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.disposables.Disposable
+import io.reactivex.rxjava3.subjects.PublishSubject
 import java.util.concurrent.TimeUnit
 
 class MainActivity : RequestPermissionActivity() {
@@ -77,6 +81,17 @@ class MainActivity : RequestPermissionActivity() {
         }
     })
 
+    private val enableBluetoothRequest =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            if (it.resultCode == RESULT_OK) {
+                bluetoothEnabledSubject.onNext(true)
+            } else {
+                bluetoothEnabledSubject.onNext(false)
+            }
+        }
+
+    private val bluetoothEnabledSubject = PublishSubject.create<Boolean>()
+
     private var disposable: Disposable? = null
     private var connectionStateDisposable: Disposable? = null
 
@@ -118,6 +133,36 @@ class MainActivity : RequestPermissionActivity() {
     override fun onPause() {
         super.onPause()
         connectionStateDisposable?.dispose()
+    }
+
+    private fun requestGPSEnabledObservable(): Observable<Boolean> {
+        return showDialogCompletable(getString(R.string.title_ask_to_enable_gps), getString(R.string.message_ask_to_enable_gps))
+            .andThen(openGPSSettingsAndResultObservable())
+    }
+
+    private fun requestBluetoothEnabled() {
+        val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+        enableBluetoothRequest.launch(enableBtIntent)
+    }
+
+    private fun requestBluetoothEnabledObservable(): Observable<Boolean> {
+        return Completable
+            .fromCallable {
+                requestBluetoothEnabled()
+            }
+            .andThen(bluetoothEnabledSubject)
+            .doOnNext {
+                if (!it) {
+                    error("You must allow the system bluetooth service.")
+                }
+            }
+    }
+
+    private fun requestSystemServicesObservable(): Observable<Boolean> {
+        return requestBluetoothEnabledObservable()
+            .flatMap {
+                requestGPSEnabledObservable()
+            }
     }
 
     private fun initView() {
@@ -190,6 +235,32 @@ class MainActivity : RequestPermissionActivity() {
                             .toMutableMap())
                         map.values.toList()
                     }
+                        .retryWhen { errors ->
+                            errors
+                                .doOnNext {
+                                    Log.e(TAG, "Error in retryWhen, $it")
+                                }
+                                .observeOn(AndroidSchedulers.mainThread())
+                                .flatMap {
+                                    when (it) {
+                                        is SystemServiceException.BluetoothUnavailableException -> {
+                                            requestBluetoothEnabledObservable()
+                                        }
+
+                                        is SystemServiceException.LocationUnavailableException -> {
+                                            requestGPSEnabledObservable()
+                                        }
+
+                                        is SystemServiceException.AllUnavailableException -> {
+                                            requestSystemServicesObservable()
+                                        }
+
+                                        else -> {
+                                            Observable.empty()
+                                        }
+                                    }
+                                }
+                        }
 //                        .map { devices ->
 //                            val pattern = Pattern.compile("Algo")
 //                            devices.filter { device ->
@@ -213,12 +284,8 @@ class MainActivity : RequestPermissionActivity() {
             .subscribe({
                 adapter.bleDeviceList = it
             }, {
-                Log.e(TAG, "", it)
+                Log.e(TAG, "scan exception", it)
                 startBtn.isEnabled = true
-                if (true) {
-                    val intent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
-                    startActivityForResult(intent, 1)
-                }
             }, {
                 startBtn.isEnabled = true
             })
