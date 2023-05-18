@@ -157,8 +157,9 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
             }
     }
 
-    private fun locationEnabledObservable(context: Context): Observable<Boolean> {
-        return Observable
+    private fun locationEnabledObservable(context: Context): Observable<Boolean> = when {
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> Observable.just(true)
+        else -> Observable
             .fromCallable {
                 LocationManagerCompat.isLocationEnabled(context.locationManager)
             }
@@ -200,11 +201,7 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
                 locationEnabledObservable(context),
                 bluetoothEnabledObservable(context)
             ) { isLocationEnabled, isBluetoothEnabled ->
-                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-                    isLocationEnabled to isBluetoothEnabled
-                } else {
-                    true to isBluetoothEnabled
-                }
+                isLocationEnabled to isBluetoothEnabled
             }
     }
 
