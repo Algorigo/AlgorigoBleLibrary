@@ -20,7 +20,6 @@ import com.algorigo.algorigoble2.rx_util.RxBroadcastReceiver
 import com.algorigo.algorigoble2.rx_util.collectListLastSortedIndex
 import com.algorigo.algorigoble2.virtual.VirtualDevice
 import com.algorigo.algorigoble2.virtual.VirtualDeviceEngine
-import com.jakewharton.rxrelay3.BehaviorRelay
 import io.reactivex.rxjava3.core.Observable
 import java.util.*
 
@@ -31,12 +30,6 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
     private val bluetoothAdapter: BluetoothAdapter = bluetoothManager.adapter
 
     private val deviceMap: MutableMap<BluetoothDevice, BleDevice> = mutableMapOf()
-
-    private val bluetoothStateRelay = BehaviorRelay
-        .create<Boolean>()
-        .apply {
-            accept(bluetoothAdapter.isEnabled)
-        }
 
     private val scanAvailableObservable = scanAvailableObservable(context)
         .doOnNext { (isLocationEnabled, isBluetoothEnabled) ->
@@ -57,11 +50,7 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
             when (intent?.action) {
                 BluetoothAdapter.ACTION_STATE_CHANGED -> {
                     when (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1)) {
-                        BluetoothAdapter.STATE_ON -> {
-                            bluetoothStateRelay.accept(true)
-                        }
                         BluetoothAdapter.STATE_OFF -> {
-                            bluetoothStateRelay.accept(false)
                             getDevices()
                                 .forEach {
                                     (it.engine as? BleDeviceEngineImpl)?.onBluetoothDisabled()
