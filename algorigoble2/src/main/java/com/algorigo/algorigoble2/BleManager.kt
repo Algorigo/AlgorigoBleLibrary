@@ -17,7 +17,6 @@ class BleManager(
     virtualDevices: Array<Pair<VirtualDevice, BleDevice>> = arrayOf()
 ) {
 
-    class BleNotAvailableException : Exception()
     class BondFailedException : Exception()
     class DisconnectedException : Exception()
 
