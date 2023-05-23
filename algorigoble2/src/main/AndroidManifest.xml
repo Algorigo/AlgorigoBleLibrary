@@ -3,6 +3,20 @@
     xmlns:tools="http://schemas.android.com/tools"
     package="com.algorigo.algorigoble2">
 
+    <application>
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+
+            <meta-data
+                android:name="com.algorigo.algorigoble2.AlgorigoBleInitializer"
+                android:value="androidx.startup"
+                />
+        </provider>
+    </application>
+
     <!-- 블루투스 퍼미션 -->
     <uses-feature
         android:name="android.hardware.bluetooth_le"
