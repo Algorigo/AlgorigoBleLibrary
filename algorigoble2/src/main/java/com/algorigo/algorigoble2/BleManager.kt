@@ -1,19 +1,13 @@
 package com.algorigo.algorigoble2
 
 import android.bluetooth.BluetoothDevice
-import android.content.Context
 import com.algorigo.algorigoble2.impl.BleManagerEngineImpl
-import com.algorigo.algorigoble2.logging.DefaultLogger
-import com.algorigo.algorigoble2.logging.Logger
-import com.algorigo.algorigoble2.logging.Logging
 import com.algorigo.algorigoble2.virtual.VirtualDevice
 import io.reactivex.rxjava3.core.Observable
 
 class BleManager(
-    context: Context,
     private val delegate: BleDeviceDelegate = defaultBleDeviceDelegate,
     engine: Engine = Engine.ALGORIGO_BLE,
-    logger: Logger? = null,
     virtualDevices: Array<Pair<VirtualDevice, BleDevice>> = arrayOf()
 ) {
 
@@ -49,14 +43,9 @@ class BleManager(
     private val virtualDevices: Map<String, BleDevice>
 
     init {
-        val logging = if (logger != null) {
-            Logging(logger)
-        } else {
-            Logging(DefaultLogger())
-        }
         when (engine) {
 //            Engine.RX_ANDROID_BLE -> this.engine = RxAndroidBleEngine(context.applicationContext, delegate)
-            Engine.ALGORIGO_BLE -> this.engine = BleManagerEngineImpl(context.applicationContext, delegate, logging)
+            Engine.ALGORIGO_BLE -> this.engine = BleManagerEngineImpl(delegate)
         }
         this.virtualDevices = virtualDevices.associate {
             Pair(

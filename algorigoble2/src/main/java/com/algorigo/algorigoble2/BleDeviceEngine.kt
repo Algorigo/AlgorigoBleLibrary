@@ -1,13 +1,11 @@
 package com.algorigo.algorigoble2
 
-import android.bluetooth.BluetoothGattCharacteristic
-import com.algorigo.algorigoble2.logging.Logging
 import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Single
 import java.util.UUID
 
-internal abstract class BleDeviceEngine(protected val logging: Logging) {
+abstract class BleDeviceEngine {
 
     lateinit var bleDevice: BleDevice
 

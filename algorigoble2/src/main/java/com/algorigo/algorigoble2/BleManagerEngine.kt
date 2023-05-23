@@ -5,7 +5,9 @@ import com.algorigo.algorigoble2.virtual.VirtualDevice
 import com.jakewharton.rxrelay3.PublishRelay
 import io.reactivex.rxjava3.core.Observable
 
-internal abstract class BleManagerEngine(protected val bleDeviceDelegate: BleManager.BleDeviceDelegate, protected val logging: Logging) {
+internal abstract class BleManagerEngine(
+    protected val bleDeviceDelegate: BleManager.BleDeviceDelegate
+) {
 
     protected val connectionStateRelay = PublishRelay.create<Pair<BleDevice, BleDevice.ConnectionState>>()
 
