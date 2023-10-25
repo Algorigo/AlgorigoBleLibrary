@@ -2,7 +2,7 @@ package com.algorigo.algorigoble2.rx_util
 
 import io.reactivex.rxjava3.core.Observable
 
-fun <T, K> Observable<T>.collectListLastSortedIndex(keySelector: (T) -> K): Observable<List<T>> {
+fun <T : Any, K> Observable<T>.collectListLastSortedIndex(keySelector: (T) -> K): Observable<List<T>> {
     val list = mutableListOf<K>()
     val map = mutableMapOf<K, T>()
     return concatMap { value ->
