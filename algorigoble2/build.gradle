@@ -81,6 +81,8 @@ signing {
 }
 
 android {
+    namespace "com.algorigo.library.algorigoble2"
+
     compileSdkVersion 33
     buildToolsVersion "30.0.3"
 
