@@ -12,7 +12,9 @@ import io.reactivex.rxjava3.core.Single
 import java.util.*
 import java.util.concurrent.TimeUnit
 
-internal class VirtualDeviceEngine(private val virtualDevice: VirtualDevice, logging: Logging) : BleDeviceEngine(logging) {
+internal class VirtualDeviceEngine(
+    private val virtualDevice: VirtualDevice
+) : BleDeviceEngine() {
     override val deviceId: String
         get() = virtualDevice.deviceId
     override val deviceName: String?

@@ -8,14 +8,14 @@ import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothProfile
-import android.content.Context
 import android.util.Log
 import com.algorigo.algorigoble2.BleCharacterisic
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleDeviceEngine
 import com.algorigo.algorigoble2.BleManager
 import com.algorigo.algorigoble2.BleSppSocket
-import com.algorigo.algorigoble2.logging.Logging
+import com.algorigo.algorigoble2.applicationContext
+import com.algorigo.algorigoble2.logging
 import com.jakewharton.rxrelay3.BehaviorRelay
 import com.jakewharton.rxrelay3.PublishRelay
 import enumerated
@@ -29,8 +29,9 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 
 @SuppressLint("MissingPermission")
-internal class BleDeviceEngineImpl(private val context: Context, private val bluetoothDevice: BluetoothDevice, logging: Logging):
-    BleDeviceEngine(logging) {
+internal class BleDeviceEngineImpl(
+    private val bluetoothDevice: BluetoothDevice
+) : BleDeviceEngine() {
 
     class CommunicationFailedException: Exception()
     class IllegalCharacteristicProperty(val property: Int, val type: String): Exception()
@@ -268,7 +269,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                     if (it.second is State.DISCONNECTED) {
                         if (it.first == 0) {
                             logging.d { "${gatt?.device?.name}(${gatt?.device?.address}) : connectGatt call" }
-                            gatt = bluetoothDevice.connectGatt(context, false, gattCallback)
+                            gatt = bluetoothDevice.connectGatt(applicationContext, false, gattCallback)
                             stateRelay.accept(State.CONNECTING())
                         } else {
                             throw BleManager.DisconnectedException()

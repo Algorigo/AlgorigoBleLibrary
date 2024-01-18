@@ -20,7 +20,6 @@ class BluetoothService : Service() {
     override fun onCreate() {
         super.onCreate()
         bleManager = BleManager(
-            applicationContext,
             virtualDevices = arrayOf(
                 VirtualBleDevice() to BleDevice(),
             )

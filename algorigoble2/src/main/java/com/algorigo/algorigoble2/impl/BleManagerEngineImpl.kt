@@ -15,7 +15,6 @@ import androidx.core.location.LocationManagerCompat
 import com.algorigo.algorigoble2.*
 import com.algorigo.algorigoble2.exception.SystemServiceException
 import com.algorigo.algorigoble2.extension.locationManager
-import com.algorigo.algorigoble2.logging.Logging
 import com.algorigo.algorigoble2.rx_util.RxBroadcastReceiver
 import com.algorigo.algorigoble2.rx_util.collectListLastSortedIndex
 import com.algorigo.algorigoble2.virtual.VirtualDevice
@@ -24,14 +23,16 @@ import io.reactivex.rxjava3.core.Observable
 import java.util.*
 
 @SuppressLint("MissingPermission")
-internal class BleManagerEngineImpl(private val context: Context, bleDeviceDelegate: BleManager.BleDeviceDelegate, logging: Logging) : BleManagerEngine(bleDeviceDelegate, logging) {
+internal class BleManagerEngineImpl(
+    bleDeviceDelegate: BleManager.BleDeviceDelegate
+) : BleManagerEngine(bleDeviceDelegate) {
 
-    private val bluetoothManager: BluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+    private val bluetoothManager: BluetoothManager = applicationContext.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private val bluetoothAdapter: BluetoothAdapter = bluetoothManager.adapter
 
     private val deviceMap: MutableMap<BluetoothDevice, BleDevice> = mutableMapOf()
 
-    private val scanAvailableObservable = scanAvailableObservable(context)
+    private val scanAvailableObservable = scanAvailableObservable()
         .doOnNext { (isLocationEnabled, isBluetoothEnabled) ->
             if (!isLocationEnabled && isBluetoothEnabled) {
                 throw SystemServiceException.LocationUnavailableException("System location is unavailable")
@@ -63,14 +64,14 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
     }
 
     init {
-        context.registerReceiver(
+        applicationContext.registerReceiver(
             bluetoothReceiver,
             IntentFilter().apply { addAction(BluetoothAdapter.ACTION_STATE_CHANGED) }
         )
     }
 
     protected fun finalize() {
-        context.unregisterReceiver(bluetoothReceiver)
+        applicationContext.unregisterReceiver(bluetoothReceiver)
     }
 
     override fun scanObservable(
@@ -149,7 +150,7 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
         }
             ?.also { device ->
                 deviceMap[bluetoothDevice] = device
-                device.initEngine(BleDeviceEngineImpl(context, bluetoothDevice, logging), logging)
+                device.initEngine(BleDeviceEngineImpl(bluetoothDevice))
                 device.getConnectionStateObservable()
                     .subscribe({
                         connectionStateRelay.accept(Pair(device, it))
@@ -157,32 +158,32 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
             }
     }
 
-    private fun locationEnabledObservable(context: Context): Observable<Boolean> = when {
+    private fun locationEnabledObservable(): Observable<Boolean> = when {
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> Observable.just(true)
         else -> Observable
             .fromCallable {
-                LocationManagerCompat.isLocationEnabled(context.locationManager)
+                LocationManagerCompat.isLocationEnabled(applicationContext.locationManager)
             }
             .concatWith(
                 RxBroadcastReceiver
-                    .broadCastReceiverObservable(context, IntentFilter(LocationManager.PROVIDERS_CHANGED_ACTION))
+                    .broadCastReceiverObservable(applicationContext, IntentFilter(LocationManager.PROVIDERS_CHANGED_ACTION))
                     .map { intent ->
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                             intent.getBooleanExtra(LocationManager.EXTRA_PROVIDER_ENABLED, false)
                         } else {
-                            LocationManagerCompat.isLocationEnabled(context.locationManager)
+                            LocationManagerCompat.isLocationEnabled(applicationContext.locationManager)
                         }
                     }
             )
     }
 
-    private fun bluetoothEnabledObservable(context: Context): Observable<Boolean> {
+    private fun bluetoothEnabledObservable(): Observable<Boolean> {
         return Observable
             .fromCallable {
                 bluetoothAdapter.isEnabled
             }
             .concatWith(RxBroadcastReceiver
-                .broadCastReceiverObservable(context, IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED))
+                .broadCastReceiverObservable(applicationContext, IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED))
                 .map { intent -> intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1) }
                 .map { state ->
                     when (state) {
@@ -195,11 +196,11 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
                 })
     }
 
-    private fun scanAvailableObservable(context: Context): Observable<Pair<Boolean, Boolean>> {
+    private fun scanAvailableObservable(): Observable<Pair<Boolean, Boolean>> {
         return Observable
             .combineLatest(
-                locationEnabledObservable(context),
-                bluetoothEnabledObservable(context)
+                locationEnabledObservable(),
+                bluetoothEnabledObservable()
             ) { isLocationEnabled, isBluetoothEnabled ->
                 isLocationEnabled to isBluetoothEnabled
             }
@@ -207,7 +208,7 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
 
     override fun initVirtualDevice(virtualDevice: VirtualDevice, bleDevice: BleDevice): BleDevice {
         return bleDevice.also { device ->
-            device.initEngine(VirtualDeviceEngine(virtualDevice, logging), logging)
+            device.initEngine(VirtualDeviceEngine(virtualDevice))
             device.getConnectionStateObservable()
                 .subscribe({
                     connectionStateRelay.accept(Pair(device, it))
