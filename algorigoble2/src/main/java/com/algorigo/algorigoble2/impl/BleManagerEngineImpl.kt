@@ -5,6 +5,7 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
+import android.bluetooth.le.ScanRecord
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -79,28 +80,27 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
     ): Observable<List<Pair<BleDevice, ScanInfo>>> {
         return scanAvailableObservable
             .flatMap {
-                Observable.just(listOf<Pair<BleDevice, ScanInfo>>())
-                    .concatWith(
-                        BleScanner.scanObservable(bluetoothAdapter, scanSettings, *scanFilters)
-                            .run {
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                                    mapOptional { scanResult ->
-                                        getBleDevice(scanResult.device)
-                                            ?.let { Optional.of(Pair(it, ScanInfo(scanResult))) }
-                                            ?: Optional.empty()
-                                    }
-                                } else {
-                                    map { scanResult ->
-                                        listOf(getBleDevice(scanResult.device)?.let { Pair(it, ScanInfo(scanResult)) })
-                                    }
-                                        .filter { it[0] != null }
-                                        .map { it[0]!! }
-                                }
+                BleScanner.scanObservable(bluetoothAdapter, scanSettings, *scanFilters)
+                    .run {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                            mapOptional { scanResult ->
+                                getBleDevice(scanResult.device, scanResult.scanRecord)
+                                    ?.let { Optional.of(Pair(it, ScanInfo(scanResult))) }
+                                    ?: Optional.empty()
                             }
-                            .collectListLastSortedIndex {
-                                it.first.deviceId
+                        } else {
+                            map { scanResult ->
+                                listOf(
+                                    getBleDevice(scanResult.device, scanResult.scanRecord)
+                                        ?.let { Pair(it, ScanInfo(scanResult)) }
+                                )
                             }
-                    )
+                                .filter { it[0] != null }
+                                .map { it[0]!! }
+                        }
+                    }
+                    .collectListLastSortedIndex { it.first.deviceId }
+                    .startWithItem(listOf())
             }
     }
 
@@ -134,18 +134,18 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
             return null
         }
         logging.d("bluetoothDevice:${bluetoothDevice.name}")
-        return createBleDevice(bluetoothDevice, clazz)
+        return createBleDevice(bluetoothDevice, clazz = clazz)
     }
 
-    private fun getBleDevice(bluetoothDevice: BluetoothDevice): BleDevice? {
-        return deviceMap[bluetoothDevice] ?: (createBleDevice<BleDevice>(bluetoothDevice))
+    private fun getBleDevice(bluetoothDevice: BluetoothDevice, scanRecord: ScanRecord? = null): BleDevice? {
+        return deviceMap[bluetoothDevice] ?: (createBleDevice<BleDevice>(bluetoothDevice, scanRecord))
     }
 
-    private fun <T : BleDevice> createBleDevice(bluetoothDevice: BluetoothDevice, clazz: Class<T>? = null): BleDevice? {
+    private fun <T : BleDevice> createBleDevice(bluetoothDevice: BluetoothDevice, scanRecord: ScanRecord? = null, clazz: Class<T>? = null): BleDevice? {
         return if (clazz != null) {
             clazz.newInstance()
         } else {
-            bleDeviceDelegate.createBleDevice(bluetoothDevice)
+            bleDeviceDelegate.createBleDevice(bluetoothDevice, scanRecord)
         }
             ?.also { device ->
                 deviceMap[bluetoothDevice] = device
