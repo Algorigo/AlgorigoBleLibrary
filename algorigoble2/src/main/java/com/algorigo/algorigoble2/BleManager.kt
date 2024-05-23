@@ -29,13 +29,13 @@ class BleManager(
 
         abstract fun createBleDevice(bluetoothDevice: BluetoothDevice): BleDevice?
 
-        fun getBleScanSettings(): BleScanSettings {
+        open fun getBleScanSettings(): BleScanSettings {
             return BleScanSettings
                 .Builder()
                 .build()
         }
 
-        fun getBleScanFilters(): Array<BleScanFilter> {
+        open fun getBleScanFilters(): Array<BleScanFilter> {
             return arrayOf()
         }
     }
