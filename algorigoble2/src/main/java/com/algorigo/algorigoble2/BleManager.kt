@@ -1,6 +1,7 @@
 package com.algorigo.algorigoble2
 
 import android.bluetooth.BluetoothDevice
+import android.bluetooth.le.ScanRecord
 import android.content.Context
 import com.algorigo.algorigoble2.impl.BleManagerEngineImpl
 import com.algorigo.algorigoble2.logging.DefaultLogger
@@ -17,7 +18,6 @@ class BleManager(
     virtualDevices: Array<Pair<VirtualDevice, BleDevice>> = arrayOf()
 ) {
 
-    class BleNotAvailableException : Exception()
     class BondFailedException : Exception()
     class DisconnectedException : Exception()
 
@@ -28,15 +28,15 @@ class BleManager(
 
     abstract class BleDeviceDelegate {
 
-        abstract fun createBleDevice(bluetoothDevice: BluetoothDevice): BleDevice?
+        abstract fun createBleDevice(bluetoothDevice: BluetoothDevice, scanRecord: ScanRecord?): BleDevice?
 
-        fun getBleScanSettings(): BleScanSettings {
+        open fun getBleScanSettings(): BleScanSettings {
             return BleScanSettings
                 .Builder()
                 .build()
         }
 
-        fun getBleScanFilters(): Array<BleScanFilter> {
+        open fun getBleScanFilters(): Array<BleScanFilter> {
             return arrayOf()
         }
     }
@@ -115,7 +115,7 @@ class BleManager(
 
     companion object {
         private val defaultBleDeviceDelegate = object : BleDeviceDelegate() {
-            override fun createBleDevice(bluetoothDevice: BluetoothDevice): BleDevice {
+            override fun createBleDevice(bluetoothDevice: BluetoothDevice, scanRecord: ScanRecord?): BleDevice {
                 return BleDevice()
             }
         }

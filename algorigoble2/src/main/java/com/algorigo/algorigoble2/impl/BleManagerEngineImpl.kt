@@ -5,17 +5,22 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
+import android.bluetooth.le.ScanRecord
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.location.LocationManager
 import android.os.Build
+import androidx.core.location.LocationManagerCompat
 import com.algorigo.algorigoble2.*
+import com.algorigo.algorigoble2.exception.SystemServiceException
+import com.algorigo.algorigoble2.extension.locationManager
 import com.algorigo.algorigoble2.logging.Logging
+import com.algorigo.algorigoble2.rx_util.RxBroadcastReceiver
 import com.algorigo.algorigoble2.rx_util.collectListLastSortedIndex
 import com.algorigo.algorigoble2.virtual.VirtualDevice
 import com.algorigo.algorigoble2.virtual.VirtualDeviceEngine
-import com.jakewharton.rxrelay3.BehaviorRelay
 import io.reactivex.rxjava3.core.Observable
 import java.util.*
 
@@ -27,25 +32,26 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
 
     private val deviceMap: MutableMap<BluetoothDevice, BleDevice> = mutableMapOf()
 
-    private val bluetoothStateRelay = BehaviorRelay.create<Boolean>().apply {
-        accept(bluetoothAdapter.isEnabled)
-    }
-    private val bluetoothStateObservable = bluetoothStateRelay
-        .doOnNext {
-            if (!it) {
-                throw BleManager.BleNotAvailableException()
+    private val scanAvailableObservable = scanAvailableObservable(context)
+        .doOnNext { (isLocationEnabled, isBluetoothEnabled) ->
+            if (!isLocationEnabled && isBluetoothEnabled) {
+                throw SystemServiceException.LocationUnavailableException("System location is unavailable")
+            } else if (isLocationEnabled && !isBluetoothEnabled) {
+                throw SystemServiceException.BluetoothUnavailableException("System bluetooth is unavailable")
+            } else if (!isLocationEnabled && !isBluetoothEnabled) {
+                throw SystemServiceException.AllUnavailableException("All system services(bluetooth, location) are unavailable")
             }
         }
+        .map {
+            it.first && it.second
+        }
+
     private val bluetoothReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
                 BluetoothAdapter.ACTION_STATE_CHANGED -> {
                     when (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1)) {
-                        BluetoothAdapter.STATE_ON -> {
-                            bluetoothStateRelay.accept(true)
-                        }
                         BluetoothAdapter.STATE_OFF -> {
-                            bluetoothStateRelay.accept(false)
                             getDevices()
                                 .forEach {
                                     (it.engine as? BleDeviceEngineImpl)?.onBluetoothDisabled()
@@ -72,30 +78,29 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
         scanSettings: BleScanSettings,
         vararg scanFilters: BleScanFilter
     ): Observable<List<Pair<BleDevice, ScanInfo>>> {
-        return bluetoothStateObservable
+        return scanAvailableObservable
             .flatMap {
-                Observable.just(listOf<Pair<BleDevice, ScanInfo>>())
-                    .concatWith(
-                        BleScanner.scanObservable(bluetoothAdapter, scanSettings, *scanFilters)
-                            .run {
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                                    mapOptional { scanResult ->
-                                        getBleDevice(scanResult.device)
-                                            ?.let { Optional.of(Pair(it, ScanInfo(scanResult))) }
-                                            ?: Optional.empty()
-                                    }
-                                } else {
-                                    map { scanResult ->
-                                        listOf(getBleDevice(scanResult.device)?.let { Pair(it, ScanInfo(scanResult)) })
-                                    }
-                                        .filter { it[0] != null }
-                                        .map { it[0]!! }
-                                }
+                BleScanner.scanObservable(bluetoothAdapter, scanSettings, *scanFilters)
+                    .run {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                            mapOptional { scanResult ->
+                                getBleDevice(scanResult.device, scanResult.scanRecord)
+                                    ?.let { Optional.of(Pair(it, ScanInfo(scanResult))) }
+                                    ?: Optional.empty()
                             }
-                            .collectListLastSortedIndex {
-                                it.first.deviceId
+                        } else {
+                            map { scanResult ->
+                                listOf(
+                                    getBleDevice(scanResult.device, scanResult.scanRecord)
+                                        ?.let { Pair(it, ScanInfo(scanResult)) }
+                                )
                             }
-                    )
+                                .filter { it[0] != null }
+                                .map { it[0]!! }
+                        }
+                    }
+                    .collectListLastSortedIndex { it.first.deviceId }
+                    .startWithItem(listOf())
             }
     }
 
@@ -129,18 +134,18 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
             return null
         }
         logging.d("bluetoothDevice:${bluetoothDevice.name}")
-        return createBleDevice(bluetoothDevice, clazz)
+        return createBleDevice(bluetoothDevice, clazz = clazz)
     }
 
-    private fun getBleDevice(bluetoothDevice: BluetoothDevice): BleDevice? {
-        return deviceMap[bluetoothDevice] ?: (createBleDevice<BleDevice>(bluetoothDevice))
+    private fun getBleDevice(bluetoothDevice: BluetoothDevice, scanRecord: ScanRecord? = null): BleDevice? {
+        return deviceMap[bluetoothDevice] ?: (createBleDevice<BleDevice>(bluetoothDevice, scanRecord))
     }
 
-    private fun <T : BleDevice> createBleDevice(bluetoothDevice: BluetoothDevice, clazz: Class<T>? = null): BleDevice? {
+    private fun <T : BleDevice> createBleDevice(bluetoothDevice: BluetoothDevice, scanRecord: ScanRecord? = null, clazz: Class<T>? = null): BleDevice? {
         return if (clazz != null) {
             clazz.newInstance()
         } else {
-            bleDeviceDelegate.createBleDevice(bluetoothDevice)
+            bleDeviceDelegate.createBleDevice(bluetoothDevice, scanRecord)
         }
             ?.also { device ->
                 deviceMap[bluetoothDevice] = device
@@ -149,6 +154,54 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
                     .subscribe({
                         connectionStateRelay.accept(Pair(device, it))
                     }, {})
+            }
+    }
+
+    private fun locationEnabledObservable(context: Context): Observable<Boolean> = when {
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> Observable.just(true)
+        else -> Observable
+            .fromCallable {
+                LocationManagerCompat.isLocationEnabled(context.locationManager)
+            }
+            .concatWith(
+                RxBroadcastReceiver
+                    .broadCastReceiverObservable(context, IntentFilter(LocationManager.PROVIDERS_CHANGED_ACTION))
+                    .map { intent ->
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            intent.getBooleanExtra(LocationManager.EXTRA_PROVIDER_ENABLED, false)
+                        } else {
+                            LocationManagerCompat.isLocationEnabled(context.locationManager)
+                        }
+                    }
+            )
+    }
+
+    private fun bluetoothEnabledObservable(context: Context): Observable<Boolean> {
+        return Observable
+            .fromCallable {
+                bluetoothAdapter.isEnabled
+            }
+            .concatWith(RxBroadcastReceiver
+                .broadCastReceiverObservable(context, IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED))
+                .map { intent -> intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1) }
+                .map { state ->
+                    when (state) {
+                        BluetoothAdapter.STATE_ON -> true
+                        BluetoothAdapter.STATE_TURNING_OFF,
+                        BluetoothAdapter.STATE_TURNING_ON,
+                        BluetoothAdapter.STATE_OFF -> false
+                        else -> throw IllegalStateException("Unexpected bluetooth state: $state")
+                    }
+                })
+    }
+
+    private fun scanAvailableObservable(context: Context): Observable<Pair<Boolean, Boolean>> {
+        return Observable
+            .combineLatest(
+                locationEnabledObservable(context),
+                bluetoothEnabledObservable(context)
+            ) { isLocationEnabled, isBluetoothEnabled ->
+                isLocationEnabled to isBluetoothEnabled
             }
     }
 

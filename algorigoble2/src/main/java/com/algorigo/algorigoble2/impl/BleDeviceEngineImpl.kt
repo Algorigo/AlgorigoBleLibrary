@@ -332,12 +332,12 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                     }
                     .flatMap { characteristic ->
                         replyRelay
-                            .doOnSubscribe {
+                            .mergeWith(Completable.fromCallable {
                                 logging.d { "${gatt.device?.name}(${gatt.device?.address}) : readCharacteristic : $characteristicUuid" }
                                 if (!gatt.readCharacteristic(characteristic)) {
                                     throw CommunicationFailedException()
                                 }
-                            }
+                            })
                             .filter { it.uuid == characteristicUuid && it.type == Type.READ_CHARACTERISTIC }
                             .map { it.byteArray }
                             .firstOrError()
@@ -362,12 +362,12 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                         when {
                             characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE != 0 -> {
                                 replyRelay
-                                    .doOnSubscribe {
+                                    .mergeWith(Completable.fromCallable {
                                         characteristic.value = byteArray
                                         if (!gatt.writeCharacteristic(characteristic)) {
                                             throw CommunicationFailedException()
                                         }
-                                    }
+                                    })
                                     .filter { it.uuid == characteristicUuid && it.type == Type.WRITE_CHARACTERISTIC }
                                     .map { it.byteArray }
                                     .firstOrError()

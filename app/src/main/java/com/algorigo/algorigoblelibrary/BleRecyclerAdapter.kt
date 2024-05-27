@@ -76,6 +76,7 @@ class BleRecyclerAdapter(private val bleRecyclerListener: BleRecyclerListener) :
                         connectBtn.isEnabled = false
                         connectBtn.setText(R.string.disconnecting)
                     }
+                    else -> {}
                 }
                 rssiView.text = scanInfo?.let { "${it.rssi} dBm" }
             }

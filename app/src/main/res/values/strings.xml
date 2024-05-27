@@ -23,4 +23,9 @@
     <string name="get_battery">Get Battery</string>
     <string name="send_on">Send On</string>
     <string name="send_off">Send Off</string>
+
+    <string name="confirm">확인</string>
+    <string name="cancel">취소</string>
+    <string name="title_ask_to_enable_gps">권한 요청</string>
+    <string name="message_ask_to_enable_gps">블루투스 스캔을 하기 위해서 GPS를 활성화해야 합니다.</string>
 </resources>
