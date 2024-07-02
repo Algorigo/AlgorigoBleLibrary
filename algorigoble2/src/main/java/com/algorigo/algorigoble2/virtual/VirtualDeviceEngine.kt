@@ -5,14 +5,13 @@ import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleDeviceEngine
 import com.algorigo.algorigoble2.BleManager
 import com.algorigo.algorigoble2.BleSppSocket
-import com.algorigo.algorigoble2.logging.Logging
 import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Single
 import java.util.*
 import java.util.concurrent.TimeUnit
 
-internal class VirtualDeviceEngine(private val virtualDevice: VirtualDevice, logging: Logging) : BleDeviceEngine(logging) {
+internal class VirtualDeviceEngine(private val virtualDevice: VirtualDevice) : BleDeviceEngine() {
     override val deviceId: String
         get() = virtualDevice.deviceId
     override val deviceName: String?

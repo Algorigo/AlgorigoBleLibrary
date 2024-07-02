@@ -16,16 +16,18 @@ import androidx.core.location.LocationManagerCompat
 import com.algorigo.algorigoble2.*
 import com.algorigo.algorigoble2.exception.SystemServiceException
 import com.algorigo.algorigoble2.extension.locationManager
-import com.algorigo.algorigoble2.logging.Logging
+import com.algorigo.algorigoble2.logging.Ble
 import com.algorigo.algorigoble2.rx_util.RxBroadcastReceiver
 import com.algorigo.algorigoble2.rx_util.collectListLastSortedIndex
 import com.algorigo.algorigoble2.virtual.VirtualDevice
 import com.algorigo.algorigoble2.virtual.VirtualDeviceEngine
+import com.algorigo.logger.L
 import io.reactivex.rxjava3.core.Observable
 import java.util.*
+import java.util.logging.Logger
 
 @SuppressLint("MissingPermission")
-internal class BleManagerEngineImpl(private val context: Context, bleDeviceDelegate: BleManager.BleDeviceDelegate, logging: Logging) : BleManagerEngine(bleDeviceDelegate, logging) {
+internal class BleManagerEngineImpl(private val context: Context, bleDeviceDelegate: BleManager.BleDeviceDelegate) : BleManagerEngine(bleDeviceDelegate) {
 
     private val bluetoothManager: BluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private val bluetoothAdapter: BluetoothAdapter = bluetoothManager.adapter
@@ -126,14 +128,14 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
             return device
         }
 
-        logging.d("getDevice:$macAddress")
+        L.debug(Ble.Engine.Default, "getDevice:$macAddress")
         val bluetoothDevice = try {
             bluetoothAdapter.getRemoteDevice(macAddress)
         } catch (e: Exception) {
-            logging.e("getRemoteDevice error", e)
+            L.error(Ble.Engine.Default, "getRemoteDevice error", e)
             return null
         }
-        logging.d("bluetoothDevice:${bluetoothDevice.name}")
+        L.debug(Ble.Engine.Default, "bluetoothDevice:${bluetoothDevice.name}")
         return createBleDevice(bluetoothDevice, clazz = clazz)
     }
 
@@ -149,7 +151,7 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
         }
             ?.also { device ->
                 deviceMap[bluetoothDevice] = device
-                device.initEngine(BleDeviceEngineImpl(context, bluetoothDevice, logging), logging)
+                device.initEngine(BleDeviceEngineImpl(context, bluetoothDevice))
                 device.getConnectionStateObservable()
                     .subscribe({
                         connectionStateRelay.accept(Pair(device, it))
@@ -207,7 +209,7 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
 
     override fun initVirtualDevice(virtualDevice: VirtualDevice, bleDevice: BleDevice): BleDevice {
         return bleDevice.also { device ->
-            device.initEngine(VirtualDeviceEngine(virtualDevice, logging), logging)
+            device.initEngine(VirtualDeviceEngine(virtualDevice))
             device.getConnectionStateObservable()
                 .subscribe({
                     connectionStateRelay.accept(Pair(device, it))

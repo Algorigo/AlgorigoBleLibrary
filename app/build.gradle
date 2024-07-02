@@ -10,7 +10,7 @@ android {
 
     defaultConfig {
         applicationId "com.algorigo.algorigoblelibrary"
-        minSdkVersion 21
+        minSdkVersion 24
         targetSdkVersion 34
         versionCode 2
         versionName "2.5.0"
@@ -45,6 +45,8 @@ dependencies {
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
 
     implementation project(':algorigoble2')
+
+    implementation 'com.algorigo.library:algorigo-logger:1.1.0'
 
     //ReactiveX
     implementation 'io.reactivex.rxjava3:rxandroid:3.0.2'

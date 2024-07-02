@@ -3,18 +3,19 @@ package com.algorigo.algorigoble2
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.le.ScanRecord
 import android.content.Context
+import android.util.Log
 import com.algorigo.algorigoble2.impl.BleManagerEngineImpl
-import com.algorigo.algorigoble2.logging.DefaultLogger
-import com.algorigo.algorigoble2.logging.Logger
-import com.algorigo.algorigoble2.logging.Logging
+import com.algorigo.algorigoble2.logging.Ble
 import com.algorigo.algorigoble2.virtual.VirtualDevice
+import com.algorigo.logger.L
+import com.algorigo.logger.LogManager
 import io.reactivex.rxjava3.core.Observable
+import java.util.logging.Logger
 
 class BleManager(
     context: Context,
     private val delegate: BleDeviceDelegate = defaultBleDeviceDelegate,
     engine: Engine = Engine.ALGORIGO_BLE,
-    logger: Logger? = null,
     virtualDevices: Array<Pair<VirtualDevice, BleDevice>> = arrayOf()
 ) {
 
@@ -50,14 +51,9 @@ class BleManager(
     private val virtualDevices: Map<String, BleDevice>
 
     init {
-        val logging = if (logger != null) {
-            Logging(logger)
-        } else {
-            Logging(DefaultLogger())
-        }
         when (engine) {
 //            Engine.RX_ANDROID_BLE -> this.engine = RxAndroidBleEngine(context.applicationContext, delegate)
-            Engine.ALGORIGO_BLE -> this.engine = BleManagerEngineImpl(context.applicationContext, delegate, logging)
+            Engine.ALGORIGO_BLE -> this.engine = BleManagerEngineImpl(context.applicationContext, delegate)
         }
         this.virtualDevices = virtualDevices.associate {
             Pair(
@@ -65,6 +61,7 @@ class BleManager(
                 this.engine.initVirtualDevice(it.first, it.second.apply { virtual = true })
             )
         }
+        L.debug(Ble, "virtualDevices: ${virtualDevices.joinToString { it.second.deviceId }}")
     }
 
     fun scanObservable(scanSettings: BleScanSettings, vararg scanFilters: BleScanFilter): Observable<List<Pair<BleDevice, ScanInfo>>> {
@@ -118,6 +115,10 @@ class BleManager(
             override fun createBleDevice(bluetoothDevice: BluetoothDevice, scanRecord: ScanRecord?): BleDevice {
                 return BleDevice()
             }
+        }
+
+        fun getLogger(): Logger {
+            return LogManager.getLogger(Ble)
         }
     }
 }

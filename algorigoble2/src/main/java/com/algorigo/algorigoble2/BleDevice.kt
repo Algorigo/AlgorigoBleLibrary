@@ -1,7 +1,8 @@
 package com.algorigo.algorigoble2
 
 import android.bluetooth.BluetoothGattDescriptor
-import com.algorigo.algorigoble2.logging.Logging
+import com.algorigo.algorigoble2.logging.Ble
+import com.algorigo.logger.L
 import java.util.*
 
 open class BleDevice {
@@ -21,12 +22,10 @@ open class BleDevice {
     }
 
     internal lateinit var engine: BleDeviceEngine
-    internal lateinit var logging: Logging
 
-    internal fun initEngine(engine: BleDeviceEngine, logging: Logging) {
+    internal fun initEngine(engine: BleDeviceEngine) {
         engine.bleDevice = this
         this.engine = engine
-        this.logging = logging
     }
 
     val deviceId: String
@@ -55,9 +54,9 @@ open class BleDevice {
 
     fun connect() {
         connectCompletable().subscribe({
-            logging.i("connected")
+            L.info(Ble.Device, "connected")
         }, {
-            logging.e("conntection fail", it)
+            L.error(Ble.Device, "conntection fail", it)
         })
     }
 
