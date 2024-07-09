@@ -15,7 +15,8 @@ import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleDeviceEngine
 import com.algorigo.algorigoble2.BleManager
 import com.algorigo.algorigoble2.BleSppSocket
-import com.algorigo.algorigoble2.logging.Logging
+import com.algorigo.algorigoble2.logging.Ble
+import com.algorigo.logger.L
 import com.jakewharton.rxrelay3.BehaviorRelay
 import com.jakewharton.rxrelay3.PublishRelay
 import enumerated
@@ -29,8 +30,8 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 
 @SuppressLint("MissingPermission")
-internal class BleDeviceEngineImpl(private val context: Context, private val bluetoothDevice: BluetoothDevice, logging: Logging):
-    BleDeviceEngine(logging) {
+internal class BleDeviceEngineImpl(private val context: Context, private val bluetoothDevice: BluetoothDevice):
+    BleDeviceEngine() {
 
     class CommunicationFailedException: Exception()
     class IllegalCharacteristicProperty(val property: Int, val type: String): Exception()
@@ -72,7 +73,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
             super.onConnectionStateChange(gatt, status, newState)
-            logging.d { "${gatt?.device?.name}(${gatt?.device?.address}) : onConnectionStateChange $status -> $newState" }
+            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onConnectionStateChange $status -> $newState")
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     gatt?.discoverServices()
@@ -88,7 +89,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
 
         override fun onServicesDiscovered(gatt: BluetoothGatt?, status: Int) {
             super.onServicesDiscovered(gatt, status)
-            logging.d { "${gatt?.device?.name}(${gatt?.device?.address}) : onServicesDiscovered $status" }
+            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onServicesDiscovered $status")
             gatt?.let {
                 stateRelay.accept(State.CONNECTED(it))
             }
@@ -100,7 +101,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
             status: Int
         ) {
             super.onCharacteristicRead(gatt, characteristic, status)
-            logging.d { "${gatt?.device?.name}(${gatt?.device?.address}) : onCharacteristicRead:$status, ${characteristic?.uuid}:${characteristic?.value?.toHexString()}" }
+            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onCharacteristicRead:$status, ${characteristic?.uuid}:${characteristic?.value?.toHexString()}")
             characteristic?.let {
                 replyRelay.accept(ReplyData(Type.READ_CHARACTERISTIC, it.uuid, it.value ?: byteArrayOf()))
             }
@@ -112,7 +113,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
             status: Int
         ) {
             super.onCharacteristicWrite(gatt, characteristic, status)
-            logging.d { "${gatt?.device?.name}(${gatt?.device?.address}) : onCharacteristicWrite:$status, ${characteristic?.uuid}:${characteristic?.value?.toHexString()}" }
+            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onCharacteristicWrite:$status, ${characteristic?.uuid}:${characteristic?.value?.toHexString()}")
             characteristic?.let {
                 replyRelay.accept(ReplyData(Type.WRITE_CHARACTERISTIC, it.uuid, it.value ?: byteArrayOf()))
             }
@@ -123,7 +124,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
             characteristic: BluetoothGattCharacteristic?
         ) {
             super.onCharacteristicChanged(gatt, characteristic)
-            logging.d { "${gatt?.device?.name}(${gatt?.device?.address}) : onCharacteristicChanged:${characteristic?.uuid}:${characteristic?.value?.toHexString()}" }
+            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onCharacteristicChanged:${characteristic?.uuid}:${characteristic?.value?.toHexString()}")
             characteristic?.let {
                 notificationRelay.accept(Pair(it.uuid, it.value))
             }
@@ -135,7 +136,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
             status: Int
         ) {
             super.onDescriptorRead(gatt, descriptor, status)
-            logging.d { "${gatt?.device?.name}(${gatt?.device?.address}) : onDescriptorRead:${descriptor?.characteristic?.uuid}:${descriptor?.value?.toHexString()}" }
+            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onDescriptorRead:${descriptor?.characteristic?.uuid}:${descriptor?.value?.toHexString()}")
             descriptor?.let {
                 replyRelay.accept(ReplyData(Type.READ_DESCRIPTOR, it.characteristic.uuid, it.value ?: byteArrayOf()))
             }
@@ -147,7 +148,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
             status: Int
         ) {
             super.onDescriptorWrite(gatt, descriptor, status)
-            logging.d { "${gatt?.device?.name}(${gatt?.device?.address}) : onDescriptorWrite:${descriptor?.characteristic?.uuid}:${descriptor?.value?.toHexString()}" }
+            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onDescriptorWrite:${descriptor?.characteristic?.uuid}:${descriptor?.value?.toHexString()}")
             descriptor?.let {
                 replyRelay.accept(ReplyData(Type.WRITE_DESCRIPTOR, it.characteristic.uuid, it.value ?: byteArrayOf()))
             }
@@ -155,27 +156,27 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
 
         override fun onPhyUpdate(gatt: BluetoothGatt?, txPhy: Int, rxPhy: Int, status: Int) {
             super.onPhyUpdate(gatt, txPhy, rxPhy, status)
-            logging.d { "${gatt?.device?.name}(${gatt?.device?.address}) : onPhyUpdate:$txPhy:$rxPhy:$status" }
+            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onPhyUpdate:$txPhy:$rxPhy:$status")
         }
 
         override fun onPhyRead(gatt: BluetoothGatt?, txPhy: Int, rxPhy: Int, status: Int) {
             super.onPhyRead(gatt, txPhy, rxPhy, status)
-            logging.d { "${gatt?.device?.name}(${gatt?.device?.address}) : onPhyRead:$txPhy:$rxPhy:$status" }
+            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onPhyRead:$txPhy:$rxPhy:$status")
         }
 
         override fun onReliableWriteCompleted(gatt: BluetoothGatt?, status: Int) {
             super.onReliableWriteCompleted(gatt, status)
-            logging.d { "${gatt?.device?.name}(${gatt?.device?.address}) : onReliableWriteCompleted:$status" }
+            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onReliableWriteCompleted:$status")
         }
 
         override fun onReadRemoteRssi(gatt: BluetoothGatt?, rssi: Int, status: Int) {
             super.onReadRemoteRssi(gatt, rssi, status)
-            logging.d { "${gatt?.device?.name}(${gatt?.device?.address}) : onReadRemoteRssi:$rssi, $status" }
+            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onReadRemoteRssi:$rssi, $status")
         }
 
         override fun onMtuChanged(gatt: BluetoothGatt?, mtu: Int, status: Int) {
             super.onMtuChanged(gatt, mtu, status)
-            logging.d { "${gatt?.device?.name}(${gatt?.device?.address}) : onMtuChanged:$mtu, $status" }
+            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onMtuChanged:$mtu, $status")
         }
     }
 
@@ -267,7 +268,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                 .doOnNext {
                     if (it.second is State.DISCONNECTED) {
                         if (it.first == 0) {
-                            logging.d { "${gatt?.device?.name}(${gatt?.device?.address}) : connectGatt call" }
+                            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : connectGatt call")
                             gatt = bluetoothDevice.connectGatt(context, false, gattCallback)
                             stateRelay.accept(State.CONNECTING())
                         } else {
@@ -280,7 +281,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                 .ignoreElement()
                 .timeout(timeoutMillis, TimeUnit.MILLISECONDS)
                 .doOnError {
-                    logging.e({ "${gatt?.device?.name}(${gatt?.device?.address}) : doOnError" }, it)
+                    L.error(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : doOnError", it)
                     if (it is TimeoutException) {
                         gatt?.also {
                             it.disconnect()
@@ -333,7 +334,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                     .flatMap { characteristic ->
                         replyRelay
                             .mergeWith(Completable.fromCallable {
-                                logging.d { "${gatt.device?.name}(${gatt.device?.address}) : readCharacteristic : $characteristicUuid" }
+                                L.debug(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : readCharacteristic : $characteristicUuid")
                                 if (!gatt.readCharacteristic(characteristic)) {
                                     throw CommunicationFailedException()
                                 }
@@ -375,7 +376,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                             characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0 -> {
                                 Single.defer {
                                     characteristic.value = byteArray
-                                    logging.d { "${gatt.device?.name}(${gatt.device?.address}) : writeCharacteristic : $characteristicUuid : ${byteArray.toHexString()}" }
+                                    L.debug(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : writeCharacteristic : $characteristicUuid : ${byteArray.toHexString()}")
                                     if (gatt.writeCharacteristic(characteristic)) {
                                         Single.just(byteArrayOf())
                                     } else {
@@ -407,7 +408,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                 getCharacteristic(characteristicUuid)
                     .flatMap {
                         characteristic = it
-                        logging.d { "${gatt.device?.name}(${gatt.device?.address}) : setCharacteristicNotification : $characteristicUuid : true" }
+                        L.debug(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : setCharacteristicNotification : $characteristicUuid : true")
                         gatt.setCharacteristicNotification(it, true)
                         writeDescriptor(gatt, it, type.byteArray)
                     }
@@ -420,7 +421,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                     }
                     .doFinally {
                         characteristic?.let { gattCharacteristic ->
-                            logging.d { "${gatt.device?.name}(${gatt.device?.address}) : setCharacteristicNotification : $characteristicUuid : false" }
+                            L.debug(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : setCharacteristicNotification : $characteristicUuid : false")
                             gatt.setCharacteristicNotification(gattCharacteristic, false)
                             writeDescriptor(gatt, gattCharacteristic, BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE).subscribe({
                                 Log.d(LOG_TAG, "DISABLE_NOTIFICATION_VALUE:${it.contentToString()}")
@@ -474,7 +475,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                     .doOnSubscribe {
                         val descriptor = characteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG_UUID)
                         descriptor.value = byteArray
-                        logging.d { "${gatt.device?.name}(${gatt.device?.address}) : writeDescriptor : ${characteristic.uuid} : ${byteArray.toHexString()}" }
+                        L.debug(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : writeDescriptor : ${characteristic.uuid} : ${byteArray.toHexString()}")
                         if (!gatt.writeDescriptor(descriptor)) {
                             throw CommunicationFailedException()
                         }

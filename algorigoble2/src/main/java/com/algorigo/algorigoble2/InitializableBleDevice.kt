@@ -1,5 +1,7 @@
 package com.algorigo.algorigoble2
 
+import com.algorigo.algorigoble2.logging.Ble
+import com.algorigo.logger.L
 import com.jakewharton.rxrelay3.BehaviorRelay
 import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Observable
@@ -37,7 +39,7 @@ abstract class InitializableBleDevice : BleDevice() {
                     initializeRelay.accept(true)
                 }
                 .doOnError {
-                    logging.e("getInitializeCompletable", it)
+                    L.error(Ble.Device, "getInitializeCompletable", it)
                     disconnect()
                 }
         }

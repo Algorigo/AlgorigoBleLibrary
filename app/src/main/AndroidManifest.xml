@@ -3,6 +3,8 @@
     package="com.algorigo.algorigoblelibrary">
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
 
     <application
         android:allowBackup="false"
@@ -16,7 +18,7 @@
             android:name=".BluetoothService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="location" />
+            android:foregroundServiceType="connectedDevice" />
 
         <activity
             android:name=".StartActivity"
