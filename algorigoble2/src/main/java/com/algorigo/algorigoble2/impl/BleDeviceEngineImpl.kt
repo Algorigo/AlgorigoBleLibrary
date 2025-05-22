@@ -25,6 +25,15 @@ import io.reactivex.rxjava3.core.Flowable
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Single
 import io.reactivex.rxjava3.schedulers.Schedulers
+import kotlinx.coroutines.rx3.asObservable
+import kotlinx.coroutines.rx3.rxCompletable
+import kotlinx.coroutines.rx3.rxSingle
+import no.nordicsemi.android.wifi.provisioner.ble.ProvisionerRepository
+import no.nordicsemi.android.wifi.provisioner.ble.domain.WifiConfigDomain
+import no.nordicsemi.android.wifi.provisioner.ble.proto.WifiInfo
+import no.nordicsemi.kotlin.wifi.provisioner.domain.ScanRecordDomain
+import no.nordicsemi.kotlin.wifi.provisioner.domain.WifiConnectionStateDomain
+import no.nordicsemi.kotlin.wifi.provisioner.domain.WifiInfoDomain
 import java.util.*
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
@@ -194,6 +203,9 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
     private var serviceSingle: Single<List<BluetoothGattService>>? = null
     private val replyRelay = PublishRelay.create<ReplyData>()
     private val notificationRelay = PublishRelay.create<Pair<UUID, ByteArray>>()
+
+    private val provisionerRepository = ProvisionerRepository.newInstance(context)
+    private val wifiMap: MutableMap<String, WifiInfoDomain> = mutableMapOf()
 
     override val deviceId: String
         get() = bluetoothDevice.address
@@ -513,6 +525,77 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                 socket?.close()
             }
             .subscribeOn(Schedulers.io())
+    }
+
+    override fun scanWifiList(): Single<List<ScanRecordDomain>> {
+        val ssids = mutableSetOf<String>()
+        return provisionerRepository.startScan()
+            .asObservable()
+            .filter { scanRecord ->
+                val ssid = scanRecord.wifiInfo?.ssid
+                !ssid.isNullOrBlank() && ssids.add(ssid)
+            }
+            .toList()
+    }
+
+    override fun startProvisioning(wifiInfoDomain: WifiInfoDomain, password: String): Single<Boolean> {
+        val config = WifiConfigDomain(
+            info = wifiInfoDomain,
+            passphrase = password,
+            volatileMemory = false,
+            anyChannel = true
+        )
+
+        return provisionerRepository.setConfig(config)
+            .asObservable()
+            .filter { state ->
+                state == WifiConnectionStateDomain.Connected ||
+                        state is WifiConnectionStateDomain.ConnectionFailed ||
+                        state == WifiConnectionStateDomain.Disconnected
+            }
+            .firstOrError()
+            .map { state ->
+                state == WifiConnectionStateDomain.Connected
+            }
+    }
+
+    override fun cleanProvisioning(): Completable {
+        return rxCompletable {
+            provisionerRepository.forgetConfig()
+        }
+    }
+
+    override fun getDeviceStatus(): Single<Map<String, Any>> {
+        val versionSingle = rxSingle { provisionerRepository.readVersion() }
+        val statusSingle = rxSingle { provisionerRepository.getStatus() }
+
+        return Single.zip(versionSingle, statusSingle) { version, status ->
+            val statusMap = mutableMapOf<String, Any>()
+
+            status.wifiState?.let { state ->
+                statusMap["state"] = state.toString()
+            }
+
+            status.wifiInfo?.let { prov ->
+                val provMap = mutableMapOf<String, Any?>()
+                provMap["ssid"] = prov.ssid
+                provMap["bssid"] = prov.bssid.toString()
+                provMap["auth"] = prov.authModeDomain?.name ?: "unknown"
+                provMap["channel"] = prov.channel
+                statusMap["provisioningInfo"] = provMap
+            }
+
+            status.connectionInfo?.let { conn ->
+                val connMap = mutableMapOf<String, Any?>()
+                connMap["ip"] = conn.ipv4Address
+                statusMap["connectionInfo"] = connMap
+            }
+
+            mapOf(
+                "version" to version.value,
+                "status" to statusMap
+            )
+        }
     }
 
     internal fun onBluetoothDisabled() {

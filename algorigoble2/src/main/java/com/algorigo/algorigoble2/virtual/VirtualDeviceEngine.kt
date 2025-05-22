@@ -8,6 +8,8 @@ import com.algorigo.algorigoble2.BleSppSocket
 import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Single
+import no.nordicsemi.kotlin.wifi.provisioner.domain.ScanRecordDomain
+import no.nordicsemi.kotlin.wifi.provisioner.domain.WifiInfoDomain
 import java.util.*
 import java.util.concurrent.TimeUnit
 
@@ -74,5 +76,21 @@ internal class VirtualDeviceEngine(private val virtualDevice: VirtualDevice) : B
 
     override fun connectSppSocket(uuid: UUID?): Observable<BleSppSocket> {
         return Observable.error(RuntimeException("Virtual device does not support spp socket"))
+    }
+
+    override fun scanWifiList(): Single<List<ScanRecordDomain>> {
+        return Single.error(RuntimeException("Virtual device does not support scan wifi"))
+    }
+
+    override fun startProvisioning(wifiInfoDomain: WifiInfoDomain, password: String): Single<Boolean> {
+        return Single.error(RuntimeException("Virtual device does not support provisioning"))
+    }
+
+    override fun cleanProvisioning(): Completable {
+        return Completable.error(RuntimeException("Virtual device does not support provisioning"))
+    }
+
+    override fun getDeviceStatus(): Single<Map<String, Any>> {
+        return Single.error(RuntimeException("Virtual device does not support provisioning"))
     }
 }

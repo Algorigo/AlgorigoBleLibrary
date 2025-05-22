@@ -3,6 +3,8 @@ package com.algorigo.algorigoble2
 import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Single
+import no.nordicsemi.kotlin.wifi.provisioner.domain.ScanRecordDomain
+import no.nordicsemi.kotlin.wifi.provisioner.domain.WifiInfoDomain
 import java.util.UUID
 
 internal abstract class BleDeviceEngine() {
@@ -30,4 +32,9 @@ internal abstract class BleDeviceEngine() {
     abstract fun setupNotification(type: BleDevice.NotificationType, characteristicUuid: UUID): Observable<Observable<ByteArray>>
 
     abstract fun connectSppSocket(uuid: UUID? = null): Observable<BleSppSocket>
+
+    abstract fun scanWifiList(): Single<List<ScanRecordDomain>>
+    abstract fun startProvisioning(wifiInfoDomain: WifiInfoDomain, password: String): Single<Boolean>
+    abstract fun cleanProvisioning(): Completable
+    abstract fun getDeviceStatus(): Single<Map<String, Any>>
 }
