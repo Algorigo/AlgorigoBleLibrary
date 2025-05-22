@@ -83,11 +83,11 @@ signing {
 android {
     namespace "com.algorigo.library.algorigoble2"
 
-    compileSdk 34
+    compileSdk 35
 
     defaultConfig {
         minSdkVersion 24
-        targetSdkVersion 34
+        targetSdkVersion 35
         versionCode 1
         versionName versionStr
 
