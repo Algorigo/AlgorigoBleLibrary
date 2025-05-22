@@ -3,6 +3,8 @@ package com.algorigo.algorigoble2
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothSocket
 import android.util.Log
+import com.algorigo.algorigoble2.logging.Ble
+import com.algorigo.logger.L
 import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Single
 import io.reactivex.rxjava3.schedulers.Schedulers
@@ -18,7 +20,7 @@ class BleSppSocket(val bluetoothSocket: BluetoothSocket) {
         try {
             bluetoothSocket.close()
         } catch (exception: Exception) {
-            Log.e(LOG_TAG, "", exception)
+            L.error(Ble, "", exception)
         }
     }
 

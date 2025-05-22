@@ -308,7 +308,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                 .blockingFirst()
                 .disconnect()
         } catch (exception: Exception) {
-            Log.e(LOG_TAG, "Device Disconnect Error", exception)
+            L.error(Ble, "Device Disconnect Error", exception)
         }
     }
 
@@ -424,9 +424,9 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                             L.debug(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : setCharacteristicNotification : $characteristicUuid : false")
                             gatt.setCharacteristicNotification(gattCharacteristic, false)
                             writeDescriptor(gatt, gattCharacteristic, BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE).subscribe({
-                                Log.d(LOG_TAG, "DISABLE_NOTIFICATION_VALUE:${it.contentToString()}")
+                                L.debug(Ble, "DISABLE_NOTIFICATION_VALUE:${it.contentToString()}")
                             }, {
-                                Log.e(LOG_TAG, "DISABLE_NOTIFICATION_VALUE error", it)
+                                L.error(Ble, "DISABLE_NOTIFICATION_VALUE error", it)
                             })
                         }
                     }
@@ -522,7 +522,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                 bleDevice.onDisconnected()
                 it.close()
             }, {
-                Log.d(LOG_TAG, "onBluetoothDisabled error:$deviceId", it)
+                L.debug(Ble, "onBluetoothDisabled error:$deviceId", it)
             })
     }
 
