@@ -35,7 +35,7 @@ internal abstract class BleDeviceEngine() {
 
     abstract fun connectSppSocket(uuid: UUID? = null): Observable<BleSppSocket>
 
-    abstract fun start(): Observable<ConnectionStatus>
+    abstract fun start(): Completable
     abstract fun scanWifiList(): Observable<ScanRecordDomain>
     abstract fun stopScanWifiList(): Completable
     abstract fun startProvisioning(wifiInfoDomain: WifiInfoDomain, password: String): Single<Boolean>

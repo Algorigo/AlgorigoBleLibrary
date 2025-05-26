@@ -80,8 +80,8 @@ internal class VirtualDeviceEngine(private val virtualDevice: VirtualDevice) : B
         return Observable.error(RuntimeException("Virtual device does not support spp socket"))
     }
 
-    override fun start(): Observable<ConnectionStatus> {
-        return Observable.just(ConnectionStatus.CONNECTED)
+    override fun start(): Completable {
+        return Completable.timer(100, TimeUnit.MILLISECONDS)
             .doOnSubscribe {
                 virtualDevice.connectionStateRelay.accept(BleDevice.ConnectionState.CONNECTING)
             }

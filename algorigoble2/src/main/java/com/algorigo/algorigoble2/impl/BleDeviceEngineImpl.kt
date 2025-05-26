@@ -9,7 +9,6 @@ import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothProfile
 import android.content.Context
-import android.util.Log
 import com.algorigo.algorigoble2.BleCharacterisic
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleDeviceEngine
@@ -25,9 +24,9 @@ import io.reactivex.rxjava3.core.Flowable
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Single
 import io.reactivex.rxjava3.schedulers.Schedulers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.rx3.asObservable
 import kotlinx.coroutines.rx3.rxCompletable
-import kotlinx.coroutines.rx3.rxObservable
 import kotlinx.coroutines.rx3.rxSingle
 import no.nordicsemi.android.wifi.provisioner.ble.ProvisionerRepository
 import no.nordicsemi.android.wifi.provisioner.ble.domain.WifiConfigDomain
@@ -528,12 +527,14 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
             .subscribeOn(Schedulers.io())
     }
 
-    override fun start(): Observable<ConnectionStatus> {
-        return rxObservable {
-            provisionerRepository.start(bluetoothDevice).collect { status ->
-                send(status)
+    override fun start(): Completable {
+        return rxCompletable {
+            provisionerRepository
+                .start(bluetoothDevice)
+                .first { it == ConnectionStatus.SUCCESS || it.isDisconnecting() }
+                .takeIf { it == ConnectionStatus.SUCCESS }
+                ?: throw Throwable("Connection failed")
             }
-        }
     }
 
     override fun scanWifiList(): Observable<ScanRecordDomain> {
