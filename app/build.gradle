@@ -6,12 +6,12 @@ plugins {
 android {
     namespace 'com.algorigo.algorigoblelibrary'
 
-    compileSdk 34
+    compileSdk 35
 
     defaultConfig {
         applicationId "com.algorigo.algorigoblelibrary"
         minSdkVersion 24
-        targetSdkVersion 34
+        targetSdkVersion 35
         versionCode 3
         versionName "2.5.1"
 

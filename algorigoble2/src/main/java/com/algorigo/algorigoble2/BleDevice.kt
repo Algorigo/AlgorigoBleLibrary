@@ -1,8 +1,10 @@
 package com.algorigo.algorigoble2
 
+import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGattDescriptor
 import com.algorigo.algorigoble2.logging.Ble
 import com.algorigo.logger.L
+import no.nordicsemi.kotlin.wifi.provisioner.domain.WifiInfoDomain
 import java.util.*
 
 open class BleDevice {
@@ -76,6 +78,14 @@ open class BleDevice {
         engine.setupNotification(type, characteristicUuid)
 
     fun connectSppSocket(uuid: UUID? = null) = engine.connectSppSocket(uuid)
+
+    fun start() = engine.start()
+    fun scanWifiList() = engine.scanWifiList()
+    fun stopScanWifiList() = engine.stopScanWifiList()
+    fun startProvisioning(wifiInfoDomain: WifiInfoDomain, password: String) =
+        engine.startProvisioning(wifiInfoDomain, password)
+    fun cleanProvisioning() = engine.cleanProvisioning()
+    fun getDeviceStatus() = engine.getDeviceStatus()
 
     override fun toString(): String {
         return "${javaClass.simpleName} $deviceName($deviceId)"
