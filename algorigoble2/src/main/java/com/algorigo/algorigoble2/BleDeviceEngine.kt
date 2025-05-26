@@ -1,8 +1,10 @@
 package com.algorigo.algorigoble2
 
+import android.bluetooth.BluetoothDevice
 import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Single
+import no.nordicsemi.android.wifi.provisioner.ble.internal.ConnectionStatus
 import no.nordicsemi.kotlin.wifi.provisioner.domain.ScanRecordDomain
 import no.nordicsemi.kotlin.wifi.provisioner.domain.WifiInfoDomain
 import java.util.UUID
@@ -33,7 +35,9 @@ internal abstract class BleDeviceEngine() {
 
     abstract fun connectSppSocket(uuid: UUID? = null): Observable<BleSppSocket>
 
-    abstract fun scanWifiList(): Single<List<ScanRecordDomain>>
+    abstract fun start(): Observable<ConnectionStatus>
+    abstract fun scanWifiList(): Observable<ScanRecordDomain>
+    abstract fun stopScanWifiList(): Completable
     abstract fun startProvisioning(wifiInfoDomain: WifiInfoDomain, password: String): Single<Boolean>
     abstract fun cleanProvisioning(): Completable
     abstract fun getDeviceStatus(): Single<Map<String, Any>>

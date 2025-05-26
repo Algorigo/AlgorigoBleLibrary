@@ -27,10 +27,11 @@ import io.reactivex.rxjava3.core.Single
 import io.reactivex.rxjava3.schedulers.Schedulers
 import kotlinx.coroutines.rx3.asObservable
 import kotlinx.coroutines.rx3.rxCompletable
+import kotlinx.coroutines.rx3.rxObservable
 import kotlinx.coroutines.rx3.rxSingle
 import no.nordicsemi.android.wifi.provisioner.ble.ProvisionerRepository
 import no.nordicsemi.android.wifi.provisioner.ble.domain.WifiConfigDomain
-import no.nordicsemi.android.wifi.provisioner.ble.proto.WifiInfo
+import no.nordicsemi.android.wifi.provisioner.ble.internal.ConnectionStatus
 import no.nordicsemi.kotlin.wifi.provisioner.domain.ScanRecordDomain
 import no.nordicsemi.kotlin.wifi.provisioner.domain.WifiConnectionStateDomain
 import no.nordicsemi.kotlin.wifi.provisioner.domain.WifiInfoDomain
@@ -527,15 +528,23 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
             .subscribeOn(Schedulers.io())
     }
 
-    override fun scanWifiList(): Single<List<ScanRecordDomain>> {
-        val ssids = mutableSetOf<String>()
+    override fun start(): Observable<ConnectionStatus> {
+        return rxObservable {
+            provisionerRepository.start(bluetoothDevice).collect { status ->
+                send(status)
+            }
+        }
+    }
+
+    override fun scanWifiList(): Observable<ScanRecordDomain> {
         return provisionerRepository.startScan()
             .asObservable()
-            .filter { scanRecord ->
-                val ssid = scanRecord.wifiInfo?.ssid
-                !ssid.isNullOrBlank() && ssids.add(ssid)
-            }
-            .toList()
+    }
+
+    override fun stopScanWifiList(): Completable {
+        return rxCompletable {
+            provisionerRepository.stopScan()
+        }
     }
 
     override fun startProvisioning(wifiInfoDomain: WifiInfoDomain, password: String): Single<Boolean> {

@@ -1,5 +1,6 @@
 package com.algorigo.algorigoble2.virtual
 
+import android.bluetooth.BluetoothDevice
 import com.algorigo.algorigoble2.BleCharacterisic
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleDeviceEngine
@@ -8,6 +9,7 @@ import com.algorigo.algorigoble2.BleSppSocket
 import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Single
+import no.nordicsemi.android.wifi.provisioner.ble.internal.ConnectionStatus
 import no.nordicsemi.kotlin.wifi.provisioner.domain.ScanRecordDomain
 import no.nordicsemi.kotlin.wifi.provisioner.domain.WifiInfoDomain
 import java.util.*
@@ -78,8 +80,22 @@ internal class VirtualDeviceEngine(private val virtualDevice: VirtualDevice) : B
         return Observable.error(RuntimeException("Virtual device does not support spp socket"))
     }
 
-    override fun scanWifiList(): Single<List<ScanRecordDomain>> {
-        return Single.error(RuntimeException("Virtual device does not support scan wifi"))
+    override fun start(): Observable<ConnectionStatus> {
+        return Observable.just(ConnectionStatus.CONNECTED)
+            .doOnSubscribe {
+                virtualDevice.connectionStateRelay.accept(BleDevice.ConnectionState.CONNECTING)
+            }
+            .doOnComplete {
+                virtualDevice.connectionStateRelay.accept(BleDevice.ConnectionState.CONNECTED)
+            }
+    }
+
+    override fun scanWifiList(): Observable<ScanRecordDomain> {
+        return Observable.error(RuntimeException("Virtual device does not support scan wifi"))
+    }
+
+    override fun stopScanWifiList(): Completable {
+        return Completable.error(RuntimeException("Virtual device does not support scan wifi"))
     }
 
     override fun startProvisioning(wifiInfoDomain: WifiInfoDomain, password: String): Single<Boolean> {
