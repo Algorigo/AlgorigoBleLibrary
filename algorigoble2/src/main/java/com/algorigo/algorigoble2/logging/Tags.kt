@@ -11,5 +11,6 @@ object Ble : Tag() {
     internal object Device : Tag() {
         object Rx : Tag()
         object Default : Tag()
+        object Provisioning : Tag()
     }
 }

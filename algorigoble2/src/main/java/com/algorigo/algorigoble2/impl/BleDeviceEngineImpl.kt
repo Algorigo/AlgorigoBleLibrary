@@ -44,6 +44,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
 
     class CommunicationFailedException: Exception()
     class IllegalCharacteristicProperty(val property: Int, val type: String): Exception()
+    class ProvisioningDisconnectedException: Exception("Provisioning disconnected before success")
 
     private sealed class State(val connectionState: BleDevice.ConnectionState) {
         class CONNECTING : State(BleDevice.ConnectionState.CONNECTING)
@@ -570,9 +571,34 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                     is WifiConnectionStateDomain.ConnectionFailed ->
                         Completable.error(Exception("WiFi connection failed: ${state.reason}"))
                     is WifiConnectionStateDomain.Disconnected ->
-                        Completable.error(Exception("WiFi disconnected before success"))
+                        Completable.error(ProvisioningDisconnectedException())
                     else ->
                         Completable.error(IllegalStateException("Unexpected connection state: $state"))
+                }
+            }
+            .onErrorResumeNext { exception ->
+                if (exception is ProvisioningDisconnectedException) {
+                    getProvisioningStatus()
+                        .map {
+                            L.verbose(Ble.Device.Provisioning, "Provisioning status map: $it")
+                            val statusMap = it["status"] as Map<String, *>
+                            val state = (statusMap["state"] as? String)
+                                ?.let { ConnectionStatus.valueOf(it.uppercase()) }
+                            val provisioningInfo = statusMap["provisioningInfo"] as? Map<String, *>
+                            val ssid = provisioningInfo
+                                ?.let { it["ssid"] as? String }
+                            if (state == ConnectionStatus.CONNECTED && ssid == wifiInfoDomain.ssid) {
+                                0
+                            } else {
+                                throw IllegalStateException(exception)
+                            }
+                        }
+                        .retryWhen {
+                            it.take(10).delay(1000, TimeUnit.MILLISECONDS)
+                        }
+                        .ignoreElement()
+                } else {
+                    Completable.error(exception)
                 }
             }
     }
