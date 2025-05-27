@@ -16,7 +16,6 @@ import com.algorigo.library.rx.Rx2ServiceBindingFactory
 import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
 import io.reactivex.rxjava3.disposables.Disposable
 import io.reactivex.rxjava3.schedulers.Schedulers
-import no.nordicsemi.kotlin.wifi.provisioner.domain.WifiInfoDomain
 import java.util.*
 
 class DeviceActivity : AppCompatActivity(), CharacteristicAdapter.Callback {
@@ -31,7 +30,7 @@ class DeviceActivity : AppCompatActivity(), CharacteristicAdapter.Callback {
 
     private lateinit var statusTextView: TextView
 
-    private val wifiInfoList = mutableListOf<WifiInfoDomain>()
+    private val wifiInfoList = mutableListOf<BleDevice.ProvisioningScanResult>()
     private val wifiSsids = mutableListOf<String>()
     private lateinit var adapter: ArrayAdapter<String>
 
@@ -157,11 +156,11 @@ class DeviceActivity : AppCompatActivity(), CharacteristicAdapter.Callback {
                     wifiInfoList.clear()
                     wifiSsids.clear()
 
-                    scanResults.mapNotNull { it.wifiInfo }
-                        .distinctBy { it.ssid }  // 중복 SSID 제거
+                    scanResults.filter { it.ssid != null }
+                        .distinctBy { it.ssid!! }  // 중복 SSID 제거
                         .forEach {
                             wifiInfoList.add(it)
-                            wifiSsids.add(it.ssid)
+                            wifiSsids.add(it.ssid!!)
                         }
                     adapter.notifyDataSetChanged()
                 }

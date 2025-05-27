@@ -1,11 +1,16 @@
 package com.algorigo.algorigoble2
 
-import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGattDescriptor
 import com.algorigo.algorigoble2.logging.Ble
 import com.algorigo.logger.L
+import io.reactivex.rxjava3.core.Single
+import no.nordicsemi.android.wifi.provisioner.ble.internal.ConnectionStatus
+import no.nordicsemi.kotlin.wifi.provisioner.domain.AuthModeDomain
+import no.nordicsemi.kotlin.wifi.provisioner.domain.BandDomain
+import no.nordicsemi.kotlin.wifi.provisioner.domain.ScanRecordDomain
 import no.nordicsemi.kotlin.wifi.provisioner.domain.WifiInfoDomain
-import java.util.*
+import okio.ByteString
+import java.util.UUID
 
 open class BleDevice {
 
@@ -21,6 +26,34 @@ open class BleDevice {
     enum class NotificationType(val byteArray: ByteArray) {
         NOTIFICATION(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE),
         INDICATION(BluetoothGattDescriptor.ENABLE_INDICATION_VALUE),
+    }
+
+    data class ProvisioningStatus(
+        val version: Int,
+        val status: ConnectionStatus?,
+        val ssid: String? = null,
+        val bssid: String? = null,
+        val auth: String? = null,
+        val channel: Int? = null,
+    )
+
+    class ProvisioningScanResult(
+        internal val scanRecord: ScanRecordDomain,
+    ) {
+        val rssi: Int?
+            get() = scanRecord.rssi
+        val ssid: String?
+            get() = scanRecord.wifiInfo?.ssid
+        val bssid: ByteString?
+            get() = scanRecord.wifiInfo?.bssid
+        val bandId: Int?
+            get() = scanRecord.wifiInfo?.band?.id
+        val channel: Int?
+            get() = scanRecord.wifiInfo?.channel
+        val authModeDomainId: Int?
+            get() = scanRecord.wifiInfo?.authModeDomain?.id
+        val macAddress: String?
+            get() = scanRecord.wifiInfo?.macAddress
     }
 
     internal lateinit var engine: BleDeviceEngine
@@ -52,7 +85,8 @@ open class BleDevice {
     fun unbondCompletable() = engine.unbondCompletable()
 
     open fun getConnectionStateObservable() = engine.getConnectionStateObservable()
-    open fun connectCompletable(timeoutMillis: Long = 10000L) = engine.connectCompletable(timeoutMillis)
+    open fun connectCompletable(timeoutMillis: Long = 10000L) =
+        engine.connectCompletable(timeoutMillis)
 
     fun connect() {
         connectCompletable().subscribe({
@@ -72,8 +106,10 @@ open class BleDevice {
 
     fun readCharacteristicSingle(characteristicUuid: UUID) =
         engine.readCharacteristicSingle(characteristicUuid)
+
     fun writeCharacteristicSingle(characteristicUuid: UUID, byteArray: ByteArray) =
         engine.writeCharacteristicSingle(characteristicUuid, byteArray)
+
     fun setupNotification(type: NotificationType, characteristicUuid: UUID) =
         engine.setupNotification(type, characteristicUuid)
 
@@ -81,11 +117,36 @@ open class BleDevice {
 
     fun initializeProvisioning() = engine.initializeProvisioning()
     fun scanWifiList() = engine.scanWifiList()
+        .map { ProvisioningScanResult(it) }
     fun stopScanWifiList() = engine.stopScanWifiList()
-    fun startProvisioning(wifiInfoDomain: WifiInfoDomain, password: String) =
-        engine.startProvisioning(wifiInfoDomain, password)
+    fun startProvisioning(scanResult: ProvisioningScanResult, password: String) =
+        Single.just(scanResult)
+            .map { it.scanRecord.wifiInfo!! }
+            .flatMapCompletable {
+                engine.startProvisioning(it, password)
+            }
     fun cleanProvisioning() = engine.cleanProvisioning()
     fun getProvisioningStatus() = engine.getProvisioningStatus()
+        .map { map ->
+            L.verbose(Ble.Device.Provisioning, "Provisioning status map: $map")
+            val statusMap = map["status"] as Map<String, *>
+            val state = (statusMap["state"] as? String)
+                ?.let { ConnectionStatus.valueOf(it.uppercase()) }
+            val provisioningInfo = statusMap["provisioningInfo"] as? Map<String, *>
+            provisioningInfo?.let {
+                ProvisioningStatus(
+                    version = map["version"] as Int,
+                    status = state,
+                    ssid = it["ssid"] as? String,
+                    bssid = it["bssid"] as? String,
+                    auth = it["auth"] as? String,
+                    channel = it["channel"] as? Int,
+                )
+            } ?: ProvisioningStatus(
+                version = map["version"] as Int,
+                status = state,
+            )
+        }
 
     override fun toString(): String {
         return "${javaClass.simpleName} $deviceName($deviceId)"
