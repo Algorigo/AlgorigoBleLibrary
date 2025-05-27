@@ -60,7 +60,7 @@ class DeviceActivity : AppCompatActivity(), CharacteristicAdapter.Callback {
                 characteristicAdapter.characteristics = it.toMutableList()
                 characteristicAdapter.notifyDataSetChanged()
             }, {
-                Log.e("!!!", "", it)
+                Log.e(TAG, "", it)
             })
     }
 
@@ -234,10 +234,6 @@ class DeviceActivity : AppCompatActivity(), CharacteristicAdapter.Callback {
                     ?: throw IllegalStateException("Device is not exist")
             }
 
-    companion object {
-        const val DEVICE_MAC_ADDRESS = "DEVICE_MAC_ADDRESS"
-    }
-
     override fun onReadCharacteristicBtn(uuid: UUID) {
         getDeviceObservable()
             .flatMapSingle { device ->
@@ -251,7 +247,7 @@ class DeviceActivity : AppCompatActivity(), CharacteristicAdapter.Callback {
             .subscribe({
                 resultTextView.text = it
             }, {
-                Log.e("!!!", "", it)
+                Log.e(TAG, "", it)
             })
     }
 
@@ -268,7 +264,7 @@ class DeviceActivity : AppCompatActivity(), CharacteristicAdapter.Callback {
             .subscribe({
                 resultTextView.text = it
             }, {
-                Log.e("!!!", "", it)
+                Log.e(TAG, "", it)
             })
     }
 
@@ -289,7 +285,7 @@ class DeviceActivity : AppCompatActivity(), CharacteristicAdapter.Callback {
                 .subscribe({
                     resultTextView.text = it
                 }, {
-                    Log.e("!!!", "onError", it)
+                    Log.e(TAG, "onError", it)
                 })
                 .also {
                     notificationDisposables[uuid] = it
@@ -297,5 +293,11 @@ class DeviceActivity : AppCompatActivity(), CharacteristicAdapter.Callback {
         } else {
             notificationDisposables[uuid]?.dispose()
         }
+    }
+
+    companion object {
+        private final val TAG = DeviceActivity::class.java.simpleName
+
+        const val DEVICE_MAC_ADDRESS = "DEVICE_MAC_ADDRESS"
     }
 }
