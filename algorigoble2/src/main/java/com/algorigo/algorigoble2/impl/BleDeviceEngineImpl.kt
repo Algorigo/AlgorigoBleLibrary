@@ -548,7 +548,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
         }
     }
 
-    override fun startProvisioning(wifiInfoDomain: WifiInfoDomain, password: String): Single<Boolean> {
+    override fun startProvisioning(wifiInfoDomain: WifiInfoDomain, password: String): Completable {
         val config = WifiConfigDomain(
             info = wifiInfoDomain,
             passphrase = password,
@@ -559,13 +559,21 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
         return provisionerRepository.setConfig(config)
             .asObservable()
             .filter { state ->
-                state == WifiConnectionStateDomain.Connected ||
+                state is WifiConnectionStateDomain.Connected ||
                         state is WifiConnectionStateDomain.ConnectionFailed ||
-                        state == WifiConnectionStateDomain.Disconnected
+                        state is WifiConnectionStateDomain.Disconnected
             }
             .firstOrError()
-            .map { state ->
-                state == WifiConnectionStateDomain.Connected
+            .flatMapCompletable { state ->
+                when (state) {
+                    is WifiConnectionStateDomain.Connected -> Completable.complete()
+                    is WifiConnectionStateDomain.ConnectionFailed ->
+                        Completable.error(Exception("WiFi connection failed: ${state.reason}"))
+                    is WifiConnectionStateDomain.Disconnected ->
+                        Completable.error(Exception("WiFi disconnected before success"))
+                    else ->
+                        Completable.error(IllegalStateException("Unexpected connection state: $state"))
+                }
             }
     }
 

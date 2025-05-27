@@ -55,4 +55,7 @@ dependencies {
 
     // AlgorigoUtil
     implementation 'com.algorigo.library:algorigoutil:1.5.0'
+
+    implementation("no.nordicsemi.android.wifi:provisioning-ble:1.2.0")
+    implementation "org.jetbrains.kotlin:kotlin-reflect:$kotlin_version"
 }
