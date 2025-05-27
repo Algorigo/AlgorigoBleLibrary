@@ -527,7 +527,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
             .subscribeOn(Schedulers.io())
     }
 
-    override fun start(): Completable {
+    override fun initializeProvisioning(): Completable {
         return rxCompletable {
             provisionerRepository
                 .start(bluetoothDevice)
@@ -583,7 +583,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
         }
     }
 
-    override fun getDeviceStatus(): Single<Map<String, Any>> {
+    override fun getProvisioningStatus(): Single<Map<String, Any>> {
         val versionSingle = rxSingle { provisionerRepository.readVersion() }
         val statusSingle = rxSingle { provisionerRepository.getStatus() }
 

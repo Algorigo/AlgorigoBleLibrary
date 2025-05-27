@@ -79,13 +79,13 @@ open class BleDevice {
 
     fun connectSppSocket(uuid: UUID? = null) = engine.connectSppSocket(uuid)
 
-    fun start() = engine.start()
+    fun initializeProvisioning() = engine.initializeProvisioning()
     fun scanWifiList() = engine.scanWifiList()
     fun stopScanWifiList() = engine.stopScanWifiList()
     fun startProvisioning(wifiInfoDomain: WifiInfoDomain, password: String) =
         engine.startProvisioning(wifiInfoDomain, password)
     fun cleanProvisioning() = engine.cleanProvisioning()
-    fun getDeviceStatus() = engine.getDeviceStatus()
+    fun getProvisioningStatus() = engine.getProvisioningStatus()
 
     override fun toString(): String {
         return "${javaClass.simpleName} $deviceName($deviceId)"

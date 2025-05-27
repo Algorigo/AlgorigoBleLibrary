@@ -80,7 +80,7 @@ internal class VirtualDeviceEngine(private val virtualDevice: VirtualDevice) : B
         return Observable.error(RuntimeException("Virtual device does not support spp socket"))
     }
 
-    override fun start(): Completable {
+    override fun initializeProvisioning(): Completable {
         return Completable.timer(100, TimeUnit.MILLISECONDS)
             .doOnSubscribe {
                 virtualDevice.connectionStateRelay.accept(BleDevice.ConnectionState.CONNECTING)
@@ -106,7 +106,7 @@ internal class VirtualDeviceEngine(private val virtualDevice: VirtualDevice) : B
         return Completable.error(RuntimeException("Virtual device does not support provisioning"))
     }
 
-    override fun getDeviceStatus(): Single<Map<String, Any>> {
+    override fun getProvisioningStatus(): Single<Map<String, Any>> {
         return Single.error(RuntimeException("Virtual device does not support provisioning"))
     }
 }

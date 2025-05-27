@@ -128,7 +128,7 @@ class DeviceActivity : AppCompatActivity(), CharacteristicAdapter.Callback {
     }
 
     private fun getStatus() {
-        bleDevice?.getDeviceStatus()
+        bleDevice?.getProvisioningStatus()
             ?.observeOn(AndroidSchedulers.mainThread())
             ?.subscribe({ status ->
                 statusTextView.text = status.toString()
@@ -138,8 +138,8 @@ class DeviceActivity : AppCompatActivity(), CharacteristicAdapter.Callback {
     }
 
     private fun startProvisioningDevice() {
-        bleDevice?.start()
-            ?.andThen(bleDevice!!.getDeviceStatus())
+        bleDevice?.initializeProvisioning()
+            ?.andThen(bleDevice!!.getProvisioningStatus())
             ?.observeOn(AndroidSchedulers.mainThread())
             ?.subscribe({ status ->
                 statusTextView.text = status.toString()
@@ -201,7 +201,7 @@ class DeviceActivity : AppCompatActivity(), CharacteristicAdapter.Callback {
         }
 
         bleDevice?.startProvisioning(wifiInfo, password)
-            ?.andThen(bleDevice!!.getDeviceStatus())
+            ?.andThen(bleDevice!!.getProvisioningStatus())
             ?.observeOn(AndroidSchedulers.mainThread())
             ?.subscribe({ status ->
                 statusTextView.text = status.toString()
@@ -214,7 +214,7 @@ class DeviceActivity : AppCompatActivity(), CharacteristicAdapter.Callback {
 
     private fun onCleanProvisioningButtonClicked() {
         bleDevice?.cleanProvisioning()
-            ?.andThen(bleDevice!!.getDeviceStatus())
+            ?.andThen(bleDevice!!.getProvisioningStatus())
             ?.observeOn(AndroidSchedulers.mainThread())
             ?.subscribe({
                 Log.d("BLE-Test", "Provisioning cleaned successfully")
