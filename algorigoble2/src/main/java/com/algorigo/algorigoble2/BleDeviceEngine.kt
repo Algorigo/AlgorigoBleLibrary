@@ -38,7 +38,7 @@ internal abstract class BleDeviceEngine() {
     abstract fun start(): Completable
     abstract fun scanWifiList(): Observable<ScanRecordDomain>
     abstract fun stopScanWifiList(): Completable
-    abstract fun startProvisioning(wifiInfoDomain: WifiInfoDomain, password: String): Single<Boolean>
+    abstract fun startProvisioning(wifiInfoDomain: WifiInfoDomain, password: String): Completable
     abstract fun cleanProvisioning(): Completable
     abstract fun getDeviceStatus(): Single<Map<String, Any>>
 }

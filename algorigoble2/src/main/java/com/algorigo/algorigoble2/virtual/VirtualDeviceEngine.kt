@@ -98,8 +98,8 @@ internal class VirtualDeviceEngine(private val virtualDevice: VirtualDevice) : B
         return Completable.error(RuntimeException("Virtual device does not support scan wifi"))
     }
 
-    override fun startProvisioning(wifiInfoDomain: WifiInfoDomain, password: String): Single<Boolean> {
-        return Single.error(RuntimeException("Virtual device does not support provisioning"))
+    override fun startProvisioning(wifiInfoDomain: WifiInfoDomain, password: String): Completable {
+        return Completable.error(RuntimeException("Virtual device does not support provisioning"))
     }
 
     override fun cleanProvisioning(): Completable {
