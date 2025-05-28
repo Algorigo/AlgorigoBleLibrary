@@ -96,7 +96,6 @@ class DeviceActivity : AppCompatActivity(), CharacteristicAdapter.Callback {
 
         val startButton: View = findViewById(R.id.start_button)
         val startScanButton: View = findViewById(R.id.scan_wifi_button)
-        val stopScanButton: View = findViewById(R.id.stop_scan_wifi_button)
         val provisionButton: View = findViewById(R.id.provisioning_button)
         val cleanProvisionButton: View = findViewById(R.id.clean_provisioning_button)
         val getStatusButton: View = findViewById(R.id.status_button)
@@ -107,10 +106,6 @@ class DeviceActivity : AppCompatActivity(), CharacteristicAdapter.Callback {
 
         startScanButton.setOnClickListener {
             startWifiScan()
-        }
-
-        stopScanButton.setOnClickListener {
-            stopWifiScan()
         }
 
         provisionButton.setOnClickListener {
@@ -149,38 +144,21 @@ class DeviceActivity : AppCompatActivity(), CharacteristicAdapter.Callback {
 
     private fun startWifiScan() {
         bleDevice?.scanWifiList()
-            ?.take(10)
-            ?.toList()
-            ?.flatMapCompletable { scanResults ->
-                runOnUiThread {
-                    wifiInfoList.clear()
-                    wifiSsids.clear()
-
-                    scanResults.filter { it.ssid != null }
-                        .distinctBy { it.ssid!! }  // 중복 SSID 제거
-                        .forEach {
-                            wifiInfoList.add(it)
-                            wifiSsids.add(it.ssid!!)
-                        }
-                    adapter.notifyDataSetChanged()
-                }
-
-                bleDevice!!.stopScanWifiList()
-            }
             ?.subscribeOn(Schedulers.io())
             ?.observeOn(AndroidSchedulers.mainThread())
-            ?.subscribe({
-                // 완료 처리
+            ?.subscribe({ scanResults ->
+                wifiInfoList.clear()
+                wifiSsids.clear()
+
+                scanResults.filter { it.ssid != null }
+                    .distinctBy { it.ssid!! }  // 중복 SSID 제거
+                    .forEach {
+                        wifiInfoList.add(it)
+                        wifiSsids.add(it.ssid!!)
+                    }
+                adapter.notifyDataSetChanged()
             }, { error ->
                 Log.e("BLE-Test", "Wi-Fi scan error: ${error.localizedMessage}")
-            })
-    }
-
-    private fun stopWifiScan() {
-        bleDevice?.stopScanWifiList()
-            ?.doOnComplete { Log.d("BLE-Test", "Wi-Fi scan stopped") }
-            ?.subscribe({}, { error ->
-                Log.e("BLE-Test", "Stop scan error: ${error.message}", error)
             })
     }
 

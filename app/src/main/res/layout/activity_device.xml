@@ -45,12 +45,6 @@
             android:layout_height="wrap_content"
             android:text="Scan WiFi Networks" />
 
-    <Button
-            android:id="@+id/stop_scan_wifi_button"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Stop WiFi Scan" />
-
     <androidx.appcompat.widget.AppCompatSpinner
             android:id="@+id/wifi_networks_spinner"
             android:layout_width="match_parent"

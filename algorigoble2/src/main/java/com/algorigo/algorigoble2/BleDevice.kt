@@ -8,6 +8,7 @@ import no.nordicsemi.android.wifi.provisioner.ble.internal.ConnectionStatus
 import no.nordicsemi.kotlin.wifi.provisioner.domain.ScanRecordDomain
 import okio.ByteString
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 open class BleDevice {
 
@@ -114,8 +115,26 @@ open class BleDevice {
 
     fun initializeProvisioning() = engine.initializeProvisioning()
     fun scanWifiList() = engine.scanWifiList()
-        .map { ProvisioningScanResult(it) }
-    fun stopScanWifiList() = engine.stopScanWifiList()
+        .scan(listOf<ProvisioningScanResult>()) { acc, scanRecordDomain ->
+            L.verbose(Ble.Device.Provisioning, "scanRecordDomain: $scanRecordDomain")
+            if (acc.firstOrNull { it.scanRecord.wifiInfo?.ssid == scanRecordDomain.wifiInfo?.ssid } != null ||
+                scanRecordDomain.wifiInfo?.ssid.isNullOrEmpty()) {
+                acc // Skip duplicates or records without SSID
+            } else {
+                acc + ProvisioningScanResult(scanRecordDomain)
+            }
+        }
+        .filter { it.isNotEmpty() }
+        .debounce(500, TimeUnit.MILLISECONDS)
+        .firstOrError()
+        .doFinally {
+            engine.stopScanWifiList()
+                .subscribe({
+                    L.debug(Ble.Device.Provisioning, "Scan stopped successfully")
+                }, {
+                    L.warning(Ble.Device.Provisioning, "Failed to stop scan", it)
+                })
+        }
     fun startProvisioning(scanResult: ProvisioningScanResult, password: String) =
         Single.just(scanResult)
             .map { it.scanRecord.wifiInfo!! }
