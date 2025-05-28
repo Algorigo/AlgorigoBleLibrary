@@ -3,6 +3,8 @@ package com.algorigo.algorigoble2
 import android.bluetooth.BluetoothGattDescriptor
 import com.algorigo.algorigoble2.logging.Ble
 import com.algorigo.logger.L
+import io.reactivex.rxjava3.core.Completable
+import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Single
 import no.nordicsemi.android.wifi.provisioner.ble.internal.ConnectionStatus
 import no.nordicsemi.kotlin.wifi.provisioner.domain.ScanRecordDomain
@@ -113,8 +115,8 @@ open class BleDevice {
 
     fun connectSppSocket(uuid: UUID? = null) = engine.connectSppSocket(uuid)
 
-    fun initializeProvisioning() = engine.initializeProvisioning()
-    fun scanWifiList() = engine.scanWifiList()
+    fun initializeProvisioning() = Completable.defer { engine.initializeProvisioning() }
+    fun scanWifiList() = Observable.defer { engine.scanWifiList() }
         .scan(listOf<ProvisioningScanResult>()) { acc, scanRecordDomain ->
             L.verbose(Ble.Device.Provisioning, "scanRecordDomain: $scanRecordDomain")
             if (acc.firstOrNull { it.scanRecord.wifiInfo?.ssid == scanRecordDomain.wifiInfo?.ssid } != null ||
@@ -141,8 +143,8 @@ open class BleDevice {
             .flatMapCompletable {
                 engine.startProvisioning(it, password)
             }
-    fun cleanProvisioning() = engine.cleanProvisioning()
-    fun getProvisioningStatus() = engine.getProvisioningStatus()
+    fun cleanProvisioning() = Completable.defer { engine.cleanProvisioning() }
+    fun getProvisioningStatus() = Single.defer { engine.getProvisioningStatus() }
         .map { map ->
             L.verbose(Ble.Device.Provisioning, "Provisioning status map: $map")
             val statusMap = map["status"] as Map<String, *>
