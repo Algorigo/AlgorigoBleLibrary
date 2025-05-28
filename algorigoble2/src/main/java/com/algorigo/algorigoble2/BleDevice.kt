@@ -3,6 +3,8 @@ package com.algorigo.algorigoble2
 import android.bluetooth.BluetoothGattDescriptor
 import com.algorigo.algorigoble2.logging.Ble
 import com.algorigo.logger.L
+import com.jakewharton.rxrelay3.BehaviorRelay
+import com.jakewharton.rxrelay3.Relay
 import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Single
@@ -39,6 +41,7 @@ open class BleDevice {
 
     class ProvisioningScanResult(
         internal val scanRecord: ScanRecordDomain,
+        val connectDelegate: (password: String) -> Completable
     ) {
         val rssi: Int?
             get() = scanRecord.rssi
@@ -54,6 +57,76 @@ open class BleDevice {
             get() = scanRecord.wifiInfo?.authModeDomain?.id
         val macAddress: String?
             get() = scanRecord.wifiInfo?.macAddress
+    }
+
+    open class ProvisioningInfo(val provisioningStatus: ProvisioningStatus)
+
+    inner class ProvisioningInitialized(provisioningStatus: ProvisioningStatus, private val statusChangedRelay: Relay<Boolean>): ProvisioningInfo(provisioningStatus) {
+        private var isClosed = false
+
+        private fun checkClosed(): Completable {
+            return Completable.fromCallable {
+                if (isClosed) {
+                    throw IllegalStateException("ProvisioningInitialized is already closed")
+                }
+            }
+        }
+
+        fun scan(): Single<List<ProvisioningScanResult>> {
+            return checkClosed()
+                .andThen(Observable.defer { engine.scanWifiList() })
+                .scan(listOf<ProvisioningScanResult>()) { acc, scanRecordDomain ->
+                    L.verbose(Ble.Device.Provisioning, "scanRecordDomain: $scanRecordDomain")
+                    if (acc.firstOrNull { it.scanRecord.wifiInfo?.ssid == scanRecordDomain.wifiInfo?.ssid } != null ||
+                        scanRecordDomain.wifiInfo?.ssid.isNullOrEmpty()) {
+                        acc // Skip duplicates or records without SSID
+                    } else {
+                        acc + ProvisioningScanResult(
+                            scanRecord = scanRecordDomain,
+                            connectDelegate = { password ->
+                                connectWifi(scanRecordDomain, password)
+                            }
+                        )
+                    }
+                }
+                .filter { it.isNotEmpty() }
+                .debounce(500, TimeUnit.MILLISECONDS)
+                .firstOrError()
+                .doFinally {
+                    engine.stopScanWifiList()
+                        .subscribe({
+                            L.debug(Ble.Device.Provisioning, "Scan stopped successfully")
+                        }, {
+                            L.warning(Ble.Device.Provisioning, "Failed to stop scan", it)
+                        })
+                }
+        }
+
+        private fun connectWifi(
+            scanRecordDomain: ScanRecordDomain,
+            password: String
+        ): Completable {
+            return scanRecordDomain.wifiInfo?.let {
+                checkClosed()
+                    .andThen(Completable.defer { engine.startProvisioning(it, password) })
+                    .doOnComplete {
+                        statusChangedRelay.accept(false)
+                    }
+            }
+                ?: Completable.error(IllegalArgumentException("No WiFi information available in scan result"))
+        }
+
+        fun clear(): Completable {
+            return checkClosed()
+                .andThen(Completable.defer { engine.cleanProvisioning() })
+                .doOnComplete {
+                    statusChangedRelay.accept(false)
+                }
+        }
+
+        fun close() {
+            isClosed = true
+        }
     }
 
     internal lateinit var engine: BleDeviceEngine
@@ -115,56 +188,43 @@ open class BleDevice {
 
     fun connectSppSocket(uuid: UUID? = null) = engine.connectSppSocket(uuid)
 
-    fun initializeProvisioning() = Completable.defer { engine.initializeProvisioning() }
-    fun scanWifiList() = Observable.defer { engine.scanWifiList() }
-        .scan(listOf<ProvisioningScanResult>()) { acc, scanRecordDomain ->
-            L.verbose(Ble.Device.Provisioning, "scanRecordDomain: $scanRecordDomain")
-            if (acc.firstOrNull { it.scanRecord.wifiInfo?.ssid == scanRecordDomain.wifiInfo?.ssid } != null ||
-                scanRecordDomain.wifiInfo?.ssid.isNullOrEmpty()) {
-                acc // Skip duplicates or records without SSID
-            } else {
-                acc + ProvisioningScanResult(scanRecordDomain)
+    fun processProvisioning(): Observable<ProvisioningInfo> {
+        val statusChangedRelay = BehaviorRelay.create<Boolean>().apply { accept(true) }
+        var initialized: ProvisioningInitialized? = null
+        return Completable.defer { engine.initializeProvisioning() }
+            .andThen(statusChangedRelay)
+            .flatMapSingle { initial ->
+                Single.defer { engine.getProvisioningStatus() }
+                    .map { map ->
+                        L.verbose(Ble.Device.Provisioning, "Provisioning status map: $map")
+                        val statusMap = map["status"] as Map<String, *>
+                        val state = (statusMap["state"] as? String)
+                            ?.let { ConnectionStatus.valueOf(it.uppercase()) }
+                        val provisioningInfo = statusMap["provisioningInfo"] as? Map<String, *>
+                        val status = provisioningInfo?.let {
+                            ProvisioningStatus(
+                                version = map["version"] as Int,
+                                status = state,
+                                ssid = it["ssid"] as? String,
+                                bssid = it["bssid"] as? String,
+                                auth = it["auth"] as? String,
+                                channel = it["channel"] as? Int,
+                            )
+                        } ?: ProvisioningStatus(
+                            version = map["version"] as Int,
+                            status = state,
+                        )
+                        if (initial) {
+                            ProvisioningInitialized(status, statusChangedRelay).also { initialized = it }
+                        } else {
+                            ProvisioningInfo(status)
+                        }
+                    }
             }
-        }
-        .filter { it.isNotEmpty() }
-        .debounce(500, TimeUnit.MILLISECONDS)
-        .firstOrError()
-        .doFinally {
-            engine.stopScanWifiList()
-                .subscribe({
-                    L.debug(Ble.Device.Provisioning, "Scan stopped successfully")
-                }, {
-                    L.warning(Ble.Device.Provisioning, "Failed to stop scan", it)
-                })
-        }
-    fun startProvisioning(scanResult: ProvisioningScanResult, password: String) =
-        Single.just(scanResult)
-            .map { it.scanRecord.wifiInfo!! }
-            .flatMapCompletable {
-                engine.startProvisioning(it, password)
+            .doFinally {
+                initialized?.close()
             }
-    fun cleanProvisioning() = Completable.defer { engine.cleanProvisioning() }
-    fun getProvisioningStatus() = Single.defer { engine.getProvisioningStatus() }
-        .map { map ->
-            L.verbose(Ble.Device.Provisioning, "Provisioning status map: $map")
-            val statusMap = map["status"] as Map<String, *>
-            val state = (statusMap["state"] as? String)
-                ?.let { ConnectionStatus.valueOf(it.uppercase()) }
-            val provisioningInfo = statusMap["provisioningInfo"] as? Map<String, *>
-            provisioningInfo?.let {
-                ProvisioningStatus(
-                    version = map["version"] as Int,
-                    status = state,
-                    ssid = it["ssid"] as? String,
-                    bssid = it["bssid"] as? String,
-                    auth = it["auth"] as? String,
-                    channel = it["channel"] as? Int,
-                )
-            } ?: ProvisioningStatus(
-                version = map["version"] as Int,
-                status = state,
-            )
-        }
+    }
 
     override fun toString(): String {
         return "${javaClass.simpleName} $deviceName($deviceId)"

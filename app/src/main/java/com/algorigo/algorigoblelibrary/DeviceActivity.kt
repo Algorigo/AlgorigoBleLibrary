@@ -5,17 +5,18 @@ import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import android.util.Log
 import android.view.View
+import android.view.ViewGroup
 import android.widget.AdapterView
-import android.widget.ArrayAdapter
+import android.widget.BaseAdapter
 import android.widget.EditText
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.widget.AppCompatSpinner
 import androidx.recyclerview.widget.RecyclerView
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.library.rx.Rx2ServiceBindingFactory
 import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
 import io.reactivex.rxjava3.disposables.Disposable
-import io.reactivex.rxjava3.schedulers.Schedulers
 import java.util.*
 
 class DeviceActivity : AppCompatActivity(), CharacteristicAdapter.Callback {
@@ -30,9 +31,34 @@ class DeviceActivity : AppCompatActivity(), CharacteristicAdapter.Callback {
 
     private lateinit var statusTextView: TextView
 
-    private val wifiInfoList = mutableListOf<BleDevice.ProvisioningScanResult>()
-    private val wifiSsids = mutableListOf<String>()
-    private lateinit var adapter: ArrayAdapter<String>
+    private var provisioningDisposable: Disposable? = null
+    private var initialized: BleDevice.ProvisioningInitialized? = null
+    private var scanWifiDisposable: Disposable? = null
+    private var scanResults = listOf<BleDevice.ProvisioningScanResult>()
+    private var adapter = object : BaseAdapter() {
+        override fun getCount(): Int {
+            return scanResults.size
+        }
+
+        override fun getItem(p0: Int): Any {
+            return getScanResult(p0)
+        }
+
+        override fun getItemId(p0: Int): Long {
+            return getScanResult(p0).ssid.hashCode().toLong()
+        }
+
+        override fun getView(p0: Int, p1: View?, p2: ViewGroup?): View {
+            return (p1 ?: layoutInflater.inflate(android.R.layout.simple_spinner_item, p2, false)).apply {
+                (this as TextView).text = getScanResult(p0).ssid ?: "Unknown SSID"
+            }
+        }
+
+        fun getScanResult(position: Int): BleDevice.ProvisioningScanResult {
+            return scanResults[position]
+        }
+    }
+    private var clearDisposable: Disposable? = null
 
     private var notificationDisposables = mutableMapOf<UUID, Disposable>()
     private val characteristicAdapter = CharacteristicAdapter(this)
@@ -73,8 +99,6 @@ class DeviceActivity : AppCompatActivity(), CharacteristicAdapter.Callback {
         passwordEditText = findViewById(R.id.wifi_password_edit_text)
 
         // 어댑터 초기화 (빈 리스트로 시작)
-        adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, wifiSsids)
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         spinner.adapter = adapter
 
         // 스피너 아이템 선택 리스너
@@ -98,7 +122,6 @@ class DeviceActivity : AppCompatActivity(), CharacteristicAdapter.Callback {
         val startScanButton: View = findViewById(R.id.scan_wifi_button)
         val provisionButton: View = findViewById(R.id.provisioning_button)
         val cleanProvisionButton: View = findViewById(R.id.clean_provisioning_button)
-        val getStatusButton: View = findViewById(R.id.status_button)
 
         startButton.setOnClickListener {
             startProvisioningDevice()
@@ -115,90 +138,110 @@ class DeviceActivity : AppCompatActivity(), CharacteristicAdapter.Callback {
         cleanProvisionButton.setOnClickListener {
             onCleanProvisioningButtonClicked()
         }
-
-        getStatusButton.setOnClickListener {
-            getStatus()
-        }
-    }
-
-    private fun getStatus() {
-        bleDevice?.getProvisioningStatus()
-            ?.observeOn(AndroidSchedulers.mainThread())
-            ?.subscribe({ status ->
-                statusTextView.text = status.toString()
-            }, { error ->
-                Log.e("BLE-Test", "Get status error: ${error.message}", error)
-            })
     }
 
     private fun startProvisioningDevice() {
-        bleDevice?.initializeProvisioning()
-            ?.andThen(bleDevice!!.getProvisioningStatus())
+        if (provisioningDisposable != null) {
+            provisioningDisposable?.dispose()
+        }
+        provisioningDisposable = bleDevice?.processProvisioning()
             ?.observeOn(AndroidSchedulers.mainThread())
-            ?.subscribe({ status ->
-                statusTextView.text = status.toString()
-            }, { error ->
-                Log.e("BLE-Test", "Start error: ${error.message}", error)
+            ?.mapOptional { provisioningInfo ->
+                Log.d(TAG, "Provisioning scan result: ${provisioningInfo.provisioningStatus}")
+                statusTextView.text = provisioningInfo.provisioningStatus.toString()
+                if (provisioningInfo is BleDevice.ProvisioningInitialized) {
+                    Optional.of(provisioningInfo)
+                } else  {
+                    Optional.empty()
+                }
+            }
+            ?.doFinally {
+                provisioningDisposable = null
+                initialized = null
+            }
+            ?.observeOn(AndroidSchedulers.mainThread())
+            ?.subscribe({
+                initialized = it
+            }, {
+                Log.e(TAG, "start Provisioning error: $it", it)
+                Toast.makeText(this, "start Provisioning error: ${it.message}", Toast.LENGTH_SHORT).show()
             })
     }
 
     private fun startWifiScan() {
-        bleDevice?.scanWifiList()
-            ?.subscribeOn(Schedulers.io())
-            ?.observeOn(AndroidSchedulers.mainThread())
-            ?.subscribe({ scanResults ->
-                wifiInfoList.clear()
-                wifiSsids.clear()
-
-                scanResults.filter { it.ssid != null }
-                    .distinctBy { it.ssid!! }  // 중복 SSID 제거
-                    .forEach {
-                        wifiInfoList.add(it)
-                        wifiSsids.add(it.ssid!!)
+        if (scanWifiDisposable != null) {
+            scanWifiDisposable?.dispose()
+        } else {
+            initialized
+                ?.scan()
+                ?.doFinally {
+                    scanWifiDisposable = null
+                }
+                ?.observeOn(AndroidSchedulers.mainThread())
+                ?.subscribe({
+                    Log.e(TAG, "Provisioning scan completed: ${it.size} networks found")
+                    scanResults = it
+                    adapter.notifyDataSetChanged()
+                }, {
+                    Log.e(TAG, "Provisioning scan error: ${it.message}", it)
+                })
+                .let {
+                    if (it != null) {
+                        scanWifiDisposable = it
+                    } else {
+                        Log.e(TAG, "Provisioning scan failed: initialized is null")
+                        Toast.makeText(this, "Provisioning scan failed: initialized is null", Toast.LENGTH_SHORT).show()
                     }
-                adapter.notifyDataSetChanged()
-            }, { error ->
-                Log.e("BLE-Test", "Wi-Fi scan error: ${error.localizedMessage}")
-            })
+                }
+        }
     }
 
     private fun onProvisioningButtonClicked() {
-        val selectedSsid = spinner.selectedItem as? String
+        val selectedPosition = spinner.selectedItemPosition
         val password = passwordEditText.text.toString()
 
-        if (selectedSsid.isNullOrEmpty() || password.isEmpty()) {
-            Log.e("BLE-Test", "SSID or password is empty")
+        if (selectedPosition < 0 || password.isEmpty()) {
+            Log.e(TAG, "SSID or password is empty")
             return
         }
 
-        val wifiInfo = wifiInfoList.find { it.ssid == selectedSsid }
-        if (wifiInfo == null) {
-            Log.e("BLE-Test", "Selected SSID not found in scan results")
-            return
-        }
+        val scanResult = adapter.getScanResult(selectedPosition)
 
-        bleDevice?.startProvisioning(wifiInfo, password)
-            ?.andThen(bleDevice!!.getProvisioningStatus())
-            ?.observeOn(AndroidSchedulers.mainThread())
-            ?.subscribe({ status ->
-                statusTextView.text = status.toString()
-                Log.d("BLE-Test", "Provisioning started successfully")
+        scanResult.connectDelegate(password)
+            .observeOn(AndroidSchedulers.mainThread())
+            .subscribe({
+                Log.e(TAG, "Provisioning started successfully")
             }, { error ->
-                statusTextView.text = "Provisioning failed: ${error.localizedMessage}"
-                Log.e("BLE-Test", "Provisioning error: ${error.localizedMessage}")
+                Log.e(TAG, "Provisioning error: $error", error)
+                Toast.makeText(this, "Provisioning error: ${error.message}", Toast.LENGTH_SHORT).show()
             })
     }
 
     private fun onCleanProvisioningButtonClicked() {
-        bleDevice?.cleanProvisioning()
-            ?.andThen(bleDevice!!.getProvisioningStatus())
-            ?.observeOn(AndroidSchedulers.mainThread())
-            ?.subscribe({
-                Log.d("BLE-Test", "Provisioning cleaned successfully")
-                statusTextView.text = it.toString()
-            }, { error ->
-                Log.e("BLE-Test", "Clean provisioning error: ${error.localizedMessage}")
-            })
+        if (clearDisposable != null) {
+            clearDisposable?.dispose()
+        } else {
+            initialized?.clear()
+                ?.observeOn(AndroidSchedulers.mainThread())
+                ?.doFinally {
+                    clearDisposable = null
+                }
+                ?.subscribe({
+                    Log.e(TAG, "Provisioning cleared successfully")
+                    Toast.makeText(this, "Provisioning cleared successfully", Toast.LENGTH_SHORT).show()
+                }, { error ->
+                    Log.e(TAG, "Failed to clear provisioning: ${error.message}", error)
+                    Toast.makeText(this, "Failed to clear provisioning: ${error.message}", Toast.LENGTH_SHORT).show()
+                })
+                .let {
+                    if (it != null) {
+                        clearDisposable = it
+                    } else {
+                        Log.e(TAG, "Failed to clear provisioning: bleDevice is null")
+                        Toast.makeText(this, "Failed to clear provisioning: bleDevice is null", Toast.LENGTH_SHORT).show()
+                    }
+                }
+        }
     }
 
     private fun getDeviceObservable() =

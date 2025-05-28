@@ -27,12 +27,6 @@
             android:layout_height="wrap_content"
             android:text="connect for provisioning" />
 
-    <Button
-            android:id="@+id/status_button"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="get status" />
-
     <TextView
             android:id="@+id/status_text_view"
             android:layout_width="match_parent"
