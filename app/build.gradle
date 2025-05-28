@@ -6,12 +6,12 @@ plugins {
 android {
     namespace 'com.algorigo.algorigoblelibrary'
 
-    compileSdk 34
+    compileSdk 35
 
     defaultConfig {
         applicationId "com.algorigo.algorigoblelibrary"
         minSdkVersion 24
-        targetSdkVersion 34
+        targetSdkVersion 35
         versionCode 3
         versionName "2.5.1"
 
@@ -55,4 +55,6 @@ dependencies {
 
     // AlgorigoUtil
     implementation 'com.algorigo.library:algorigoutil:1.5.0'
+
+    implementation "org.jetbrains.kotlin:kotlin-reflect:$kotlin_version"
 }

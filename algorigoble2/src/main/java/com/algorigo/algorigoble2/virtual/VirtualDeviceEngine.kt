@@ -1,5 +1,6 @@
 package com.algorigo.algorigoble2.virtual
 
+import android.bluetooth.BluetoothDevice
 import com.algorigo.algorigoble2.BleCharacterisic
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleDeviceEngine
@@ -8,6 +9,9 @@ import com.algorigo.algorigoble2.BleSppSocket
 import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Single
+import no.nordicsemi.android.wifi.provisioner.ble.internal.ConnectionStatus
+import no.nordicsemi.kotlin.wifi.provisioner.domain.ScanRecordDomain
+import no.nordicsemi.kotlin.wifi.provisioner.domain.WifiInfoDomain
 import java.util.*
 import java.util.concurrent.TimeUnit
 
@@ -74,5 +78,35 @@ internal class VirtualDeviceEngine(private val virtualDevice: VirtualDevice) : B
 
     override fun connectSppSocket(uuid: UUID?): Observable<BleSppSocket> {
         return Observable.error(RuntimeException("Virtual device does not support spp socket"))
+    }
+
+    override fun initializeProvisioning(): Completable {
+        return Completable.timer(100, TimeUnit.MILLISECONDS)
+            .doOnSubscribe {
+                virtualDevice.connectionStateRelay.accept(BleDevice.ConnectionState.CONNECTING)
+            }
+            .doOnComplete {
+                virtualDevice.connectionStateRelay.accept(BleDevice.ConnectionState.CONNECTED)
+            }
+    }
+
+    override fun scanWifiList(): Observable<ScanRecordDomain> {
+        return Observable.error(RuntimeException("Virtual device does not support scan wifi"))
+    }
+
+    override fun stopScanWifiList(): Completable {
+        return Completable.error(RuntimeException("Virtual device does not support scan wifi"))
+    }
+
+    override fun startProvisioning(wifiInfoDomain: WifiInfoDomain, password: String): Completable {
+        return Completable.error(RuntimeException("Virtual device does not support provisioning"))
+    }
+
+    override fun cleanProvisioning(): Completable {
+        return Completable.error(RuntimeException("Virtual device does not support provisioning"))
+    }
+
+    override fun getProvisioningStatus(): Single<Map<String, Any>> {
+        return Single.error(RuntimeException("Virtual device does not support provisioning"))
     }
 }

@@ -35,7 +35,7 @@ jobs:
           - ~/.gradle/caches
           - ~/.gradle/wrapper
     - save_cache:
-        key: gradle-properties-${CIRCLE_WORKFLOW_ID}
+        key: gradle-properties-$CIRCLE_WORKFLOW_ID
         name: Save gradle properties
         paths:
           - ~/.gradle/gradle.properties
@@ -60,7 +60,7 @@ jobs:
           key: gradle-v1a-{{ arch }}-{{ checksum "./tmp_gradle_cache_seed" }}
           name: Restore gradle cache
       - restore_cache:
-          key: gradle-properties-${CIRCLE_WORKFLOW_ID}
+          key: gradle-properties-$CIRCLE_WORKFLOW_ID
           name: Restore gradle properties
       - run:
           name: Upload Maven Central
@@ -79,6 +79,9 @@ workflows:
               - /v2\/feature\/.*/
               - /v2\/release\/.*/
               - /v2\/hotfix\/.*/
+              - /feature\/.*/
+              - /release\/.*/
+              - /hotfix\/.*/
     - deploy:
         requires:
           - build
@@ -88,3 +91,5 @@ workflows:
               - v2/master
               - /v2\/release\/.*/
               - /v2\/hotfix\/.*/
+              - /release\/.*/
+              - /hotfix\/.*/

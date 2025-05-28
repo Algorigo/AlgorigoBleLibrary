@@ -4,12 +4,13 @@ import com.algorigo.logger.Tag
 
 
 object Ble : Tag() {
-    object Engine : Tag() {
+    internal object Engine : Tag() {
         object Rx : Tag()
         object Default : Tag()
     }
-    object Device : Tag() {
+    internal object Device : Tag() {
         object Rx : Tag()
         object Default : Tag()
+        object Provisioning : Tag()
     }
 }

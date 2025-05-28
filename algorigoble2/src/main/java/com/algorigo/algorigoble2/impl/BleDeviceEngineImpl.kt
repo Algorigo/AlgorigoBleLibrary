@@ -9,7 +9,6 @@ import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothProfile
 import android.content.Context
-import android.util.Log
 import com.algorigo.algorigoble2.BleCharacterisic
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleDeviceEngine
@@ -25,6 +24,16 @@ import io.reactivex.rxjava3.core.Flowable
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Single
 import io.reactivex.rxjava3.schedulers.Schedulers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.rx3.asObservable
+import kotlinx.coroutines.rx3.rxCompletable
+import kotlinx.coroutines.rx3.rxSingle
+import no.nordicsemi.android.wifi.provisioner.ble.ProvisionerRepository
+import no.nordicsemi.android.wifi.provisioner.ble.domain.WifiConfigDomain
+import no.nordicsemi.android.wifi.provisioner.ble.internal.ConnectionStatus
+import no.nordicsemi.kotlin.wifi.provisioner.domain.ScanRecordDomain
+import no.nordicsemi.kotlin.wifi.provisioner.domain.WifiConnectionStateDomain
+import no.nordicsemi.kotlin.wifi.provisioner.domain.WifiInfoDomain
 import java.util.*
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
@@ -35,6 +44,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
 
     class CommunicationFailedException: Exception()
     class IllegalCharacteristicProperty(val property: Int, val type: String): Exception()
+    class ProvisioningDisconnectedException: Exception("Provisioning disconnected before success")
 
     private sealed class State(val connectionState: BleDevice.ConnectionState) {
         class CONNECTING : State(BleDevice.ConnectionState.CONNECTING)
@@ -195,6 +205,9 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
     private val replyRelay = PublishRelay.create<ReplyData>()
     private val notificationRelay = PublishRelay.create<Pair<UUID, ByteArray>>()
 
+    private val provisionerRepository = ProvisionerRepository.newInstance(context)
+    private val wifiMap: MutableMap<String, WifiInfoDomain> = mutableMapOf()
+
     override val deviceId: String
         get() = bluetoothDevice.address
     override val deviceName: String?
@@ -308,7 +321,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                 .blockingFirst()
                 .disconnect()
         } catch (exception: Exception) {
-            Log.e(LOG_TAG, "Device Disconnect Error", exception)
+            L.error(Ble, "Device Disconnect Error", exception)
         }
     }
 
@@ -424,9 +437,9 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                             L.debug(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : setCharacteristicNotification : $characteristicUuid : false")
                             gatt.setCharacteristicNotification(gattCharacteristic, false)
                             writeDescriptor(gatt, gattCharacteristic, BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE).subscribe({
-                                Log.d(LOG_TAG, "DISABLE_NOTIFICATION_VALUE:${it.contentToString()}")
+                                L.debug(Ble, "DISABLE_NOTIFICATION_VALUE:${it.contentToString()}")
                             }, {
-                                Log.e(LOG_TAG, "DISABLE_NOTIFICATION_VALUE error", it)
+                                L.error(Ble, "DISABLE_NOTIFICATION_VALUE error", it)
                             })
                         }
                     }
@@ -515,6 +528,120 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
             .subscribeOn(Schedulers.io())
     }
 
+    override fun initializeProvisioning(): Completable {
+        return rxCompletable {
+            provisionerRepository
+                .start(bluetoothDevice)
+                .first { it == ConnectionStatus.SUCCESS || it.isDisconnecting() }
+                .takeIf { it == ConnectionStatus.SUCCESS }
+                ?: throw Throwable("Connection failed")
+            }
+    }
+
+    override fun scanWifiList(): Observable<ScanRecordDomain> {
+        return provisionerRepository.startScan()
+            .asObservable()
+    }
+
+    override fun stopScanWifiList(): Completable {
+        return rxCompletable {
+            provisionerRepository.stopScan()
+        }
+    }
+
+    override fun startProvisioning(wifiInfoDomain: WifiInfoDomain, password: String): Completable {
+        val config = WifiConfigDomain(
+            info = wifiInfoDomain,
+            passphrase = password,
+            volatileMemory = false,
+            anyChannel = true
+        )
+
+        return provisionerRepository.setConfig(config)
+            .asObservable()
+            .filter { state ->
+                state is WifiConnectionStateDomain.Connected ||
+                        state is WifiConnectionStateDomain.ConnectionFailed ||
+                        state is WifiConnectionStateDomain.Disconnected
+            }
+            .firstOrError()
+            .flatMapCompletable { state ->
+                when (state) {
+                    is WifiConnectionStateDomain.Connected -> Completable.complete()
+                    is WifiConnectionStateDomain.ConnectionFailed ->
+                        Completable.error(Exception("WiFi connection failed: ${state.reason}"))
+                    is WifiConnectionStateDomain.Disconnected ->
+                        Completable.error(ProvisioningDisconnectedException())
+                    else ->
+                        Completable.error(IllegalStateException("Unexpected connection state: $state"))
+                }
+            }
+            .onErrorResumeNext { exception ->
+                if (exception is ProvisioningDisconnectedException) {
+                    getProvisioningStatus()
+                        .map {
+                            L.verbose(Ble.Device.Provisioning, "Provisioning status map: $it")
+                            val statusMap = it["status"] as Map<String, *>
+                            val state = (statusMap["state"] as? String)
+                                ?.let { ConnectionStatus.valueOf(it.uppercase()) }
+                            val provisioningInfo = statusMap["provisioningInfo"] as? Map<String, *>
+                            val ssid = provisioningInfo
+                                ?.let { it["ssid"] as? String }
+                            if (state == ConnectionStatus.CONNECTED && ssid == wifiInfoDomain.ssid) {
+                                0
+                            } else {
+                                throw IllegalStateException(exception)
+                            }
+                        }
+                        .retryWhen {
+                            it.take(10).delay(1000, TimeUnit.MILLISECONDS)
+                        }
+                        .ignoreElement()
+                } else {
+                    Completable.error(exception)
+                }
+            }
+    }
+
+    override fun cleanProvisioning(): Completable {
+        return rxCompletable {
+            provisionerRepository.forgetConfig()
+        }
+    }
+
+    override fun getProvisioningStatus(): Single<Map<String, Any>> {
+        val versionSingle = rxSingle { provisionerRepository.readVersion() }
+        val statusSingle = rxSingle { provisionerRepository.getStatus() }
+
+        return Single.zip(versionSingle, statusSingle) { version, status ->
+            val statusMap = mutableMapOf<String, Any>()
+
+            status.wifiState?.let { state ->
+                statusMap["state"] = state.toString()
+            }
+
+            status.wifiInfo?.let { prov ->
+                val provMap = mutableMapOf<String, Any?>()
+                provMap["ssid"] = prov.ssid
+                provMap["bssid"] = prov.bssid.toString()
+                provMap["auth"] = prov.authModeDomain?.name ?: "unknown"
+                provMap["channel"] = prov.channel
+                statusMap["provisioningInfo"] = provMap
+            }
+
+            status.connectionInfo?.let { conn ->
+                val connMap = mutableMapOf<String, Any?>()
+                connMap["ip"] = conn.ipv4Address
+                statusMap["connectionInfo"] = connMap
+            }
+
+            mapOf(
+                "version" to version.value,
+                "status" to statusMap
+            )
+        }
+    }
+
     internal fun onBluetoothDisabled() {
         getGattSingle()
             .subscribe({
@@ -522,7 +649,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                 bleDevice.onDisconnected()
                 it.close()
             }, {
-                Log.d(LOG_TAG, "onBluetoothDisabled error:$deviceId", it)
+                L.debug(Ble, "onBluetoothDisabled error:$deviceId", it)
             })
     }
 
