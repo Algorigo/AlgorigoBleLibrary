@@ -79,6 +79,9 @@ workflows:
               - /v2\/feature\/.*/
               - /v2\/release\/.*/
               - /v2\/hotfix\/.*/
+              - /feature\/.*/
+              - /release\/.*/
+              - /hotfix\/.*/
     - deploy:
         requires:
           - build
@@ -88,3 +91,5 @@ workflows:
               - v2/master
               - /v2\/release\/.*/
               - /v2\/hotfix\/.*/
+              - /release\/.*/
+              - /hotfix\/.*/
