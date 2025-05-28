@@ -5,10 +5,7 @@ import com.algorigo.algorigoble2.logging.Ble
 import com.algorigo.logger.L
 import io.reactivex.rxjava3.core.Single
 import no.nordicsemi.android.wifi.provisioner.ble.internal.ConnectionStatus
-import no.nordicsemi.kotlin.wifi.provisioner.domain.AuthModeDomain
-import no.nordicsemi.kotlin.wifi.provisioner.domain.BandDomain
 import no.nordicsemi.kotlin.wifi.provisioner.domain.ScanRecordDomain
-import no.nordicsemi.kotlin.wifi.provisioner.domain.WifiInfoDomain
 import okio.ByteString
 import java.util.UUID
 
