@@ -1,7 +1,7 @@
 apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
 
-def versionStr = '2.6.1'
+def versionStr = '2.7.0'
 
 def getCurrentGitBranch() {
     def gitBranch = "Unknown branch"
@@ -81,7 +81,7 @@ signing {
 }
 
 android {
-    namespace "com.algorigo.library.algorigoble2"
+    namespace "$group.$archivesBaseName"
 
     compileSdk 35
 
