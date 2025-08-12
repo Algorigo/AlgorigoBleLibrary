@@ -1,7 +1,7 @@
 apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
 
-def versionStr = '2.6.1'
+def versionStr = '2.7.0'
 
 def getCurrentGitBranch() {
     def gitBranch = "Unknown branch"
@@ -63,21 +63,6 @@ publishing {
                     url = 'https://github.com/Algorigo/AlgorigoBleLibrary'
                 }
             }
-
-            pom.withXml {
-                def dependenciesNode = asNode().appendNode('dependencies')
-                configurations.implementation.allDependencies.each {
-                    if (it.name == "algorigo-logger" ||
-                            it.name == "provisioning-ble" ||
-                            it.name == "kotlinx-coroutines-rx3") {
-                        println("Dependency: ${it.group}:${it.name}:${it.version}")
-                        def dependencyNode = dependenciesNode.appendNode('dependency')
-                        dependencyNode.appendNode('groupId', it.group)
-                        dependencyNode.appendNode('artifactId', it.name)
-                        dependencyNode.appendNode('version', it.version)
-                    }
-                }
-            }
         }
     }
     repositories {
@@ -96,7 +81,7 @@ signing {
 }
 
 android {
-    namespace "com.algorigo.library.algorigoble2"
+    namespace "$group.$archivesBaseName"
 
     compileSdk 35
 
@@ -127,12 +112,12 @@ android {
 
 dependencies {
 
-    implementation 'androidx.core:core-ktx:1.13.1'
+    implementation 'androidx.core:core-ktx:1.16.0'
     testImplementation 'junit:junit:4.13.2'
-    androidTestImplementation 'androidx.test.ext:junit:1.1.5'
-    androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
+    androidTestImplementation 'androidx.test.ext:junit:1.3.0'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.7.0'
 
-    implementation 'com.algorigo.library:algorigo-logger:1.1.0'
+    implementation 'com.algorigo.library:algorigo-logger:1.2.3'
 
     //ReactiveX
     implementation 'io.reactivex.rxjava3:rxkotlin:3.0.1'
@@ -141,8 +126,5 @@ dependencies {
     implementation 'com.jakewharton.rxrelay3:rxrelay:3.0.1'
 
     // gson
-    implementation 'com.google.code.gson:gson:2.10.1'
-
-    implementation("no.nordicsemi.android.wifi:provisioning-ble:1.2.0")
-    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-rx3:1.9.0"
+    implementation 'com.google.code.gson:gson:2.12.1'
 }
