@@ -65,7 +65,28 @@ jobs:
       - run:
           name: Upload Maven Central
           command: ./gradlew publish
-
+  deploy_to_maven_central:
+    docker:
+      - image: cimg/android:2024.01
+    working_directory: ~/code
+    steps:
+      - attach_workspace:
+          at: .
+      - restore_cache:
+          key: gradle-v1a-{{ arch }}-{{ checksum "./tmp_gradle_cache_seed" }}
+          name: Restore gradle cache
+      - restore_cache:
+          key: gradle-properties-${CIRCLE_WORKFLOW_ID}
+          name: Restore gradle properties
+      - run:
+          name: Build Maven Central
+          command: ./gradlew publish
+      - run:
+            name: Upload to Maven Central
+            command: |
+              cd algorigoble2/build/staging-deploy
+              zip -r staging-deploy.zip com
+              curl --request POST --verbose --header 'Authorization: Bearer $MAVEN_CENTRAL_TOKEN' --form bundle=@staging-deploy.zip https://central.sonatype.com/api/v1/publisher/upload
 workflows:
   version: 2
   build_deploy:
@@ -88,8 +109,14 @@ workflows:
         filters:
           branches:
             only:
-              - v2/master
               - /v2\/release\/.*/
               - /v2\/hotfix\/.*/
               - /release\/.*/
               - /hotfix\/.*/
+    - deploy_to_maven_central:
+        requires:
+          - build
+        filters:
+          branches:
+            only:
+              - v2/master
