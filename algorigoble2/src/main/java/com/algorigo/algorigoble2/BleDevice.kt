@@ -81,6 +81,8 @@ open class BleDevice {
 
     fun connectSppSocket(uuid: UUID? = null) = engine.connectSppSocket(uuid)
 
+    fun setMtuCompletable(mtu: Int = 517) = engine.setMtuCompletable(mtu)
+
     override fun toString(): String {
         return "${javaClass.simpleName} $deviceName($deviceId)"
     }

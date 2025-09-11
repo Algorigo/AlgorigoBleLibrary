@@ -514,6 +514,17 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
             .subscribeOn(Schedulers.io())
     }
 
+    override fun setMtuCompletable(mtu: Int): Completable {
+        return getGattSingle().map { gatt ->
+            Single.fromCallable { gatt.requestMtu(mtu) }
+                .doOnSuccess { if (!it) throw RuntimeException("Error") }
+                .retryWhen {
+                    it.take(5).delay(100, TimeUnit.MILLISECONDS)
+                }
+        }
+            .ignoreElement()
+    }
+
     internal fun onBluetoothDisabled() {
         getGattSingle()
             .subscribe({

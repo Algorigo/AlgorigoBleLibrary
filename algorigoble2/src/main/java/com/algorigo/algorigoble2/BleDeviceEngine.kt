@@ -31,4 +31,6 @@ internal abstract class BleDeviceEngine() {
     abstract fun setupNotification(type: BleDevice.NotificationType, characteristicUuid: UUID): Observable<Observable<ByteArray>>
 
     abstract fun connectSppSocket(uuid: UUID? = null): Observable<BleSppSocket>
+
+    abstract fun setMtuCompletable(mtu: Int): Completable
 }
