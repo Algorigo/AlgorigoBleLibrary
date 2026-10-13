@@ -1,6 +1,5 @@
 package com.algorigo.algorigoble2
 
-import android.bluetooth.BluetoothGattDescriptor
 import com.algorigo.algorigoble2.logging.Ble
 import com.algorigo.logger.L
 import java.util.UUID
@@ -17,9 +16,10 @@ open class BleDevice {
         SPP_CONNECTED("SPP CONNECTED"),
     }
 
+    // CCCD 값. BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE / ENABLE_INDICATION_VALUE 와 동일 (Bluetooth Core Spec 정의값)
     enum class NotificationType(val byteArray: ByteArray) {
-        NOTIFICATION(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE),
-        INDICATION(BluetoothGattDescriptor.ENABLE_INDICATION_VALUE),
+        NOTIFICATION(byteArrayOf(0x01, 0x00)),
+        INDICATION(byteArrayOf(0x02, 0x00)),
     }
 
     internal lateinit var engine: BleDeviceEngine
@@ -46,6 +46,12 @@ open class BleDevice {
 
     var virtual = false
         internal set
+
+    /**
+     * read/write/notification 설정/MTU 요청 등 GATT 작업 하나의 최대 대기 시간.
+     * 초과하면 [java.util.concurrent.TimeoutException], 작업 중 연결이 끊기면 [BleManager.DisconnectedException]으로 종료된다.
+     */
+    var operationTimeoutMillis = DEFAULT_OPERATION_TIMEOUT_MILLIS
 
     fun bondCompletable() = engine.bondCompletable()
     fun unbondCompletable() = engine.unbondCompletable()
@@ -99,5 +105,7 @@ open class BleDevice {
 
     companion object {
         private val TAG = BleDevice::class.java.simpleName
+
+        const val DEFAULT_OPERATION_TIMEOUT_MILLIS = 10_000L
     }
 }

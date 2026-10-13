@@ -21,11 +21,19 @@
     - `setMtuCompletable()`은 `requestMtuSingle().ignoreElement()`로 유지하여 호환성을 지켰습니다. engine 추상 메서드는 `setMtuCompletable` → `requestMtuSingle`로 변경했습니다.
     - `VirtualDeviceEngine`은 연결 상태일 때 23~517 범위로 보정한 값을 반환합니다.
     - 테스트: `BleDeviceEngineImplMtuTest`, `VirtualDeviceEngineMtuTest`. 테스트 인프라(MockK, `unitTests.returnDefaultValues`, `GattTestFixture`, `RxTestSchedulerRule`)도 이 브랜치에서 추가했습니다.
-    - 남은 작업: MTU 요청에도 타임아웃이 없는 문제는 아래 "작업 무한 대기" 항목에서 함께 처리합니다.
+    - MTU 요청에 타임아웃이 없던 문제는 아래 "작업 무한 대기" 항목(`feature/fix_gatt_operation_hang`)에서 함께 해결했습니다.
   - 문제: `getGattSingle().map { Single... }.ignoreElement()` 구조라서 안쪽 `Single`이 구독되지 않습니다. 결과적으로 MTU 요청은 보내지지 않고 Completable만 바로 완료됩니다. (최근 커밋 `9f18f3d`에서 추가된 기능)
   - 제안: `flatMap`으로 바꾸고, `onMtuChanged` 콜백을 relay로 받아서 **협상된 MTU 값을 `Single<Int>`로 반환**해야 합니다. 현재 `onMtuChanged`(176)는 로그만 남깁니다. Android 14 이상에서는 요청 값과 상관없이 517로 협상을 시도하므로, 실제 협상된 값을 반환하는 것이 중요합니다.
 
-- [ ] **[버그] read/write/descriptor 작업이 무한 대기할 수 있음** — `impl/BleDeviceEngineImpl.kt:324-355, 357-401, 467-496`
+- [x] **[버그] read/write/descriptor 작업이 무한 대기할 수 있음** — `impl/BleDeviceEngineImpl.kt:324-355, 357-401, 467-496`
+  - ✅ 해결 (`feature/fix_gatt_operation_hang`)
+    - `BleDeviceEngineImpl`에 `guardOperation()`을 추가하여 read/write characteristic, CCCD descriptor write(`setupNotification`), MTU 요청에 적용했습니다.
+      - 작업 도중 연결이 끊기면 `BleManager.DisconnectedException`, `BleDevice.operationTimeoutMillis`(기본 `DEFAULT_OPERATION_TIMEOUT_MILLIS` = 10초)를 넘기면 `TimeoutException`으로 종료됩니다.
+      - 연결 끊김 감지를 먼저 구독하므로, 이미 끊긴 상태에서는 GATT 호출 없이 바로 실패합니다.
+    - `setupNotification`에서는 descriptor write에만 타임아웃이 적용됩니다. 설정이 끝난 뒤의 notification 스트림은 시간이 지나도 끊기지 않습니다.
+    - 그 결과 `InitializableBleDevice.initializeCompletable()` 안의 작업이 응답을 받지 못해도 `connectCompletable()`이 에러로 끝나고 연결이 해제됩니다.
+    - JVM 테스트에서 `BluetoothGattDescriptor.*_VALUE` static 필드가 null이 되는 문제 때문에, CCCD 값(`0x0001`/`0x0002`/`0x0000`)을 라이브러리 안에 상수로 정의했습니다. Bluetooth 스펙 정의값이므로 실기기 동작은 동일합니다.
+    - 테스트: `BleDeviceEngineImplOperationGuardTest`, `InitializableBleDeviceOperationGuardTest`. guard를 비활성화하면 버그 시나리오 테스트 10개가 실패하는 것을 확인했습니다.
   - 문제: GATT 호출 후 `replyRelay`에서 응답이 오기를 기다리는데, **타임아웃이 없고 연결 끊김도 감지하지 않습니다**. `getGattSingle()`은 `firstOrError()`이므로 이후의 상태 변화는 보지 않습니다.
   - 영향: 작업 도중 연결이 끊기거나 콜백이 유실되면 Single이 영원히 끝나지 않습니다. `InitializableBleDevice.initializeCompletable()` 안에서 이런 일이 생기면 `connectCompletable()`도 끝나지 않습니다.
   - 제안: 작업마다 타임아웃을 두고, `stateRelay`에서 CONNECTED가 아닌 상태가 오면 `DisconnectedException`이 나도록 merge합니다.
