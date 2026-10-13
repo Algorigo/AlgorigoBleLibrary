@@ -269,8 +269,10 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                 .doOnNext {
                     if (it.second is State.DISCONNECTED) {
                         if (it.first == 0) {
-                            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : connectGatt call")
+                            L.debug(Ble.Device.Default, "${bluetoothDevice.name}(${bluetoothDevice.address}) : connectGatt call")
+                            // 블루투스가 꺼져 있으면 connectGatt 가 null 을 반환한다. 상태를 CONNECTING 으로 바꾸기 전에 실패시킨다.
                             gatt = bluetoothDevice.connectGatt(context, false, gattCallback)
+                                ?: throw BleManager.ConnectFailedException("connectGatt returned null (bluetooth may be off)")
                             stateRelay.accept(State.CONNECTING())
                         } else {
                             throw BleManager.DisconnectedException()
@@ -282,17 +284,26 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                 .ignoreElement()
                 .timeout(timeoutMillis, TimeUnit.MILLISECONDS)
                 .doOnError {
-                    L.error(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : doOnError", it)
+                    L.error(Ble.Device.Default, "${bluetoothDevice.name}(${bluetoothDevice.address}) : doOnError", it)
                     if (it is TimeoutException) {
-                        gatt?.also {
-                            it.disconnect()
-                            it.close()
-                            stateRelay.accept(State.DISCONNECTED())
-                            bleDevice.onDisconnected()
-                        }
+                        gatt?.also { cancelConnecting(it) }
+                    }
+                }
+                .doOnDispose {
+                    // 연결이 완료되기 전에 구독이 해제되면 진행 중인 연결을 취소한다. (연결 완료 후의 dispose 는 무시)
+                    if (stateRelay.value is State.CONNECTING) {
+                        gatt?.also { cancelConnecting(it) }
                     }
                 }
         })
+
+    private fun cancelConnecting(gatt: BluetoothGatt) {
+        L.debug(Ble.Device.Default, "${bluetoothDevice.name}(${bluetoothDevice.address}) : cancel connecting")
+        gatt.disconnect()
+        gatt.close()
+        stateRelay.accept(State.DISCONNECTED())
+        bleDevice.onDisconnected()
+    }
 
     private fun checkConnectionState(connectionState: BleDevice.ConnectionState): Completable {
         return stateRelay.doOnNext {

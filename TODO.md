@@ -38,7 +38,13 @@
   - 영향: 작업 도중 연결이 끊기거나 콜백이 유실되면 Single이 영원히 끝나지 않습니다. `InitializableBleDevice.initializeCompletable()` 안에서 이런 일이 생기면 `connectCompletable()`도 끝나지 않습니다.
   - 제안: 작업마다 타임아웃을 두고, `stateRelay`에서 CONNECTED가 아닌 상태가 오면 `DisconnectedException`이 나도록 merge합니다.
 
-- [ ] **[버그] 블루투스가 꺼진 상태에서 connect를 호출하면 CONNECTING 상태에 영구히 머무름** — `impl/BleDeviceEngineImpl.kt:264-292`
+- [x] **[버그] 블루투스가 꺼진 상태에서 connect를 호출하면 CONNECTING 상태에 영구히 머무름** — `impl/BleDeviceEngineImpl.kt:264-292`
+  - ✅ 해결 (`feature/fix_connect_stuck_connecting`)
+    - `connectGatt()`가 null을 반환하면 상태를 CONNECTING으로 바꾸기 전에 `BleManager.ConnectFailedException`으로 실패합니다. 상태는 DISCONNECTED로 유지되므로 다시 연결할 수 있습니다.
+    - 연결이 완료되기 전에 구독이 dispose되면(연결 취소) `gatt.disconnect()/close()`를 호출하고, DISCONNECTED와 `onDisconnected()`를 알립니다. 연결이 완료된 뒤의 dispose는 무시하여 기존 동작을 유지합니다.
+    - 타임아웃과 취소의 정리 로직을 `cancelConnecting()`으로 통합했습니다. 정리는 해당 구독이 직접 `connectGatt`로 만든 gatt가 있을 때만 수행합니다.
+    - connect 로그에서 아직 할당되지 않은 `gatt` 대신 `bluetoothDevice`의 이름과 주소를 출력하도록 수정했습니다.
+    - 테스트: `BleDeviceEngineImplConnectTest`. 수정 전 코드로 실행하면 null 반환 2건과 취소 1건이 실패하는 것을 확인했습니다.
   - 문제: BT가 꺼져 있으면 `connectGatt()`가 `null`을 반환합니다. 하지만 상태는 `CONNECTING`으로 바뀌고, 타임아웃이 나도 `gatt?.also { ... }`가 실행되지 않아서 `DISCONNECTED`로 되돌아가지 않습니다.
   - 영향: 앱을 재시작하기 전까지 해당 기기의 connect는 모두 `IllegalStateException("Connection state is CONNECTING ...")`로 실패합니다.
   - 제안: `connectGatt()`가 null을 반환하면 즉시 에러를 내고 상태를 복구합니다. 타임아웃 처리 블록에서는 gatt가 null이어도 상태를 복구합니다. 구독자가 dispose했을 때(연결 취소)도 `doOnDispose`로 `disconnect()/close()`를 처리합니다. 지금은 취소한 뒤에도 연결이 뒤늦게 성공할 수 있습니다.
