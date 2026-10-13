@@ -86,7 +86,9 @@ jobs:
             command: |
               cd algorigoble2/build/staging-deploy
               zip -r staging-deploy.zip com
-              curl --request POST --verbose --header 'Authorization: Bearer $MAVEN_CENTRAL_TOKEN' --form bundle=@staging-deploy.zip https://central.sonatype.com/api/v1/publisher/upload
+              # 작은따옴표 안에서는 환경변수가 치환되지 않으므로 큰따옴표를 사용한다.
+              # --verbose 는 Authorization 헤더(토큰)를 로그에 출력하므로 사용하지 않고, 실패 시 응답 본문과 함께 job 을 실패시킨다.
+              curl --fail-with-body --request POST --header "Authorization: Bearer ${MAVEN_CENTRAL_TOKEN}" --form bundle=@staging-deploy.zip https://central.sonatype.com/api/v1/publisher/upload
 workflows:
   version: 2
   build_deploy:
