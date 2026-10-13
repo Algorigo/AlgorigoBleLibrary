@@ -70,7 +70,13 @@
   - 제안: `android { publishing { singleVariant("release") { withSourcesJar(); withJavadocJar() } } }`와 `from components.release`를 사용합니다. 공개 API에 노출되는 의존성(RxJava `Observable/Completable/Single`, 공개 `Ble` Tag가 상속하는 `algorigo-logger`)은 `implementation` 대신 `api`로 선언합니다.
   - 참고: Central Portal 검증 요건상 `-sources.jar`와 `-javadoc.jar`도 필요합니다. 현재 설정으로 2.7.0이 실제로 배포되었는지 확인이 필요합니다.
 
-- [ ] **[배포] CircleCI의 Maven Central 업로드 토큰이 치환되지 않음** — `.circleci/config.yml:89`
+- [x] **[배포] CircleCI의 Maven Central 업로드 토큰이 치환되지 않음** — `.circleci/config.yml:89`
+  - ✅ 해결 (`feature/fix_ci_maven_central_token`)
+    - Authorization 헤더를 큰따옴표(`"Authorization: Bearer ${MAVEN_CENTRAL_TOKEN}"`)로 바꿔서 환경변수가 치환되도록 했습니다.
+    - `--verbose`를 제거했습니다. 토큰이 치환되면 verbose 출력이 Authorization 헤더를 CI 로그에 그대로 남기기 때문입니다.
+    - `--fail-with-body`를 추가했습니다. 업로드가 실패하면(HTTP 4xx/5xx) 응답 본문을 출력하고 job을 실패시킵니다. curl 7.76 이상이 필요하며, `cimg/android:2024.01`(Ubuntu 22.04 기반, curl 7.81)에서 지원되는 것으로 알고 있으나 실제 CI에서 확인이 필요합니다.
+    - 검증: YAML 파싱과 job/workflow 구조가 변경 전과 같은지 확인했습니다. 업로드 step의 curl 명령을 stub curl과 더미 토큰으로 실행해 보니, 수정 전에는 `Bearer $MAVEN_CENTRAL_TOKEN` 문자열이 그대로 전달되고 수정 후에는 실제 값으로 치환되었습니다.
+    - 남은 확인 사항: 실제 업로드는 `v2/master` CI에서만 확인할 수 있습니다. Central Portal API는 `Bearer` 뒤에 **user token의 `base64(username:password)`**를 요구하므로, CircleCI의 `MAVEN_CENTRAL_TOKEN` 값이 이 형식인지 확인이 필요합니다.
   - 문제: `--header 'Authorization: Bearer $MAVEN_CENTRAL_TOKEN'`가 작은따옴표로 감싸져 있어서 환경변수가 치환되지 않고 문자열 그대로 전송됩니다. 그래서 인증에 실패합니다.
   - 제안: 큰따옴표로 바꿉니다: `--header "Authorization: Bearer ${MAVEN_CENTRAL_TOKEN}"`. `--fail` 옵션도 추가해서 업로드가 실패하면 job이 실패하도록 합니다.
 
