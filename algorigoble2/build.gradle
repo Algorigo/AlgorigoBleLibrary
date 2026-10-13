@@ -42,58 +42,90 @@ if (getCurrentGitBranch().contains('master')) {
     version = "${versionStr}-${getUserName()}-SNAPSHOT"
 }
 
-publishing {
-    publications {
-        mavenJava(MavenPublication) {
-            artifactId = archivesBaseName
-            pom {
-                name = 'AlgorigoBleLibrary'
-                description = 'Ble Library for Android using ReactiveX'
-                url = 'https://github.com/Algorigo/AlgorigoBleLibrary'
-                artifact("$buildDir/outputs/aar/algorigoble2-release.aar")
-
-                licenses {
-                    license {
-                        name = 'The Apache Software License, Version 2.0'
-                        url = 'http://www.apache.org/licenses/LICENSE-2.0.txt'
-                    }
-                }
-
-                developers {
-                    developer {
-                        id = 'rouddy'
-                        name = 'Rouddy'
-                        email = 'rouddy@naver.com'
-                    }
-                }
-
-                scm {
-                    connection = 'scm:https://github.com/Algorigo/AlgorigoBleLibrary.git'
-                    developerConnection = 'scm:git:https://github.com/Algorigo/AlgorigoBleLibrary.git'
+// components.release 는 AGP 가 afterEvaluate 시점에 생성하므로 publication 도 afterEvaluate 에서 정의한다
+afterEvaluate {
+    publishing {
+        publications {
+            mavenJava(MavenPublication) {
+                // aar + sources/javadoc jar + 의존성(api → compile, implementation → runtime)이 POM 에 포함된다
+                from components.release
+                artifactId = archivesBaseName
+                pom {
+                    name = 'AlgorigoBleLibrary'
+                    description = 'Ble Library for Android using ReactiveX'
                     url = 'https://github.com/Algorigo/AlgorigoBleLibrary'
+
+                    licenses {
+                        license {
+                            name = 'The Apache Software License, Version 2.0'
+                            url = 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+                        }
+                    }
+
+                    developers {
+                        developer {
+                            id = 'rouddy'
+                            name = 'Rouddy'
+                            email = 'rouddy@naver.com'
+                        }
+                    }
+
+                    scm {
+                        connection = 'scm:https://github.com/Algorigo/AlgorigoBleLibrary.git'
+                        developerConnection = 'scm:git:https://github.com/Algorigo/AlgorigoBleLibrary.git'
+                        url = 'https://github.com/Algorigo/AlgorigoBleLibrary'
+                    }
+                }
+            }
+        }
+        repositories {
+            if (version.endsWith('SNAPSHOT')) {
+                maven {
+                    url = NEXUS_SNAPSHOT_REPOSITORY_URL
+                    credentials {
+                        username = findProperty('nexusUsername')
+                        password = findProperty('nexusPassword')
+                    }
+                }
+            } else {
+                maven {
+                    url = layout.buildDirectory.dir('staging-deploy')
                 }
             }
         }
     }
-    repositories {
-        if (version.endsWith('SNAPSHOT')) {
-            maven {
-                url = NEXUS_SNAPSHOT_REPOSITORY_URL
-                credentials {
-                    username = findProperty('nexusUsername')
-                    password = findProperty('nexusPassword')
-                }
-            }
-        } else {
-            maven {
-                url = layout.buildDirectory.dir('staging-deploy')
-            }
+
+    signing {
+        sign publishing.publications.mavenJava
+    }
+}
+
+// 배포 POM 에서 의존성이 빠지는 회귀를 막는다. (./gradlew build 의 check 단계에서 실행)
+// 선언된 api 의존성은 compile, implementation 의존성은 runtime scope 로 POM 에 있어야 한다.
+tasks.register('verifyPublicationPom') {
+    dependsOn 'generatePomFileForMavenJavaPublication'
+    def pomFile = layout.buildDirectory.file('publications/mavenJava/pom-default.xml')
+    doLast {
+        def pom = new groovy.xml.XmlSlurper().parse(pomFile.get().asFile)
+        def published = pom.dependencies.dependency.collectEntries {
+            ["${it.groupId.text()}:${it.artifactId.text()}".toString(), it.scope.text()]
+        }
+        def expected = [:]
+        configurations.implementation.dependencies.withType(ExternalModuleDependency).each {
+            expected["${it.group}:${it.name}".toString()] = 'runtime'
+        }
+        configurations.api.dependencies.withType(ExternalModuleDependency).each {
+            expected["${it.group}:${it.name}".toString()] = 'compile'
+        }
+        def mismatched = expected.findAll { name, scope -> published[name] != scope }
+        if (!mismatched.isEmpty()) {
+            throw new GradleException("Published POM is missing dependencies or has wrong scope. expected: $mismatched, published: $published")
         }
     }
 }
 
-signing {
-    sign publishing.publications.mavenJava
+tasks.named('check') {
+    dependsOn 'verifyPublicationPom'
 }
 
 android {
@@ -127,6 +159,12 @@ android {
     testOptions {
         unitTests.returnDefaultValues = true
     }
+    publishing {
+        singleVariant("release") {
+            withSourcesJar()
+            withJavadocJar()
+        }
+    }
 }
 
 dependencies {
@@ -137,9 +175,12 @@ dependencies {
     androidTestImplementation 'androidx.test.ext:junit:1.3.0'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.7.0'
 
-    implementation 'com.algorigo.library:algorigo-logger:1.2.3'
+    // 공개 API 의 Ble 태그가 com.algorigo.logger.Tag 를 상속하므로 api 로 노출한다
+    api 'com.algorigo.library:algorigo-logger:1.2.3'
 
     //ReactiveX
+    // 공개 API 가 Observable/Single/Completable 을 반환하므로 api 로 노출한다 (기존 전이 의존성으로 해석되던 버전과 동일)
+    api 'io.reactivex.rxjava3:rxjava:3.1.5'
     implementation 'io.reactivex.rxjava3:rxkotlin:3.0.1'
     implementation 'io.reactivex.rxjava3:rxandroid:3.0.2'
     //ReactiveX Relay
