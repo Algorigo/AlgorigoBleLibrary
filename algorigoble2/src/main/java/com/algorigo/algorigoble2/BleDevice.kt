@@ -81,7 +81,13 @@ open class BleDevice {
 
     fun connectSppSocket(uuid: UUID? = null) = engine.connectSppSocket(uuid)
 
-    fun setMtuCompletable(mtu: Int = 517) = engine.setMtuCompletable(mtu)
+    /**
+     * MTU 변경을 요청하고, 기기와 협상된 MTU 값을 반환한다.
+     * 협상된 값은 요청한 값과 다를 수 있다.
+     */
+    fun requestMtuSingle(mtu: Int = 517) = engine.requestMtuSingle(mtu)
+
+    fun setMtuCompletable(mtu: Int = 517) = requestMtuSingle(mtu).ignoreElement()
 
     override fun toString(): String {
         return "${javaClass.simpleName} $deviceName($deviceId)"

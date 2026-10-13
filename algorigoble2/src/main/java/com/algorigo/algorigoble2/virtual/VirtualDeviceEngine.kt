@@ -76,7 +76,20 @@ internal class VirtualDeviceEngine(private val virtualDevice: VirtualDevice) : B
         return Observable.error(RuntimeException("Virtual device does not support spp socket"))
     }
 
-    override fun setMtuCompletable(mtu: Int): Completable {
-        return Completable.complete()
+    override fun requestMtuSingle(mtu: Int): Single<Int> {
+        return virtualDevice.connectionStateRelay
+            .firstOrError()
+            .flatMap {
+                if (it == BleDevice.ConnectionState.CONNECTED) {
+                    Single.just(mtu.coerceIn(MIN_MTU, MAX_MTU))
+                } else {
+                    Single.error(BleManager.DisconnectedException())
+                }
+            }
+    }
+
+    companion object {
+        private const val MIN_MTU = 23
+        private const val MAX_MTU = 517
     }
 }

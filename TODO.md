@@ -14,7 +14,14 @@
 
 ## P0 — 즉시 수정
 
-- [ ] **[버그] `setMtuCompletable()`이 `requestMtu()`를 호출하지 않음** — `impl/BleDeviceEngineImpl.kt:517-526`
+- [x] **[버그] `setMtuCompletable()`이 `requestMtu()`를 호출하지 않음** — `impl/BleDeviceEngineImpl.kt:517-526`
+  - ✅ 해결 (`feature/fix_set_mtu`)
+    - `BleDevice.requestMtuSingle(mtu): Single<Int>`를 추가했습니다. `requestMtu()`를 호출한 뒤 `onMtuChanged`를 기다려서 **협상된 MTU**를 반환합니다.
+    - `onMtuChanged`의 status가 실패이면 `BleManager.MtuChangeFailedException(status)`이 나고, `requestMtu()`가 false를 반환하면 기존 작업과 같은 방식으로 재시도합니다.
+    - `setMtuCompletable()`은 `requestMtuSingle().ignoreElement()`로 유지하여 호환성을 지켰습니다. engine 추상 메서드는 `setMtuCompletable` → `requestMtuSingle`로 변경했습니다.
+    - `VirtualDeviceEngine`은 연결 상태일 때 23~517 범위로 보정한 값을 반환합니다.
+    - 테스트: `BleDeviceEngineImplMtuTest`, `VirtualDeviceEngineMtuTest`. 테스트 인프라(MockK, `unitTests.returnDefaultValues`, `GattTestFixture`, `RxTestSchedulerRule`)도 이 브랜치에서 추가했습니다.
+    - 남은 작업: MTU 요청에도 타임아웃이 없는 문제는 아래 "작업 무한 대기" 항목에서 함께 처리합니다.
   - 문제: `getGattSingle().map { Single... }.ignoreElement()` 구조라서 안쪽 `Single`이 구독되지 않습니다. 결과적으로 MTU 요청은 보내지지 않고 Completable만 바로 완료됩니다. (최근 커밋 `9f18f3d`에서 추가된 기능)
   - 제안: `flatMap`으로 바꾸고, `onMtuChanged` 콜백을 relay로 받아서 **협상된 MTU 값을 `Single<Int>`로 반환**해야 합니다. 현재 `onMtuChanged`(176)는 로그만 남깁니다. Android 14 이상에서는 요청 값과 상관없이 517로 협상을 시도하므로, 실제 협상된 값을 반환하는 것이 중요합니다.
 
