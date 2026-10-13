@@ -57,7 +57,14 @@
   - 문제: BT가 `STATE_TURNING_OFF`가 되면 `bluetoothAdapter.bluetoothLeScanner`가 `null`을 반환하는데, `doFinally`에서 호출하는 `stopScan()`이 NPE를 냅니다. `doFinally`에서 던진 예외는 `RxJavaPlugins.onError`로 전달되므로, 앱이 `RxJavaPlugins.setErrorHandler`를 설정하지 않았다면 크래시가 납니다.
   - 제안: `startScan/stopScan`에서 scanner null 체크를 하고 try/catch로 감쌉니다. `startScan`의 `doOnSubscribe`에서도 null이면 명확한 에러를 냅니다.
 
-- [ ] **[배포] 배포되는 POM에 의존성이 하나도 없음** — `algorigoble2/build.gradle:53, 131-145`
+- [x] **[배포] 배포되는 POM에 의존성이 하나도 없음** — `algorigoble2/build.gradle:53, 131-145`
+  - ✅ 해결 (`feature/fix_pom_dependencies`)
+    - 수동 `artifact(aar)` 대신 `from components.release`로 publication을 구성했습니다. AGP가 component를 afterEvaluate 시점에 만들기 때문에 publication/signing은 `afterEvaluate`로 감쌌습니다. publish가 `bundleReleaseAar`에 자동으로 의존하므로, 미리 assemble하지 않아도 됩니다.
+    - `android.publishing.singleVariant("release") { withSourcesJar(); withJavadocJar() }`를 추가하여 Central 요건인 `-sources.jar`와 `-javadoc.jar`를 함께 배포합니다.
+    - 공개 API에 노출되는 의존성을 `api`로 바꿨습니다. `io.reactivex.rxjava3:rxjava:3.1.5`(기존 전이 의존성으로 해석되던 버전과 동일)와 `algorigo-logger`가 해당됩니다.
+    - 결과 POM: 이전 0개 → compile 3개(logger, rxjava, kotlin-stdlib) + runtime 5개(core-ktx, rxkotlin, rxandroid, rxrelay, gson)
+    - 회귀 방지: `verifyPublicationPom` 태스크를 `check`에 연결했습니다. 선언된 `api`/`implementation` 의존성이 POM에 올바른 scope로 있는지 `./gradlew build`(CI)에서 검사합니다. `from components.release`를 제거하면 실패하는 것을 확인했습니다.
+    - 남은 확인 사항: 실제 Central 업로드는 CI의 `v2/master`에서만 가능해서 검증하지 못했습니다. 2.7.0이 정상 배포되었는지도 별도 확인이 필요합니다.
   - 문제: publication이 `artifact("...aar")`로 AAR만 수동 첨부하고 있어서 POM에 dependency가 생성되지 않습니다. 예전에는 `pom.withXml`로 일부를 수동 추가했지만, `190f597`(revert)에서 이 코드도 함께 제거되었습니다.
   - 영향: Maven Central에서 받아 쓰는 앱이 RxJava/RxKotlin/RxRelay/algorigo-logger를 직접 추가하지 않으면 런타임에 `NoClassDefFoundError`가 납니다. 샘플 앱(`app/build.gradle:49-54`)은 이 라이브러리들을 직접 추가하고 있어서 문제가 드러나지 않습니다.
   - 제안: `android { publishing { singleVariant("release") { withSourcesJar(); withJavadocJar() } } }`와 `from components.release`를 사용합니다. 공개 API에 노출되는 의존성(RxJava `Observable/Completable/Single`, 공개 `Ble` Tag가 상속하는 `algorigo-logger`)은 `implementation` 대신 `api`로 선언합니다.
@@ -174,7 +181,7 @@
 - [ ] **[구조]** `BleCharacterisic` 오타: 올바른 이름의 타입을 추가하고 기존 이름은 `@Deprecated typealias`로 남겨서 호환성을 유지합니다.
 - [ ] **[구조]** 죽은 코드 제거:
   - 코드: `BleManager.Engine` enum(RX_ANDROID_BLE 흔적), `BleScanFilter.isOk`의 LOLLIPOP 분기, `@RequiresApi(LOLLIPOP/M)`, `BleManagerEngineImpl`의 pre-N 분기(minSdk 24), 미사용 `ConnectionStateData`, `Ble.*.Rx`/`Provisioning` Tag, 미사용 `TAG`/`LOG_TAG`
-  - 빌드: 미사용 `gson` 의존성, 미사용 `jreleaser` 플러그인, CI의 android-29 system image 설치
+  - 빌드: 미사용 `gson`/`rxkotlin`/`rxandroid` 의존성(현재 POM에 runtime 의존성으로 배포됨), 미사용 `jreleaser` 플러그인, CI의 android-29 system image 설치
 - [ ] **[구조]** `BleDevice.connect()`가 Disposable을 버립니다(fire-and-forget). 제거하거나 Disposable을 반환해야 합니다.
 - [ ] **[구조]** bond 상태를 1초 간격 polling으로 확인합니다. `ACTION_BOND_STATE_CHANGED` broadcast로 바꾸고 타임아웃을 추가합니다. `removeBond`는 리플렉션으로 숨겨진 API를 호출하므로 향후 막힐 수 있습니다.
 - [ ] **[구조]** 라이브러리 manifest에 `uses-feature bluetooth_le required="true"`가 있어서 사용하는 앱에 설치 제한이 강제됩니다. 또 `neverForLocation` 플래그 때문에 비콘 스캔 결과가 필터링됩니다. `required="false"`로 바꾸거나, 앱에서 `tools:replace/remove`로 덮어쓰는 방법을 문서화합니다.
