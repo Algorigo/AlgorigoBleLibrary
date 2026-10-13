@@ -6,6 +6,9 @@ import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import com.algorigo.algorigoble2.BleScanFilter
 import com.algorigo.algorigoble2.BleScanSettings
+import com.algorigo.algorigoble2.exception.SystemServiceException
+import com.algorigo.algorigoble2.logging.Ble
+import com.algorigo.logger.L
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.subjects.PublishSubject
 
@@ -64,7 +67,10 @@ internal class BleScanner private constructor(private val bluetoothAdapter: Blue
 
     @SuppressLint("MissingPermission")
     private fun startScan(scanCallback: ScanCallback, bleScanSettings: BleScanSettings, vararg bleScanFilters: BleScanFilter) {
-        bluetoothAdapter.bluetoothLeScanner.startScan(
+        // 블루투스가 켜져 있지 않으면 bluetoothLeScanner 는 null 이다
+        val scanner = bluetoothAdapter.bluetoothLeScanner
+            ?: throw SystemServiceException.BluetoothUnavailableException("BluetoothLeScanner is unavailable (bluetooth may be off)")
+        scanner.startScan(
             BleScanOptionsConverter.convertScanFilters(bleScanFilters),
             BleScanOptionsConverter.convertScanSettings(bleScanSettings),
             scanCallback
@@ -73,7 +79,13 @@ internal class BleScanner private constructor(private val bluetoothAdapter: Blue
 
     @SuppressLint("MissingPermission")
     private fun stopScan(scanCallback: ScanCallback) {
-        bluetoothAdapter.bluetoothLeScanner.stopScan(scanCallback)
+        // doFinally 에서 호출되므로 여기서 던진 예외는 RxJavaPlugins.onError 로 전달되어 앱이 크래시날 수 있다.
+        // 블루투스가 꺼지는 중에는 scanner 가 null 이거나 stopScan 이 IllegalStateException 을 던지므로 무시한다.
+        try {
+            bluetoothAdapter.bluetoothLeScanner?.stopScan(scanCallback)
+        } catch (exception: Exception) {
+            L.warning(Ble.Engine.Default, "stopScan failed", exception)
+        }
     }
 
     companion object {
