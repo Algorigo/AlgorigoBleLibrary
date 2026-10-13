@@ -21,6 +21,7 @@ class BleManager(
 
     class BondFailedException : Exception()
     class DisconnectedException : Exception()
+    class MtuChangeFailedException(val status: Int) : Exception("MTU change failed with status $status")
 
     enum class Engine {
 //        RX_ANDROID_BLE,

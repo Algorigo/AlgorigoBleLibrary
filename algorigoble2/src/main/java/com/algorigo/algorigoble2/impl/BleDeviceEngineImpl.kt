@@ -176,6 +176,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
         override fun onMtuChanged(gatt: BluetoothGatt?, mtu: Int, status: Int) {
             super.onMtuChanged(gatt, mtu, status)
             L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onMtuChanged:$mtu, $status")
+            mtuRelay.accept(Pair(mtu, status))
         }
     }
 
@@ -193,6 +194,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
     private var serviceSingle: Single<List<BluetoothGattService>>? = null
     private val replyRelay = PublishRelay.create<ReplyData>()
     private val notificationRelay = PublishRelay.create<Pair<UUID, ByteArray>>()
+    private val mtuRelay = PublishRelay.create<Pair<Int, Int>>()
 
     override val deviceId: String
         get() = bluetoothDevice.address
@@ -514,15 +516,33 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
             .subscribeOn(Schedulers.io())
     }
 
-    override fun setMtuCompletable(mtu: Int): Completable {
-        return getGattSingle().map { gatt ->
-            Single.fromCallable { gatt.requestMtu(mtu) }
-                .doOnSuccess { if (!it) throw RuntimeException("Error") }
-                .retryWhen {
-                    it.take(5).delay(100, TimeUnit.MILLISECONDS)
-                }
-        }
-            .ignoreElement()
+    override fun requestMtuSingle(mtu: Int): Single<Int> {
+        return getGattSingle()
+            .flatMap { gatt ->
+                mtuRelay
+                    .mergeWith(Completable.fromCallable {
+                        L.debug(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : requestMtu : $mtu")
+                        if (!gatt.requestMtu(mtu)) {
+                            throw CommunicationFailedException()
+                        }
+                    })
+                    .firstOrError()
+                    .map { (negotiatedMtu, status) ->
+                        if (status != BluetoothGatt.GATT_SUCCESS) {
+                            throw BleManager.MtuChangeFailedException(status)
+                        }
+                        negotiatedMtu
+                    }
+                    .retryWhen {
+                        it.take(5).flatMap { throwable ->
+                            if (throwable is CommunicationFailedException) {
+                                Flowable.timer(500, TimeUnit.MILLISECONDS)
+                            } else {
+                                Flowable.error(throwable)
+                            }
+                        }
+                    }
+            }
     }
 
     internal fun onBluetoothDisabled() {
