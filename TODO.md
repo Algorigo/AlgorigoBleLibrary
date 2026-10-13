@@ -49,7 +49,11 @@
   - 영향: 앱을 재시작하기 전까지 해당 기기의 connect는 모두 `IllegalStateException("Connection state is CONNECTING ...")`로 실패합니다.
   - 제안: `connectGatt()`가 null을 반환하면 즉시 에러를 내고 상태를 복구합니다. 타임아웃 처리 블록에서는 gatt가 null이어도 상태를 복구합니다. 구독자가 dispose했을 때(연결 취소)도 `doOnDispose`로 `disconnect()/close()`를 처리합니다. 지금은 취소한 뒤에도 연결이 뒤늦게 성공할 수 있습니다.
 
-- [ ] **[버그] 스캔 중 블루투스를 끄면 앱이 크래시날 가능성이 높음** — `impl/BleScanner.kt:66-77`
+- [x] **[버그] 스캔 중 블루투스를 끄면 앱이 크래시날 가능성이 높음** — `impl/BleScanner.kt:66-77`
+  - ✅ 해결 (`feature/fix_scan_crash_on_bluetooth_off`)
+    - `stopScan()`은 scanner가 null이면 건너뛰고, `stopScan`이 던지는 예외(`IllegalStateException` 등)는 warning 로그만 남기고 무시합니다. 그래서 `doFinally`에서 `RxJavaPlugins.onError`로 예외가 새어 나가지 않습니다.
+    - `startScan()`은 scanner가 null이면 NPE 대신 `SystemServiceException.BluetoothUnavailableException`으로 실패합니다.
+    - 테스트: `BleScannerTest`. 수정 전 코드에서는 NPE와 `IllegalStateException`이 `RxJavaPlugins.onError`로 전달되어 테스트가 실패하는 것을 확인했습니다.
   - 문제: BT가 `STATE_TURNING_OFF`가 되면 `bluetoothAdapter.bluetoothLeScanner`가 `null`을 반환하는데, `doFinally`에서 호출하는 `stopScan()`이 NPE를 냅니다. `doFinally`에서 던진 예외는 `RxJavaPlugins.onError`로 전달되므로, 앱이 `RxJavaPlugins.setErrorHandler`를 설정하지 않았다면 크래시가 납니다.
   - 제안: `startScan/stopScan`에서 scanner null 체크를 하고 try/catch로 감쌉니다. `startScan`의 `doOnSubscribe`에서도 null이면 명확한 에러를 냅니다.
 
