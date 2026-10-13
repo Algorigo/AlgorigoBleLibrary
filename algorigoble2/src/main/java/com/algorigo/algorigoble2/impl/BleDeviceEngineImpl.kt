@@ -354,6 +354,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                         }
                     }
             }
+            .guardOperation()
     }
 
     override fun writeCharacteristicSingle(characteristicUuid: UUID, byteArray: ByteArray): Single<ByteArray> {
@@ -400,6 +401,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                         }
                     }
             }
+            .guardOperation()
     }
 
     override fun setupNotification(type: BleDevice.NotificationType, characteristicUuid: UUID): Observable<Observable<ByteArray>> {
@@ -424,7 +426,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                         characteristic?.let { gattCharacteristic ->
                             L.debug(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : setCharacteristicNotification : $characteristicUuid : false")
                             gatt.setCharacteristicNotification(gattCharacteristic, false)
-                            writeDescriptor(gatt, gattCharacteristic, BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE).subscribe({
+                            writeDescriptor(gatt, gattCharacteristic, DISABLE_NOTIFICATION_VALUE).subscribe({
                                 L.debug(Ble, "DISABLE_NOTIFICATION_VALUE:${it.contentToString()}")
                             }, {
                                 L.error(Ble, "DISABLE_NOTIFICATION_VALUE error", it)
@@ -495,6 +497,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                     }
             }
         }
+            .guardOperation()
     }
 
     override fun connectSppSocket(uuid: UUID?): Observable<BleSppSocket> {
@@ -543,6 +546,22 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                         }
                     }
             }
+            .guardOperation()
+    }
+
+    /**
+     * GATT 콜백을 기다리는 작업이 영원히 끝나지 않는 것을 막는다.
+     * 작업 도중 연결이 끊기면 [BleManager.DisconnectedException], [BleDevice.operationTimeoutMillis]를 넘기면 [TimeoutException]으로 종료한다.
+     * 이미 연결이 끊긴 상태라면 GATT 호출 없이 바로 실패하도록 연결 끊김 감지를 먼저 구독한다.
+     */
+    private fun <T : Any> Single<T>.guardOperation(): Single<T> {
+        val disconnectedSingle = stateRelay
+            .filter { it !is State.CONNECTED }
+            .firstOrError()
+            .flatMap { Single.error<T>(BleManager.DisconnectedException()) }
+        return disconnectedSingle
+            .ambWith(this)
+            .timeout(bleDevice.operationTimeoutMillis, TimeUnit.MILLISECONDS)
     }
 
     internal fun onBluetoothDisabled() {
@@ -560,6 +579,8 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
         private val LOG_TAG = BleDeviceEngineImpl::class.java.simpleName
 
         private val CLIENT_CHARACTERISTIC_CONFIG_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+        // BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE 와 동일
+        private val DISABLE_NOTIFICATION_VALUE = byteArrayOf(0x00, 0x00)
     }
 }
 
