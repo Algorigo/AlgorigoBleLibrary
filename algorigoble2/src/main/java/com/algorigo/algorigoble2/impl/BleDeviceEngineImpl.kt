@@ -23,6 +23,7 @@ import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Flowable
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Single
+import io.reactivex.rxjava3.core.SingleEmitter
 import io.reactivex.rxjava3.schedulers.Schedulers
 import java.util.*
 import java.util.concurrent.TimeUnit
@@ -215,6 +216,13 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
     private val replyRelay = PublishRelay.create<ReplyData>()
     private val notificationRelay = PublishRelay.create<Pair<UUID, ByteArray>>()
     private val mtuRelay = PublishRelay.create<Pair<Int, Int>>()
+    private val operationQueue = PublishRelay.create<QueuedOperation<*>>().toSerialized()
+
+    init {
+        operationQueue
+            .concatMapCompletable { it.execute() }
+            .subscribe({}, { L.error(Ble.Device.Default, "GATT operation queue terminated", it) })
+    }
 
     override val deviceId: String
         get() = bluetoothDevice.address
@@ -356,7 +364,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
     }
 
     override fun readCharacteristicSingle(characteristicUuid: UUID): Single<ByteArray> {
-        return getGattSingle()
+        return enqueue(getGattSingle()
             .flatMap { gatt ->
                 getCharacteristic(characteristicUuid)
                     .doOnSuccess {
@@ -376,64 +384,34 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                             .map { it.byteArray }
                             .firstOrError()
                     }
-                    .retryWhen {
-                        it.take(5).flatMap { throwable ->
-                            if (throwable is CommunicationFailedException) {
-                                Flowable.timer(500, TimeUnit.MILLISECONDS)
-                            } else {
-                                Flowable.error(throwable)
-                            }
-                        }
-                    }
-            }
-            .guardOperation()
+                    .retryOnCommunicationFailure()
+            })
     }
 
     override fun writeCharacteristicSingle(characteristicUuid: UUID, byteArray: ByteArray): Single<ByteArray> {
-        return getGattSingle()
+        return enqueue(getGattSingle()
             .flatMap { gatt ->
                 getCharacteristic(characteristicUuid)
                     .flatMap { characteristic ->
-                        when {
-                            characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE != 0 -> {
-                                replyRelay
-                                    .mergeWith(Completable.fromCallable {
-                                        characteristic.value = byteArray
-                                        if (!gatt.writeCharacteristic(characteristic)) {
-                                            throw CommunicationFailedException()
-                                        }
-                                    })
-                                    .filter { it.uuid == characteristicUuid && it.type == Type.WRITE_CHARACTERISTIC }
-                                    .map { it.byteArray }
-                                    .firstOrError()
-                            }
-                            characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0 -> {
-                                Single.defer {
+                        if (characteristic.properties and (BluetoothGattCharacteristic.PROPERTY_WRITE or BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) == 0) {
+                            Single.error(IllegalCharacteristicProperty(characteristic.properties, "WRITE_CHARACTERISTIC"))
+                        } else {
+                            // write-no-response 도 onCharacteristicWrite 가 와야 BluetoothGatt 가 다음 작업을 받으므로 응답을 기다린다
+                            replyRelay
+                                .mergeWith(Completable.fromCallable {
                                     characteristic.value = byteArray
                                     L.debug(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : writeCharacteristic : $characteristicUuid : ${byteArray.toHexString()}")
-                                    if (gatt.writeCharacteristic(characteristic)) {
-                                        Single.just(byteArrayOf())
-                                    } else {
-                                        Single.error(CommunicationFailedException())
+                                    if (!gatt.writeCharacteristic(characteristic)) {
+                                        throw CommunicationFailedException()
                                     }
-                                }
-                            }
-                            else -> {
-                                Single.error(IllegalCharacteristicProperty(characteristic.properties, "WRITE_CHARACTERISTIC"))
-                            }
+                                })
+                                .filter { it.uuid == characteristicUuid && it.type == Type.WRITE_CHARACTERISTIC }
+                                .map { it.byteArray }
+                                .firstOrError()
                         }
                     }
-                    .retryWhen {
-                        it.take(5).flatMap { throwable ->
-                            if (throwable is CommunicationFailedException) {
-                                Flowable.timer(500, TimeUnit.MILLISECONDS)
-                            } else {
-                                Flowable.error(throwable)
-                            }
-                        }
-                    }
-            }
-            .guardOperation()
+                    .retryOnCommunicationFailure()
+            })
     }
 
     override fun setupNotification(type: BleDevice.NotificationType, characteristicUuid: UUID): Observable<Observable<ByteArray>> {
@@ -496,7 +474,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
     }
 
     private fun writeDescriptor(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, byteArray: ByteArray): Single<ByteArray> {
-        return Single.defer {
+        return enqueue(Single.defer {
             if (characteristic.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY == 0 &&
                 characteristic.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE == 0) {
                 Single.error(IllegalCharacteristicProperty(characteristic.properties, "WRITE_DESCRIPTOR"))
@@ -513,18 +491,9 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                     .filter { it.uuid == characteristic.uuid && it.type == Type.WRITE_DESCRIPTOR }
                     .map { it.byteArray }
                     .firstOrError()
-                    .retryWhen {
-                        it.take(5).flatMap { throwable ->
-                            if (throwable is CommunicationFailedException) {
-                                Flowable.timer(500, TimeUnit.MILLISECONDS)
-                            } else {
-                                Flowable.error(throwable)
-                            }
-                        }
-                    }
+                    .retryOnCommunicationFailure()
             }
-        }
-            .guardOperation()
+        })
     }
 
     override fun connectSppSocket(uuid: UUID?): Observable<BleSppSocket> {
@@ -547,7 +516,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
     }
 
     override fun requestMtuSingle(mtu: Int): Single<Int> {
-        return getGattSingle()
+        return enqueue(getGattSingle()
             .flatMap { gatt ->
                 mtuRelay
                     .mergeWith(Completable.fromCallable {
@@ -563,17 +532,45 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                         }
                         negotiatedMtu
                     }
-                    .retryWhen {
-                        it.take(5).flatMap { throwable ->
-                            if (throwable is CommunicationFailedException) {
-                                Flowable.timer(500, TimeUnit.MILLISECONDS)
-                            } else {
-                                Flowable.error(throwable)
-                            }
-                        }
-                    }
+                    .retryOnCommunicationFailure()
+            })
+    }
+
+    /**
+     * Android 는 BluetoothGatt 당 한 번에 하나의 GATT 작업만 처리한다. 그래서 read/write/descriptor write/MTU 요청을 기기별 큐로 직렬화한다.
+     * 앞 작업이 콜백을 받거나 타임아웃/연결 끊김으로 끝나야 다음 작업이 시작된다.
+     * 타임아웃과 연결 끊김 감지([guardOperation])는 큐에서 기다리는 시간이 아니라 작업이 실제로 시작된 시점부터 적용된다.
+     */
+    private fun <T : Any> enqueue(operation: Single<T>): Single<T> = Single.create { emitter ->
+        operationQueue.accept(QueuedOperation(operation.guardOperation(), emitter))
+    }
+
+    private class QueuedOperation<T : Any>(private val operation: Single<T>, private val emitter: SingleEmitter<T>) {
+        fun execute(): Completable = Completable.defer {
+            if (emitter.isDisposed) {
+                // 시작 전에 취소된 작업은 GATT 호출 없이 건너뛴다
+                Completable.complete()
+            } else {
+                // 실행 중에 취소되더라도 작업이 끝날 때까지(콜백/타임아웃/연결 끊김) 다음 작업을 시작하지 않는다
+                operation
+                    .doOnSuccess { emitter.onSuccess(it) }
+                    .doOnError { emitter.tryOnError(it) }
+                    .ignoreElement()
+                    .onErrorComplete()
             }
-            .guardOperation()
+        }
+    }
+
+    /** GATT 호출이 false 를 반환하면 잠시 후 다시 시도하고, 재시도 횟수를 넘기면 [CommunicationFailedException]으로 실패한다. */
+    private fun <T : Any> Single<T>.retryOnCommunicationFailure(): Single<T> = retryWhen { errors ->
+        var retryCount = 0
+        errors.flatMap { throwable ->
+            if (throwable is CommunicationFailedException && retryCount++ < MAX_RETRY_COUNT) {
+                Flowable.timer(RETRY_DELAY_MILLIS, TimeUnit.MILLISECONDS)
+            } else {
+                Flowable.error(throwable)
+            }
+        }
     }
 
     /**
@@ -606,6 +603,8 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
         private val LOG_TAG = BleDeviceEngineImpl::class.java.simpleName
 
         private val CLIENT_CHARACTERISTIC_CONFIG_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+        private const val MAX_RETRY_COUNT = 5
+        private const val RETRY_DELAY_MILLIS = 500L
         // BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE 와 동일
         private val DISABLE_NOTIFICATION_VALUE = byteArrayOf(0x00, 0x00)
     }
