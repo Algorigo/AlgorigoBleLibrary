@@ -209,7 +209,21 @@
   - 스캔 콜백 스레드와 앱 스레드에서 동시에 `getBleDevice()`가 호출되면, 같은 기기에 대해 `BleDevice`(와 engine)가 두 개 만들어질 수 있습니다. 그러면 GATT 연결이 중복되고 상태가 서로 어긋납니다.
   - 제안: `ConcurrentHashMap.getOrPut` 또는 `synchronized`를 사용합니다.
 
-- [ ] **[버그] `ConnectionState` enum의 `status`가 `var`이어서 전역 상태가 바뀜** — `BleDevice.kt:11`, `InitializableBleDevice.kt:21-22`
+- [x] **[버그] `ConnectionState` enum의 `status`가 `var`이어서 전역 상태가 바뀜** — `BleDevice.kt:11`, `InitializableBleDevice.kt:21-22`
+  - ✅ 해결 (`feature/fix_connection_state_mutation`)
+    - `ConnectionState.status`를 `val`로 바꿔서 enum 싱글턴을 수정할 수 없게 했습니다.
+    - `ConnectionState.INITIALIZING`을 추가했습니다(오타 `INITIALING`도 수정). 기존 값의 ordinal이 바뀌지 않도록 enum 끝에 추가했습니다.
+    - `InitializableBleDevice`는 GATT 연결 후 `initializeCompletable()`을 진행하는 동안 `INITIALIZING`을 내보냅니다. 상태 스트림에 `distinctUntilChanged()`를 적용해서 같은 상태가 연달아 나오지 않게 했습니다.
+    - ⚠️ 동작/API 변경:
+      - 초기화 중 상태가 `CONNECTING`(status "INITIALING")에서 `INITIALIZING`으로 바뀝니다. `when`으로 상태를 분기하는 앱은 `INITIALIZING`도 처리해야 합니다.
+      - `status`에 값을 대입하던 코드는 컴파일되지 않습니다.
+      - 샘플 앱 `BleRecyclerAdapter`는 `INITIALIZING`을 `CONNECTING`처럼 표시하도록 수정했습니다.
+    - 테스트:
+      - `ConnectionStateGlobalMutationTest`(2건, 기존 API만 사용): 수정 전 코드에서 2건 모두 실패했습니다. 다른 기기의 CONNECTING status가 `"INITIALING"`으로 바뀌는 것과 상태 중복(`CONNECTING, CONNECTING`, `DISCONNECTED, DISCONNECTED`)이 재현됐습니다.
+      - `InitializableBleDeviceStateTest`(4건): INITIALIZING 상태, 상태 순서, 초기화 실패, 재연결을 검증합니다.
+    - 실기기 확인(Fold5 → S23, 초기화에서 1초 대기 후 Device Name read):
+      - 수정 전: 초기화 중 상태가 `CONNECTING(INITIALING)`이었고, 초기화 후 전역 `ConnectionState.CONNECTING.status`가 **`"INITIALING"`으로 바뀌어 있었습니다**. `DISCONNECTED`가 2번 나왔습니다.
+      - 수정 후: `DISCONNECTED → CONNECTING → INITIALIZING → CONNECTED → DISCONNECTING → DISCONNECTED` 순서로 중복 없이 나왔고, 전역 `CONNECTING.status`는 `"CONNECTING"`으로 유지됐습니다.
   - `ConnectionState.CONNECTING.apply { status = "INITIALING" }`가 enum 싱글턴 자체를 수정합니다. 그래서 이후 **모든 기기**의 CONNECTING 상태가 `"INITIALING"`으로 표시됩니다.
   - 제안: `status`를 `val`로 바꾸고 `INITIALIZING` 상태를 별도로 추가합니다(오타 `INITIALING`도 수정). `distinctUntilChanged()`도 적용합니다.
 
