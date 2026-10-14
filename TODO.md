@@ -211,7 +211,18 @@
       - 참고: S23(듀얼모드)은 AUTO여도 Android가 LE를 선택했습니다(`btif_gattc_open_impl: Transport=BT_TRANSPORT_LE, device type=DUAL`). 그래서 이 기기로는 BR/EDR 시도로 인한 133 실패 자체를 재현하지 못했습니다.
   - 듀얼모드 기기에서 BR/EDR로 연결을 시도하다가 status 133으로 실패하는 대표적인 원인입니다. minSdk가 24이므로 `connectGatt(context, autoConnect, callback, BluetoothDevice.TRANSPORT_LE)`를 바로 사용할 수 있습니다.
 
-- [ ] **[버그] `deviceMap`이 thread-safe하지 않음** — `impl/BleManagerEngineImpl.kt:35, 143-153`
+- [x] **[버그] `deviceMap`이 thread-safe하지 않음** — `impl/BleManagerEngineImpl.kt:35, 143-153`
+  - ✅ 해결 (`feature/thread_safe_device_map`)
+    - `deviceMap`을 `ConcurrentHashMap`으로 바꿨습니다. `getBleDevice()`처럼 이미 있는 기기를 찾는 경로는 잠금 없이 조회합니다.
+    - `createBleDevice()`는 `synchronized(deviceMap)` 안에서 같은 기기가 이미 있는지 다시 확인한 뒤 만듭니다. 그래서 같은 기기에 대해 delegate가 한 번만 호출됩니다. `getOrPut`은 원자적이지 않고, `computeIfAbsent`는 사용자 코드인 delegate를 map 내부 잠금 안에서 실행하게 됩니다(delegate가 다시 `getDevice()`로 map을 수정하면 문제가 됨). 그래서 둘 다 쓰지 않고 재진입 가능한 `synchronized`를 사용했습니다.
+    - 함께 발견한 문제: 수정 전에는 `initEngine()`보다 먼저 map에 넣었기 때문에, 다른 스레드가 engine이 붙지 않은 `BleDevice`를 받아 `deviceId`, `connectionState` 등에 접근하면 `UninitializedPropertyAccessException`이 났습니다. 이제 engine 초기화와 상태 구독을 마친 뒤 map에 넣습니다.
+    - `getDevices()`는 live view 대신 snapshot(`toList()`)을 돌려줍니다.
+    - 테스트: `BleManagerEngineImplDeviceMapTest`(2건). 수정 전 코드에서 2건 모두 실패했습니다(3회 반복 모두).
+      - 8개 스레드의 동시 `getDevice(같은 MAC)`: 수정 전에는 서로 다른 인스턴스를 받았습니다.
+      - 기기 추가 중 `getDevices()`/`getConnectedDevices()` 반복: 수정 전에는 `UninitializedPropertyAccessException`이 났습니다. 생성 순서만 고치고 map을 `mutableMapOf()`로 되돌리면 `ConcurrentModificationException`이 나는 것도 확인했습니다.
+    - 실기기 확인(Fold5, 연결 없음. 임시 instrumented test로 `BleManagerEngineImpl` 직접 사용):
+      - 동시 `getDevice(S23 MAC)` 8건 × 5라운드(delegate 50ms 지연): 수정 전에는 매 라운드 **서로 다른 인스턴스 8개, delegate 호출 8회**였고 map에는 마지막 1개만 남았습니다(나머지 7개는 map에 없는 별도 engine을 가짐). 수정 후에는 매 라운드 인스턴스 1개, delegate 호출 1회였습니다.
+      - 실제 스캔 8초 동안 다른 스레드에서 `getDevices()`/`getConnectedDevices()` 반복: 수정 전에는 약 11,000회 반복 중 **`UninitializedPropertyAccessException` 244건, `ConcurrentModificationException` 19건**이 났습니다(스캔 기기 92개). 수정 후에는 11,095회 반복에서 오류가 없었습니다(스캔 기기 67개).
   - 스캔 콜백 스레드와 앱 스레드에서 동시에 `getBleDevice()`가 호출되면, 같은 기기에 대해 `BleDevice`(와 engine)가 두 개 만들어질 수 있습니다. 그러면 GATT 연결이 중복되고 상태가 서로 어긋납니다.
   - 제안: `ConcurrentHashMap.getOrPut` 또는 `synchronized`를 사용합니다.
 
