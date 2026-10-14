@@ -22,6 +22,15 @@ open class BleDevice {
         INDICATION(byteArrayOf(0x02, 0x00)),
     }
 
+    enum class WriteType {
+        /** characteristic 이 WRITE 를 지원하면 응답 있는 쓰기, WRITE NO RESPONSE 만 지원하면 응답 없는 쓰기 */
+        DEFAULT,
+        /** 응답 있는 쓰기(Write Request). characteristic 이 WRITE 를 지원해야 한다 */
+        WITH_RESPONSE,
+        /** 응답 없는 쓰기(Write Command). characteristic 이 WRITE NO RESPONSE 를 지원해야 한다 */
+        WITHOUT_RESPONSE,
+    }
+
     internal lateinit var engine: BleDeviceEngine
 
     internal fun initEngine(engine: BleDeviceEngine) {
@@ -79,8 +88,9 @@ open class BleDevice {
     fun readCharacteristicSingle(characteristicUuid: UUID) =
         engine.readCharacteristicSingle(characteristicUuid)
 
-    fun writeCharacteristicSingle(characteristicUuid: UUID, byteArray: ByteArray) =
-        engine.writeCharacteristicSingle(characteristicUuid, byteArray)
+    @JvmOverloads
+    fun writeCharacteristicSingle(characteristicUuid: UUID, byteArray: ByteArray, writeType: WriteType = WriteType.DEFAULT) =
+        engine.writeCharacteristicSingle(characteristicUuid, byteArray, writeType)
 
     fun setupNotification(type: NotificationType, characteristicUuid: UUID) =
         engine.setupNotification(type, characteristicUuid)

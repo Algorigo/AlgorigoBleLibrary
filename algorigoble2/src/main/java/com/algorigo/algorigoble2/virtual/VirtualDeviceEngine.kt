@@ -53,7 +53,8 @@ internal class VirtualDeviceEngine(private val virtualDevice: VirtualDevice) : B
         return virtualDevice.readCharacteristicSingleExternal(characteristicUuid)
     }
 
-    override fun writeCharacteristicSingle(characteristicUuid: UUID, byteArray: ByteArray): Single<ByteArray> {
+    // 가상 기기는 쓰기 타입을 구분하지 않는다
+    override fun writeCharacteristicSingle(characteristicUuid: UUID, byteArray: ByteArray, writeType: BleDevice.WriteType): Single<ByteArray> {
         return virtualDevice.writeCharacteristicSingleExternal(characteristicUuid, byteArray)
     }
 
