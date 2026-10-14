@@ -114,7 +114,18 @@
 
 ## P1 — 높음
 
-- [ ] **[버그] GATT 콜백의 `status`를 무시함** — `impl/BleDeviceEngineImpl.kt:89-154`
+- [x] **[버그] GATT 콜백의 `status`를 무시함** — `impl/BleDeviceEngineImpl.kt:89-154`
+  - ✅ 해결 (`feature/handle_gatt_status`)
+    - 공개 예외 `BleManager.GattOperationFailedException(operation, status)`를 추가했습니다. `operation`은 `READ_CHARACTERISTIC`/`WRITE_CHARACTERISTIC`/`WRITE_DESCRIPTOR`/`DISCOVER_SERVICES`입니다.
+    - `ReplyData`에 콜백 status를 포함했습니다. read, write, descriptor write(notification 설정)는 status가 실패이면 값 대신 이 예외로 실패합니다. 실패한 작업 뒤의 큐 작업은 정상적으로 이어서 실행됩니다.
+    - **첫 서비스 탐색 실패:** 서비스 없이 CONNECTED로 만들지 않습니다. gatt를 `disconnect()/close()`하고, `connectCompletable()`은 `GattOperationFailedException("DISCOVER_SERVICES", status)`로 실패합니다.
+      - 이를 위해 `State.DISCONNECTED`에 `cause`를 추가했습니다. 에러가 전달되는 시점에 이미 DISCONNECTED 상태이므로, `onError`에서 바로 다시 연결할 수 있습니다.
+    - **재탐색(`onServiceChanged`) 실패:** 연결을 유지하고 경고 로그만 남깁니다. 서비스 목록이 비면 이후 작업은 characteristic을 찾지 못해 실패합니다.
+    - 테스트: `BleDeviceEngineImplGattStatusTest`(7건). 수정 전 엔진에서는 6건이 실패했습니다. 나머지 1건(재탐색 실패 시 연결 유지)은 기존 동작을 보존하는지 확인하는 테스트입니다.
+    - 실기기 확인(Fold5 → S23 시스템 GATT의 readable characteristic 35개 읽기): 수정 전과 후의 결과가 같았습니다(정상 read 30건 성공). 즉 status 0인 정상 응답은 영향을 받지 않습니다.
+      - 빈 값(0바이트)으로 읽힌 characteristic도 실제로 status 0이었습니다.
+      - 다만 S23 시스템 GATT는 실패 status를 돌려주는 characteristic이 없어서, **실패 status 경로 자체는 실기기에서 확인하지 못했습니다**. nRF Connect 서버 등 실패 응답을 만들 수 있는 peripheral로 재검증이 필요합니다.
+    - 남은 작업: 연결 중 끊김(`onConnectionStateChange`)의 status(예: 133, 8)는 아직 `DisconnectedException`에 담기지 않습니다. 이 부분은 P2 "예외 계층 정리" 항목에서 처리합니다.
   - read/write/descriptor 콜백이 `status != GATT_SUCCESS`인 경우에도 성공으로 처리합니다. 예를 들어 인증이 부족해서 read가 실패해도 이전 값이 성공으로 반환됩니다.
   - `onServicesDiscovered`도 실패한 경우에 `CONNECTED`로 전환합니다. 이 경우 서비스가 비어 있어서 이후의 모든 작업이 `IllegalStateException`으로 실패합니다.
   - 제안: `ReplyData`에 status를 포함하고, 실패하면 `GattException(status)`로 에러를 냅니다. discovery가 실패하면 연결을 실패로 처리합니다.
@@ -243,6 +254,11 @@
   - 인자 검증의 `size < -2`는 `size < -1`의 오타입니다.
   - 생성자 안에서 블로킹 `connect()`를 호출하고, 연결하기 전에 `cancelDiscovery()`를 호출하지 않습니다.
 - [ ] **[버그] VirtualDevice 동작이 실기기와 다름** — `virtual/VirtualDeviceEngine.kt:44`, `virtual/VirtualDevice.kt:77`. `disconnect()`가 `bleDevice.onDisconnected()`를 호출하지 않습니다. 그래서 가상 `InitializableBleDevice`는 재연결 시 초기화하기 전부터 CONNECTED로 보고합니다. `notifyByteArray()`는 notification마다 새 `Thread`를 생성하므로 **순서가 보장되지 않습니다**.
+- [ ] **[버그] 작업이 타임아웃된 뒤에도 BluetoothGatt가 busy로 남아 다음 작업이 연달아 실패함 (실기기)** — `impl/BleDeviceEngineImpl.kt`(`enqueue`/`guardOperation`)
+  - S23의 일부 vendor characteristic은 read에 응답하지 않았습니다. 라이브러리 타임아웃(기본 10초) 후 큐는 다음 작업으로 넘어가지만, Android `BluetoothGatt`는 콜백이 올 때까지 busy 상태를 유지합니다.
+  - 그래서 이어진 read 4건이 각각 6번씩 `prior command is not finished`로 거절됐고, 결국 `CommunicationFailedException`으로 실패했습니다.
+  - ATT transaction timeout은 30초이므로, 라이브러리 타임아웃이 이보다 짧으면 이런 일이 생길 수 있습니다.
+  - 제안: 타임아웃이 나면 호출자에게는 바로 에러를 주되, 큐는 늦은 콜백이나 연결 끊김(최대 ATT timeout 30초)까지 다음 작업을 막습니다. 또는 타임아웃 시 링크를 끊고 재연결하도록 안내합니다.
 - [ ] **[버그] `InitializableBleDevice` 초기화에 타임아웃이 없음** — `InitializableBleDevice.kt:30-46`. 실패하면 `disconnect()`도 두 번 호출됩니다.
 - [ ] **[버그] BroadcastReceiver를 `finalize()`에서 해제함** — `impl/BleManagerEngineImpl.kt:69-77`. `finalize()`는 호출 시점이 보장되지 않습니다. `BleManager`를 여러 개 만들면 receiver와 deviceMap도 각각 생기므로, 같은 기기에 대한 객체가 중복됩니다. 싱글턴으로 강제하거나 `close()` API를 제공해야 합니다.
 - [ ] **[버그] `getDevice()`가 가상 기기보다 실제 엔진을 먼저 조회함 (실기기)** — `BleManager.kt:88-91`, `impl/BleManagerEngineImpl.kt:125-140`
