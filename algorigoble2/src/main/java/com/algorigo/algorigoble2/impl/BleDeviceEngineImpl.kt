@@ -418,19 +418,22 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
             })
     }
 
-    override fun writeCharacteristicSingle(characteristicUuid: UUID, byteArray: ByteArray): Single<ByteArray> {
+    override fun writeCharacteristicSingle(characteristicUuid: UUID, byteArray: ByteArray, writeType: BleDevice.WriteType): Single<ByteArray> {
         return enqueue(getGattSingle()
             .flatMap { gatt ->
                 getCharacteristic(characteristicUuid)
                     .flatMap { characteristic ->
-                        if (characteristic.properties and (BluetoothGattCharacteristic.PROPERTY_WRITE or BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) == 0) {
-                            Single.error(IllegalCharacteristicProperty(characteristic.properties, "WRITE_CHARACTERISTIC"))
+                        val gattWriteType = resolveWriteType(characteristic.properties, writeType)
+                        if (gattWriteType == null) {
+                            Single.error(IllegalCharacteristicProperty(characteristic.properties, "WRITE_CHARACTERISTIC($writeType)"))
                         } else {
                             // write-no-response 도 onCharacteristicWrite 가 와야 BluetoothGatt 가 다음 작업을 받으므로 응답을 기다린다
                             replyRelay
                                 .mergeWith(Completable.fromCallable {
+                                    // writeType 을 매번 지정한다. 지정하지 않으면 Android 는 WRITE NO RESPONSE 속성이 있는 characteristic 을 응답 없이 쓴다
+                                    characteristic.writeType = gattWriteType
                                     characteristic.value = byteArray
-                                    L.debug(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : writeCharacteristic : $characteristicUuid : ${byteArray.toHexString()}")
+                                    L.debug(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : writeCharacteristic : $characteristicUuid : ${byteArray.toHexString()} : $writeType")
                                     sendGattRequest { gatt.writeCharacteristic(characteristic) }
                                 })
                                 .filter { it.uuid == characteristicUuid && it.type == Type.WRITE_CHARACTERISTIC }
@@ -440,6 +443,21 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                     }
                     .retryOnCommunicationFailure()
             })
+    }
+
+    /** 요청한 쓰기 타입을 BluetoothGattCharacteristic.WRITE_TYPE_* 로 바꾼다. characteristic 이 지원하지 않는 타입이면 null. */
+    private fun resolveWriteType(properties: Int, writeType: BleDevice.WriteType): Int? {
+        val withResponse = properties and BluetoothGattCharacteristic.PROPERTY_WRITE != 0
+        val withoutResponse = properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0
+        return when (writeType) {
+            BleDevice.WriteType.DEFAULT -> when {
+                withResponse -> BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                withoutResponse -> BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                else -> null
+            }
+            BleDevice.WriteType.WITH_RESPONSE -> if (withResponse) BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT else null
+            BleDevice.WriteType.WITHOUT_RESPONSE -> if (withoutResponse) BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE else null
+        }
     }
 
     override fun setupNotification(type: BleDevice.NotificationType, characteristicUuid: UUID): Observable<Observable<ByteArray>> {
