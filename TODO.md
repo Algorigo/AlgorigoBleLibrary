@@ -85,7 +85,16 @@
   - 문제: `--header 'Authorization: Bearer $MAVEN_CENTRAL_TOKEN'`가 작은따옴표로 감싸져 있어서 환경변수가 치환되지 않고 문자열 그대로 전송됩니다. 그래서 인증에 실패합니다.
   - 제안: 큰따옴표로 바꿉니다: `--header "Authorization: Bearer ${MAVEN_CENTRAL_TOKEN}"`. `--fail` 옵션도 추가해서 업로드가 실패하면 job이 실패하도록 합니다.
 
-- [ ] **[버그/배포] kotlin-reflect가 없는 앱에서 로그 태그를 처음 사용하는 순간 크래시남 (실기기)** — `logging/Tags.kt`, `algorigoble2/build.gradle`
+- [x] **[버그/배포] kotlin-reflect가 없는 앱에서 로그 태그를 처음 사용하는 순간 크래시남 (실기기)** — `logging/Tags.kt`, `algorigoble2/build.gradle`
+  - ✅ 해결 (`feature/fix_kotlin_reflect_crash`) — 이 저장소에서 할 수 있는 우회 수정입니다.
+    - `algorigoble2`에 `implementation "org.jetbrains.kotlin:kotlin-reflect:$kotlin_version"`(2.0.0)을 추가했습니다. POM에 runtime 의존성으로 들어가므로, 사용하는 앱이 kotlin-reflect를 직접 추가하지 않아도 됩니다. 샘플 앱도 `app/build.gradle` 수정 없이 전이 의존성으로 받는 것을 확인했습니다.
+    - logger 최신 버전(1.2.4~1.2.6)도 확인했는데, POM 의존성이 0개이고 `KClass.objectInstance`를 그대로 사용해서 버전을 올려도 해결되지 않습니다.
+    - 회귀 방지: instrumented test `LoggingTagInstrumentedTest`를 추가했습니다. MockK가 없는 라이브러리의 실제 runtime classpath에서 모든 `Ble.*` 태그 초기화와 `BleManager.getDevice()`(가상 기기)를 검사합니다.
+      - 수정 전에는 2건 모두 `KotlinReflectionNotSupportedError`/`NoClassDefFoundError`로 실패했고, 수정 후에는 2/2 통과했습니다(SM-F946N).
+      - 실행: `ANDROID_SERIAL=<기기> ./gradlew :algorigoble2:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.algorigo.algorigoble2.LoggingTagInstrumentedTest`. CI(`./gradlew build`)는 기기가 필요한 이 테스트를 실행하지 않습니다.
+    - 실기기 확인: 수정 전에 크래시가 나던 시나리오(가상 기기 connect → DeviceActivity read)를 재현해 보니, `I Ble.Device: connected` 로그가 정상 출력되고 크래시 없이 동작했습니다.
+    - 참고: kotlin-reflect는 약 3MB입니다. R8을 쓰는 앱에서는 사용하지 않는 부분이 대부분 제거됩니다.
+    - 남은 작업: algorigo-logger에서 reflection을 제거하거나(`Class.getField("INSTANCE")` 등) kotlin-reflect를 선언하고, POM 의존성을 바로잡아야 합니다. logger가 수정되면 이 우회 의존성은 제거할 수 있습니다.
   - 문제: `algorigo-logger`의 `Tag`는 생성될 때 부모 태그를 `Class.forName(바깥 클래스).kotlin.objectInstance`로 찾습니다. 이 코드는 **kotlin-reflect가 필요**한데, logger의 POM에 의존성이 0개라서 kotlin-reflect가 함께 들어오지 않습니다. 1.2.3~1.2.6 모두 같은 상태입니다.
     - 그 결과 `Ble.Device`, `Ble.Engine.Default` 같은 중첩 태그가 처음 초기화될 때 `KotlinReflectionNotSupportedError`가 납니다. 최상위 태그인 `Ble`는 부모를 찾지 않으므로 괜찮습니다.
   - 영향(실기기 재현):
@@ -228,6 +237,7 @@
 - [ ] **[구조]** `getDevice(mac)`에서 `getRemoteDevice`는 대문자 MAC만 허용합니다. 입력을 정규화해야 합니다.
 - [ ] **[구조]** `clazz.newInstance()`(`impl/BleManagerEngineImpl.kt:148`)는 deprecated이고, 사용하는 앱이 R8을 쓰면 no-arg 생성자가 제거될 수 있습니다. factory 람다 방식으로 바꾸거나 consumer proguard rule을 추가합니다.
 - [ ] **[배포]** Gradle에서 deprecated된 `buildDir`, `archivesBaseName`을 교체합니다.
+- [ ] **[구조]** `ExampleInstrumentedTest`가 항상 실패합니다. 패키지명을 `com.algorigo.algorigoble2.test`로 기대하지만, 실제 namespace는 `com.algorigo.rx.algorigoble2`입니다. 이 때문에 `connectedDebugAndroidTest` 전체 실행이 실패하므로, 수정하거나 삭제해야 합니다(`algorigoble2/src/androidTest/.../ExampleInstrumentedTest.kt`).
 - [ ] **[구조]** (실기기) 라이브러리 로그가 2~3번씩 중복 출력되는 경우가 있습니다. 예를 들어 `doOnError` 한 번에 같은 줄이 2~3번 나옵니다. 원인은 확인하지 못했습니다. 샘플 앱의 `BluetoothService`가 `AndroidHandler`를 추가하는 방식과 logger의 handler 전파 구조를 확인해야 합니다.
 
 ### 장기 기능
