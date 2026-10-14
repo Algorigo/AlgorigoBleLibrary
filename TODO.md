@@ -120,7 +120,21 @@
   - 제안: `ReplyData`에 status를 포함하고, 실패하면 `GattException(status)`로 에러를 냅니다. discovery가 실패하면 연결을 실패로 처리합니다.
   - (실기기) indicate 전용 `aaa2`에 NOTIFICATION CCCD(`0x0100`)를 쓰면 라이브러리는 성공으로 보고합니다. 서버의 응답 status는 로그에 남지 않아서 실제로 거부됐는지는 확인하지 못했습니다. status 실패를 의도적으로 만들 수 있는 peripheral로 재검증이 필요합니다.
 
-- [ ] **[버그] 재연결한 뒤에도 이전 연결의 서비스 캐시를 사용함** — `impl/BleDeviceEngineImpl.kt:193, 438-449`
+- [x] **[버그] 재연결한 뒤에도 이전 연결의 서비스 캐시를 사용함** — `impl/BleDeviceEngineImpl.kt:193, 438-449`
+  - ✅ 해결 (`feature/fix_stale_service_cache`)
+    - `serviceSingle` 캐시를 제거했습니다. 서비스 목록과 characteristic은 항상 **현재 연결된 `BluetoothGatt`**에서 읽습니다. 그래서 재연결 후 이전(닫힌) gatt의 characteristic 객체를 쓰지 않습니다.
+    - `onServiceChanged`(API 31+)를 처리합니다. 현재 연결된 gatt이면 `discoverServices()`를 다시 호출합니다. Android는 `discoverServices()` 호출 즉시 서비스 목록을 비우기 때문에, 재탐색이 끝날 때까지(`onServicesDiscovered`) read/write/notification 설정/`getCharacteristicsSingle()`이 기다립니다. `discoverServices()`가 false를 반환하면 대기하지 않습니다.
+    - 재탐색으로 `onServicesDiscovered`가 다시 와도 CONNECTED를 다시 내보내지 않습니다. 다시 내보내면 `setupNotification`이 재구독되어 CCCD를 한 번 더 쓰기 때문입니다.
+    - `getCharacteristicsSingle()`에도 `guardOperation()`(타임아웃, 연결 끊김 감지)을 적용했습니다.
+    - 테스트: `BleDeviceEngineImplServiceCacheTest`(8건). 수정 전 코드에서는 재연결 후 이전 목록, 이전 characteristic 사용, 재탐색 없음, CONNECTED 중복, CCCD 중복 쓰기, 재탐색 중 작업 진행 등 6건이 실패했습니다.
+      - `GattTestFixture`의 mock gatt를 실제처럼 바꿨습니다. `discoverServices()`를 호출하면 목록이 비워지고, `onServicesDiscovered` 시점에 서버 DB가 반영됩니다.
+    - 실기기 확인(Fold5 샘플 앱 ↔ S23 nRF Connect GATT 서버):
+      - 연결을 유지한 채 S23 서버를 켜자 `onServiceChanged` → `discoverServices()` → `onServicesDiscovered`가 이어졌고, 앱을 재시작하지 않고 화면을 다시 열어도 `aaa1`/`aaa2`/`2a37` 등이 나타났습니다. 새로 나타난 `aaa1` read도 정상 동작했습니다.
+      - 연결을 끊고 S23 서버를 끈 뒤 **같은 프로세스에서 재연결**하자, 사라진 서비스가 목록에서도 사라졌습니다. 수정 전에는 이전 목록이 남아 있었습니다.
+    - 남은 제한 사항:
+      - API 30 이하에는 `onServiceChanged` 콜백이 없어서, 연결 중의 서비스 변경은 재연결해야 반영됩니다.
+      - 서비스 변경 전에 설정한 notification 구독은 자동으로 다시 설정하지 않습니다. 핸들이 바뀌는 경우(DFU 등)에는 앱이 다시 구독해야 합니다.
+      - 서비스 변경을 앱에 알리는 공개 API는 없습니다.
   - `serviceSingle`은 한 번 설정되면 초기화되지 않습니다. 그래서 재연결 후에도 닫힌 이전 `BluetoothGatt`의 characteristic 객체를 새 gatt에서 사용합니다. 펌웨어 업데이트(DFU) 등으로 핸들이 바뀌면 다른 characteristic에 접근하거나 작업이 실패합니다.
   - 제안: DISCONNECTED가 되면 `serviceSingle = null`로 초기화합니다. `onServiceChanged`(API 31+)에서도 다시 discovery를 수행합니다.
   - (실기기, nRF Connect GATT 서버) 연결 중에 S23(서버)의 GATT DB가 바뀌었습니다.
