@@ -89,8 +89,28 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
         override fun onServicesDiscovered(gatt: BluetoothGatt?, status: Int) {
             super.onServicesDiscovered(gatt, status)
             L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onServicesDiscovered $status")
+            discoveringServicesRelay.accept(false)
             gatt?.let {
-                stateRelay.accept(State.CONNECTED(it))
+                // onServiceChanged 로 다시 탐색한 경우에는 이미 같은 gatt 로 CONNECTED 이므로 상태를 다시 내보내지 않는다.
+                // (다시 내보내면 gattObservable 을 구독 중인 setupNotification 이 재구독되어 CCCD 를 다시 쓴다)
+                if ((stateRelay.value as? State.CONNECTED)?.gatt !== it) {
+                    stateRelay.accept(State.CONNECTED(it))
+                }
+            }
+        }
+
+        override fun onServiceChanged(gatt: BluetoothGatt) {
+            super.onServiceChanged(gatt)
+            L.debug(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : onServiceChanged")
+            if ((stateRelay.value as? State.CONNECTED)?.gatt !== gatt) {
+                // 아직 첫 서비스 탐색 전이라면 그 탐색 결과에 변경 사항이 반영된다
+                return
+            }
+            // BluetoothGatt.getServices() 는 discoverServices() 를 다시 호출해야 갱신된다. 탐색이 끝날 때까지 작업은 기다린다.
+            discoveringServicesRelay.accept(true)
+            if (!gatt.discoverServices()) {
+                L.warning(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : discoverServices failed after onServiceChanged")
+                discoveringServicesRelay.accept(false)
             }
         }
 
@@ -191,7 +211,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                 throw BleManager.DisconnectedException()
             }
         }
-    private var serviceSingle: Single<List<BluetoothGattService>>? = null
+    private val discoveringServicesRelay = BehaviorRelay.createDefault(false)
     private val replyRelay = PublishRelay.create<ReplyData>()
     private val notificationRelay = PublishRelay.create<Pair<UUID, ByteArray>>()
     private val mtuRelay = PublishRelay.create<Pair<Int, Int>>()
@@ -329,9 +349,10 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
             .map { services ->
                 services.map { it.characteristics }.flatten()
             }
-            .map {
+            .map<List<BleCharacterisic>> {
                 it.map { BleCharacteristicImpl(it) }
             }
+            .guardOperation()
     }
 
     override fun readCharacteristicSingle(characteristicUuid: UUID): Single<ByteArray> {
@@ -451,16 +472,11 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
         .firstOrError()
 
     private fun getServices(): Single<List<BluetoothGattService>> {
+        // 서비스 목록을 캐시하지 않고 현재 연결된 gatt 에서 읽는다. (재연결/서비스 변경 후 이전 목록과 characteristic 객체를 쓰지 않도록)
         return checkConnectionState(BleDevice.ConnectionState.CONNECTED)
-            .andThen(Single.defer {
-                serviceSingle
-                    ?: getGattSingle()
-                        .flatMap { gatt ->
-                            Single.fromCallable(gatt::getServices).cache().also {
-                                serviceSingle = it
-                            }
-                        }
-            })
+            .andThen(discoveringServicesRelay.filter { !it }.firstOrError())
+            .flatMap { getGattSingle() }
+            .map { it.services }
     }
 
     private fun getCharacteristic(characteristicUuid: UUID): Single<BluetoothGattCharacteristic> {
