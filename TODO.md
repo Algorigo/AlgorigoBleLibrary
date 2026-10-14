@@ -202,7 +202,13 @@
     - notification 해제와 다른 설정의 CCCD 쓰기가 겹치자 `writeDescriptor() - prior command is not finished`가 발생했고, 500ms 재시도로 복구됐습니다.
     - `operationTimeoutMillis=1`로 타임아웃시킨 직후 다음 read는 이전 요청이 아직 진행 중이라 busy가 되어 579ms(재시도 1회)가 걸렸습니다.
 
-- [ ] **[버그] `connectGatt`에 transport를 지정하지 않음** — `impl/BleDeviceEngineImpl.kt:271`
+- [x] **[버그] `connectGatt`에 transport를 지정하지 않음** — `impl/BleDeviceEngineImpl.kt:271`
+  - ✅ 해결 (`feature/connect_gatt_transport_le`)
+    - `connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)`로 LE transport를 명시합니다.
+    - 테스트: `BleDeviceEngineImplTransportTest`. 수정 전 코드에서는 3인자 `connectGatt`(AUTO)가 호출되어 실패했습니다. `GattTestFixture`는 3인자와 4인자 overload를 모두 stub하여 기존 테스트가 영향을 받지 않게 했습니다.
+    - 실기기 확인(Fold5 → S23, Device Name read):
+      - Fold5 `dumpsys bluetooth_manager`에 기록된 이 앱의 GATT client transport가 수정 전 **`transport: AUTO`**에서 수정 후 **`transport: LE`**로 바뀌었습니다. 연결과 read는 양쪽 모두 정상이었습니다.
+      - 참고: S23(듀얼모드)은 AUTO여도 Android가 LE를 선택했습니다(`btif_gattc_open_impl: Transport=BT_TRANSPORT_LE, device type=DUAL`). 그래서 이 기기로는 BR/EDR 시도로 인한 133 실패 자체를 재현하지 못했습니다.
   - 듀얼모드 기기에서 BR/EDR로 연결을 시도하다가 status 133으로 실패하는 대표적인 원인입니다. minSdk가 24이므로 `connectGatt(context, autoConnect, callback, BluetoothDevice.TRANSPORT_LE)`를 바로 사용할 수 있습니다.
 
 - [ ] **[버그] `deviceMap`이 thread-safe하지 않음** — `impl/BleManagerEngineImpl.kt:35, 143-153`
