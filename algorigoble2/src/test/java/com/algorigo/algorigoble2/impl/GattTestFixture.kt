@@ -82,10 +82,12 @@ internal class GattTestFixture(val bleDevice: BleDevice = BleDevice()) {
         simulateServicesDiscovered(targetGatt)
     }
 
-    /** 서버 DB 를 탐색 결과로 반영한 뒤 onServicesDiscovered 를 보낸다. */
-    fun simulateServicesDiscovered(targetGatt: BluetoothGatt = gatt) {
-        gattStates.getValue(targetGatt).let { it.discoveredServices = it.serverServices.toList() }
-        callback.onServicesDiscovered(targetGatt, BluetoothGatt.GATT_SUCCESS)
+    /** 서버 DB 를 탐색 결과로 반영한 뒤 onServicesDiscovered 를 보낸다. 실패 status 이면 서비스 목록은 비어 있다. */
+    fun simulateServicesDiscovered(targetGatt: BluetoothGatt = gatt, status: Int = BluetoothGatt.GATT_SUCCESS) {
+        gattStates.getValue(targetGatt).let {
+            it.discoveredServices = if (status == BluetoothGatt.GATT_SUCCESS) it.serverServices.toList() else listOf()
+        }
+        callback.onServicesDiscovered(targetGatt, status)
     }
 
     fun disconnectFromRemote(targetGatt: BluetoothGatt = gatt) {
