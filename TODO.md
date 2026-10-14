@@ -125,6 +125,7 @@
     - 실기기 확인(Fold5 → S23 시스템 GATT의 readable characteristic 35개 읽기): 수정 전과 후의 결과가 같았습니다(정상 read 30건 성공). 즉 status 0인 정상 응답은 영향을 받지 않습니다.
       - 빈 값(0바이트)으로 읽힌 characteristic도 실제로 status 0이었습니다.
       - 다만 S23 시스템 GATT는 실패 status를 돌려주는 characteristic이 없어서, **실패 status 경로 자체는 실기기에서 확인하지 못했습니다**. nRF Connect 서버 등 실패 응답을 만들 수 있는 peripheral로 재검증이 필요합니다.
+      - (`feature/write_type` 실기기 테스트 중 추가 확인) nRF Connect Sample configuration의 HR Control Point(`2a39`)에 정의되지 않은 값 `0x02`를 써도 서버가 받아들였습니다(성공 응답). 즉 nRF 샘플 서버로도 실패 status를 만들 수 없었습니다. 실패 응답을 설정할 수 있는 peripheral(예: nRF52 DK 펌웨어)이 필요합니다.
     - 남은 작업: 연결 중 끊김(`onConnectionStateChange`)의 status(예: 133, 8)는 아직 `DisconnectedException`에 담기지 않습니다. 이 부분은 P2 "예외 계층 정리" 항목에서 처리합니다.
   - read/write/descriptor 콜백이 `status != GATT_SUCCESS`인 경우에도 성공으로 처리합니다. 예를 들어 인증이 부족해서 read가 실패해도 이전 값이 성공으로 반환됩니다.
   - `onServicesDiscovered`도 실패한 경우에 `CONNECTED`로 전환합니다. 이 경우 서비스가 비어 있어서 이후의 모든 작업이 `IllegalStateException`으로 실패합니다.
@@ -223,7 +224,24 @@
 
 ### 잠재적 버그
 
-- [ ] **[버그] 쓰기 타입 문제** — `impl/BleDeviceEngineImpl.kt:357-401`
+- [x] **[버그] 쓰기 타입 문제** — `impl/BleDeviceEngineImpl.kt:357-401`
+  - ✅ 해결 (`feature/write_type`)
+    - `BleDevice.WriteType`(`DEFAULT`/`WITH_RESPONSE`/`WITHOUT_RESPONSE`)를 추가했습니다. `writeCharacteristicSingle(uuid, bytes, writeType = DEFAULT)`이고, `@JvmOverloads`로 기존 2인자 시그니처의 바이너리 호환을 유지합니다.
+      - `DEFAULT`: WRITE를 지원하면 응답 있는 쓰기, WRITE NO RESPONSE만 지원하면 응답 없는 쓰기를 합니다. 기존 코드가 의도했던 동작입니다.
+      - 명시한 타입을 characteristic이 지원하지 않으면 GATT 호출 없이 `IllegalCharacteristicProperty`로 실패합니다.
+    - 쓰기 전에 `characteristic.writeType`을 **매번 지정**합니다. 지정하지 않으면 Android 기본값(WRITE NO RESPONSE 속성이 있으면 NO_RESPONSE)이 적용되던 것이 원인이었습니다. 큐로 직렬화되므로 공유 characteristic 객체의 writeType을 바꿔도 안전합니다.
+    - ⚠️ 동작 변경: WRITE와 WRITE NO RESPONSE를 모두 가진 characteristic의 기본 쓰기가 실제로 응답을 기다리게 됩니다(더 느리지만 확실함). 처리량이 필요하면 `WITHOUT_RESPONSE`를 명시해야 합니다.
+    - `VirtualDeviceEngine`은 쓰기 타입을 구분하지 않습니다(`VirtualDevice` API 변경 없음).
+    - 테스트: `BleDeviceEngineImplWriteTypeTest`(6건). writeType 지정을 빼면(수정 전 동작) 5건이 실패하고, 나머지 1건은 미지원 타입 검증입니다.
+    - 실기기 확인(Fold5 → S23 nRF Connect GATT 서버, 각 5회, 스택 로그의 write 요청 → 완료 시간):
+
+      | 쓰기 | 수정 전 | 수정 후 |
+      |---|---|---|
+      | `aaa2`(WRITE+WNR) 기본 | **0~1ms**(Write Command), 라이브러리 7~16ms | **81~104ms**(Write Request), 라이브러리 90~124ms |
+      | `aaa2` `WITHOUT_RESPONSE` | – | 0~1ms, 라이브러리 7~19ms |
+      | `aaa2` `WITH_RESPONSE` | – | 53~86ms, 라이브러리 64~99ms |
+      | `2a39`(WRITE 전용) 기본 | 57~139ms | 78~87ms(변화 없음) |
+      | `2a39` `WITHOUT_RESPONSE` | – | GATT 호출 없이 `IllegalCharacteristicProperty`(4ms) |
   - `WRITE | WRITE_NO_RESPONSE` 속성을 둘 다 가진 characteristic은 Android 기본 `writeType`이 NO_RESPONSE입니다. 그래서 응답을 기다리는 분기로 들어가도 실제로는 응답 없이 전송됩니다. 사용자가 쓰기 타입을 선택할 수도 없습니다.
   - ~~NO_RESPONSE 분기는 `onCharacteristicWrite`를 기다리지 않고 바로 반환합니다. 그래서 연속으로 쓰면 다음 write가 busy가 되고 500ms씩 재시도하므로 처리량이 크게 떨어집니다.~~ → `feature/gatt_operation_queue`에서 해결했습니다. 이제 `onCharacteristicWrite`를 기다리고 큐로 직렬화합니다. 쓰기 타입을 선택하는 기능은 여전히 남아 있습니다.
   - (실기기) 블루투스 스택 로그의 write 요청 → 완료 시간으로 비교했습니다.
@@ -291,7 +309,8 @@
 
 ### 빠진 BLE 기능
 
-- [ ] **[기능] 쓰기 타입 선택 API** — `writeCharacteristicSingle(uuid, bytes, writeType)` (with/without response).
+- [x] **[기능] 쓰기 타입 선택 API** — `writeCharacteristicSingle(uuid, bytes, writeType)` (with/without response).
+  - ✅ 해결 (`feature/write_type`): 위 "쓰기 타입 문제" 항목과 함께 `BleDevice.WriteType`으로 추가했습니다.
 - [ ] **[기능] Connection priority** — `requestConnectionPriority(HIGH/BALANCED/LOW_POWER)`. 처리량과 지연에 큰 영향을 줍니다.
 - [ ] **[기능] RSSI 읽기** — `readRemoteRssi()`. 콜백(`impl/BleDeviceEngineImpl.kt:171`)은 있지만 로그만 남깁니다.
 - [ ] **[기능] 자동 재연결 / `autoConnect` 옵션** — 현재 `autoConnect=false`로 고정되어 있고, 끊겼을 때 재연결하는 정책이 없습니다. status 133이면 재시도하는 옵션도 필요합니다.
