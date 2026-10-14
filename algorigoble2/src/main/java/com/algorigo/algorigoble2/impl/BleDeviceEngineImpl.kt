@@ -339,7 +339,8 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                         if (it.first == 0) {
                             L.debug(Ble.Device.Default, "${bluetoothDevice.name}(${bluetoothDevice.address}) : connectGatt call")
                             // 블루투스가 꺼져 있으면 connectGatt 가 null 을 반환한다. 상태를 CONNECTING 으로 바꾸기 전에 실패시킨다.
-                            val newGatt = bluetoothDevice.connectGatt(context, false, gattCallback)
+                            // transport 를 지정하지 않으면(AUTO) 듀얼모드 기기에서 BR/EDR 로 GATT 연결을 시도해 status 133 으로 실패할 수 있다
+                            val newGatt = bluetoothDevice.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
                                 ?: throw BleManager.ConnectFailedException("connectGatt returned null (bluetooth may be off)")
                             gatt = newGatt
                             stateRelay.accept(State.CONNECTING(newGatt))

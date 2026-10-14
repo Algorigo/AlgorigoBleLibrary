@@ -46,6 +46,7 @@ internal class GattTestFixture(val bleDevice: BleDevice = BleDevice()) {
         every { bluetoothDevice.address } returns ADDRESS
         every { bluetoothDevice.name } returns NAME
         every { bluetoothDevice.connectGatt(any(), any(), capture(callbackSlot)) } returns gatt
+        every { bluetoothDevice.connectGatt(any(), any(), capture(callbackSlot), any()) } returns gatt
     }
 
     /** 재연결 시 connectGatt 가 반환할 새 gatt 를 만든다. 서버 DB 는 비어 있는 상태로 시작한다. */
@@ -68,6 +69,7 @@ internal class GattTestFixture(val bleDevice: BleDevice = BleDevice()) {
     /** connectGatt 반환값을 호출 순서대로 지정한다. null 은 블루투스가 꺼져 있을 때의 반환값이다. */
     fun stubConnectGatt(vararg results: BluetoothGatt?) {
         every { bluetoothDevice.connectGatt(any(), any(), capture(callbackSlot)) } returnsMany results.toList()
+        every { bluetoothDevice.connectGatt(any(), any(), capture(callbackSlot), any()) } returnsMany results.toList()
     }
 
     /** connectGatt → STATE_CONNECTED → onServicesDiscovered 순서로 콜백을 보내 CONNECTED 상태로 만든다. */
