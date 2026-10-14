@@ -8,6 +8,7 @@ import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothProfile
+import android.bluetooth.BluetoothSocket
 import android.content.Context
 import com.algorigo.algorigoble2.BleCharacterisic
 import com.algorigo.algorigoble2.BleDevice
@@ -25,6 +26,7 @@ import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Single
 import io.reactivex.rxjava3.core.SingleEmitter
 import io.reactivex.rxjava3.schedulers.Schedulers
+import java.io.IOException
 import java.util.*
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
@@ -37,13 +39,14 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
     class IllegalCharacteristicProperty(val property: Int, val type: String): Exception()
 
     private sealed class State(val connectionState: BleDevice.ConnectionState) {
-        class CONNECTING : State(BleDevice.ConnectionState.CONNECTING)
+        // 각 상태는 disconnect() 가 정리할 수 있도록 진행 중인 gatt / 소켓을 담는다
+        class CONNECTING(val gatt: BluetoothGatt) : State(BleDevice.ConnectionState.CONNECTING)
         class CONNECTED(val gatt: BluetoothGatt) : State(BleDevice.ConnectionState.CONNECTED)
         // cause: 연결 시도 중에 끊겼을 때 connectCompletable 이 낼 에러. (null 이면 DisconnectedException)
         class DISCONNECTED(val cause: Throwable? = null) : State(BleDevice.ConnectionState.DISCONNECTED)
-        class DISCONNECTING : State(BleDevice.ConnectionState.DISCONNECTING)
-        class SPP_CONNECTING : State(BleDevice.ConnectionState.SPP_CONNECTING)
-        class SPP_CONNECTED : State(BleDevice.ConnectionState.SPP_CONNECTED)
+        class DISCONNECTING(val gatt: BluetoothGatt) : State(BleDevice.ConnectionState.DISCONNECTING)
+        class SPP_CONNECTING(val socket: BluetoothSocket) : State(BleDevice.ConnectionState.SPP_CONNECTING)
+        class SPP_CONNECTED(val socket: BleSppSocket) : State(BleDevice.ConnectionState.SPP_CONNECTED)
     }
 
     private enum class Type {
@@ -104,11 +107,16 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
             discoveringServicesRelay.accept(false)
             gatt?.let {
                 val alreadyConnected = (stateRelay.value as? State.CONNECTED)?.gatt === it
+                val connecting = (stateRelay.value as? State.CONNECTING)?.gatt === it
+                if (!alreadyConnected && !connecting) {
+                    // 연결 취소/타임아웃으로 이미 정리된 gatt 의 늦은 콜백은 무시한다
+                    return
+                }
                 if (status != BluetoothGatt.GATT_SUCCESS) {
                     if (alreadyConnected) {
                         // onServiceChanged 후 재탐색 실패: 연결은 유지한다. (서비스 목록이 비면 이후 작업은 characteristic 을 찾지 못해 실패한다)
                         L.warning(Ble.Device.Default, "${it.device?.name}(${it.device?.address}) : service rediscovery failed : $status")
-                    } else if (stateRelay.value is State.CONNECTING) {
+                    } else {
                         // 첫 서비스 탐색 실패: 서비스 없이 CONNECTED 로 만들지 않고 연결을 정리한다
                         cancelConnecting(it, BleManager.GattOperationFailedException("DISCOVER_SERVICES", status))
                     }
@@ -331,9 +339,10 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                         if (it.first == 0) {
                             L.debug(Ble.Device.Default, "${bluetoothDevice.name}(${bluetoothDevice.address}) : connectGatt call")
                             // 블루투스가 꺼져 있으면 connectGatt 가 null 을 반환한다. 상태를 CONNECTING 으로 바꾸기 전에 실패시킨다.
-                            gatt = bluetoothDevice.connectGatt(context, false, gattCallback)
+                            val newGatt = bluetoothDevice.connectGatt(context, false, gattCallback)
                                 ?: throw BleManager.ConnectFailedException("connectGatt returned null (bluetooth may be off)")
-                            stateRelay.accept(State.CONNECTING())
+                            gatt = newGatt
+                            stateRelay.accept(State.CONNECTING(newGatt))
                         } else {
                             throw (it.second as State.DISCONNECTED).cause ?: BleManager.DisconnectedException()
                         }
@@ -375,13 +384,38 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
     }
 
     override fun disconnect() {
-        try {
-            checkConnectionState(BleDevice.ConnectionState.CONNECTED)
-                .andThen(gattObservable)
-                .blockingFirst()
-                .disconnect()
-        } catch (exception: Exception) {
-            L.error(Ble, "Device Disconnect Error", exception)
+        when (val state = stateRelay.value) {
+            is State.CONNECTED -> {
+                L.debug(Ble.Device.Default, "${bluetoothDevice.name}(${bluetoothDevice.address}) : disconnect")
+                // DISCONNECTING 이 되면 진행 중인 작업과 notification 은 바로 DisconnectedException 으로 끝난다
+                stateRelay.accept(State.DISCONNECTING(state.gatt))
+                state.gatt.disconnect()
+                // onConnectionStateChange(DISCONNECTED) 가 오지 않는 경우를 대비해 일정 시간 뒤 강제로 정리한다
+                Completable.timer(DISCONNECT_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS).subscribe {
+                    val current = stateRelay.value
+                    if (current is State.DISCONNECTING && current.gatt === state.gatt) {
+                        L.warning(Ble.Device.Default, "${bluetoothDevice.name}(${bluetoothDevice.address}) : disconnect callback did not arrive, closing gatt")
+                        state.gatt.close()
+                        stateRelay.accept(State.DISCONNECTED())
+                        bleDevice.onDisconnected()
+                    }
+                }
+            }
+            // 연결 시도 중이면 취소한다. 기다리던 connectCompletable 은 DisconnectedException 으로 끝난다
+            is State.CONNECTING -> cancelConnecting(state.gatt)
+            is State.SPP_CONNECTING -> {
+                // 소켓을 닫으면 진행 중인 connect() 가 IOException 으로 끝나고, connectSppSocket 이 상태를 정리한다
+                try {
+                    state.socket.close()
+                } catch (exception: IOException) {
+                    L.error(Ble, "spp socket close error", exception)
+                }
+            }
+            is State.SPP_CONNECTED -> {
+                state.socket.close()
+                stateRelay.accept(State.DISCONNECTED())
+            }
+            else -> L.debug(Ble.Device.Default, "${bluetoothDevice.name}(${bluetoothDevice.address}) : disconnect ignored, state is ${state?.connectionState}")
         }
     }
 
@@ -574,17 +608,24 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
     override fun connectSppSocket(uuid: UUID?): Observable<BleSppSocket> {
         var socket: BleSppSocket? = null
         return checkConnectionState(BleDevice.ConnectionState.DISCONNECTED)
-            .andThen(Observable.create<BleSppSocket> {
-                stateRelay.accept(State.SPP_CONNECTING())
+            .andThen(Observable.create<BleSppSocket> { emitter ->
                 val aUuid = uuid ?: bluetoothDevice.uuids.first().uuid
-                BleSppSocket(bluetoothDevice.createRfcommSocketToServiceRecord(aUuid)).also { theSocket ->
+                val bluetoothSocket = bluetoothDevice.createRfcommSocketToServiceRecord(aUuid)
+                // 연결 중에 disconnect() 가 불리면 소켓을 닫아 connect() 를 중단할 수 있도록 상태에 소켓을 담는다
+                stateRelay.accept(State.SPP_CONNECTING(bluetoothSocket))
+                BleSppSocket(bluetoothSocket).also { theSocket ->
                     socket = theSocket
-                    stateRelay.accept(State.SPP_CONNECTED())
-                    it.onNext(theSocket)
+                    stateRelay.accept(State.SPP_CONNECTED(theSocket))
+                    // disconnect() 로 SPP 연결이 끊기면 스트림을 끝낸다
+                    emitter.setDisposable(stateRelay.filter { it !is State.SPP_CONNECTED }.firstElement()
+                        .subscribe { emitter.tryOnError(BleManager.DisconnectedException()) })
+                    emitter.onNext(theSocket)
                 }
             })
             .doFinally {
-                stateRelay.accept(State.DISCONNECTED())
+                if (stateRelay.value !is State.DISCONNECTED) {
+                    stateRelay.accept(State.DISCONNECTED())
+                }
                 socket?.close()
             }
             .subscribeOn(Schedulers.io())
@@ -709,6 +750,8 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
         private const val RETRY_DELAY_MILLIS = 500L
         // ATT transaction timeout(30초) + 여유
         private const val GATT_RELEASE_TIMEOUT_MILLIS = 31_000L
+        // disconnect() 후 onConnectionStateChange(DISCONNECTED) 를 기다리는 최대 시간
+        private const val DISCONNECT_TIMEOUT_MILLIS = 5_000L
         // BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE 와 동일
         private val DISABLE_NOTIFICATION_VALUE = byteArrayOf(0x00, 0x00)
     }
