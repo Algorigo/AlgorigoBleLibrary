@@ -23,6 +23,7 @@
     - `VirtualDeviceEngine`은 연결 상태일 때 23~517 범위로 보정한 값을 반환합니다.
     - 테스트: `BleDeviceEngineImplMtuTest`, `VirtualDeviceEngineMtuTest`. 테스트 인프라(MockK, `unitTests.returnDefaultValues`, `GattTestFixture`, `RxTestSchedulerRule`)도 이 브랜치에서 추가했습니다.
     - MTU 요청에 타임아웃이 없던 문제는 아래 "작업 무한 대기" 항목(`feature/fix_gatt_operation_hang`)에서 함께 해결했습니다.
+    - 실기기 확인(Fold5 → S23 nRF Connect GATT 서버): `configureMTU(517)` → `onConfigureMTU(517, 0)`을 받은 뒤 517을 반환했습니다. 247을 요청해도 링크의 실제 MTU인 517을 반환했습니다. 이미 교환된 링크라서 요청값과 협상값이 다를 수 있습니다.
   - 문제: `getGattSingle().map { Single... }.ignoreElement()` 구조라서 안쪽 `Single`이 구독되지 않습니다. 결과적으로 MTU 요청은 보내지지 않고 Completable만 바로 완료됩니다. (최근 커밋 `9f18f3d`에서 추가된 기능)
   - 제안: `flatMap`으로 바꾸고, `onMtuChanged` 콜백을 relay로 받아서 **협상된 MTU 값을 `Single<Int>`로 반환**해야 합니다. 현재 `onMtuChanged`(176)는 로그만 남깁니다. Android 14 이상에서는 요청 값과 상관없이 517로 협상을 시도하므로, 실제 협상된 값을 반환하는 것이 중요합니다.
 
@@ -35,6 +36,11 @@
     - 그 결과 `InitializableBleDevice.initializeCompletable()` 안의 작업이 응답을 받지 못해도 `connectCompletable()`이 에러로 끝나고 연결이 해제됩니다.
     - JVM 테스트에서 `BluetoothGattDescriptor.*_VALUE` static 필드가 null이 되는 문제 때문에, CCCD 값(`0x0001`/`0x0002`/`0x0000`)을 라이브러리 안에 상수로 정의했습니다. Bluetooth 스펙 정의값이므로 실기기 동작은 동일합니다.
     - 테스트: `BleDeviceEngineImplOperationGuardTest`, `InitializableBleDeviceOperationGuardTest`. guard를 비활성화하면 버그 시나리오 테스트 10개가 실패하는 것을 확인했습니다.
+    - 실기기 확인(Fold5 → S23 nRF Connect GATT 서버):
+      - `operationTimeoutMillis=1`로 read하면 `TimeoutException`이 나고, 다음 작업은 정상 동작했습니다.
+      - 연결이 끊긴 뒤 read는 GATT 호출 없이 1ms 만에 `DisconnectedException`으로 끝났습니다.
+      - 연결이 끊기면 진행 중인 notification 스트림도 `DisconnectedException`으로 종료됐습니다.
+      - 그 밖에 read/write/notify/indicate가 모두 정상 동작했습니다.
   - 문제: GATT 호출 후 `replyRelay`에서 응답이 오기를 기다리는데, **타임아웃이 없고 연결 끊김도 감지하지 않습니다**. `getGattSingle()`은 `firstOrError()`이므로 이후의 상태 변화는 보지 않습니다.
   - 영향: 작업 도중 연결이 끊기거나 콜백이 유실되면 Single이 영원히 끝나지 않습니다. `InitializableBleDevice.initializeCompletable()` 안에서 이런 일이 생기면 `connectCompletable()`도 끝나지 않습니다.
   - 제안: 작업마다 타임아웃을 두고, `stateRelay`에서 CONNECTED가 아닌 상태가 오면 `DisconnectedException`이 나도록 merge합니다.
@@ -112,10 +118,15 @@
   - read/write/descriptor 콜백이 `status != GATT_SUCCESS`인 경우에도 성공으로 처리합니다. 예를 들어 인증이 부족해서 read가 실패해도 이전 값이 성공으로 반환됩니다.
   - `onServicesDiscovered`도 실패한 경우에 `CONNECTED`로 전환합니다. 이 경우 서비스가 비어 있어서 이후의 모든 작업이 `IllegalStateException`으로 실패합니다.
   - 제안: `ReplyData`에 status를 포함하고, 실패하면 `GattException(status)`로 에러를 냅니다. discovery가 실패하면 연결을 실패로 처리합니다.
+  - (실기기) indicate 전용 `aaa2`에 NOTIFICATION CCCD(`0x0100`)를 쓰면 라이브러리는 성공으로 보고합니다. 서버의 응답 status는 로그에 남지 않아서 실제로 거부됐는지는 확인하지 못했습니다. status 실패를 의도적으로 만들 수 있는 peripheral로 재검증이 필요합니다.
 
 - [ ] **[버그] 재연결한 뒤에도 이전 연결의 서비스 캐시를 사용함** — `impl/BleDeviceEngineImpl.kt:193, 438-449`
   - `serviceSingle`은 한 번 설정되면 초기화되지 않습니다. 그래서 재연결 후에도 닫힌 이전 `BluetoothGatt`의 characteristic 객체를 새 gatt에서 사용합니다. 펌웨어 업데이트(DFU) 등으로 핸들이 바뀌면 다른 characteristic에 접근하거나 작업이 실패합니다.
   - 제안: DISCONNECTED가 되면 `serviceSingle = null`로 초기화합니다. `onServiceChanged`(API 31+)에서도 다시 discovery를 수행합니다.
+  - (실기기, nRF Connect GATT 서버) 연결 중에 S23(서버)의 GATT DB가 바뀌었습니다.
+    - Fold5 OS는 `onServiceChanged`를 받고 서비스를 다시 탐색했지만, 라이브러리는 이 콜백을 처리하지 않습니다.
+    - 그래서 연결이 유지되는 동안은 물론, **같은 프로세스에서 끊었다 다시 연결한 뒤에도**(OS가 `onSearchComplete`로 새 목록을 받았는데도) `getCharacteristicsSingle()`이 이전 목록을 반환했습니다. 앱 프로세스를 재시작해야 새 서비스가 보였습니다.
+    - 참고: bonded 기기는 robust caching(Database Hash)으로 해시가 같으면 OS가 탐색을 생략합니다. 이것은 정상적인 OS 동작입니다.
 
 - [ ] **[버그] 같은 characteristic을 여러 곳에서 notification 구독하면, 하나만 해제해도 전부 끊김** — `impl/BleDeviceEngineImpl.kt:403-433`
   - 구독할 때마다 CCCD를 활성화하고, 하나라도 dispose되면 `doFinally`에서 CCCD를 비활성화합니다. 그래서 나머지 구독자는 에러 없이 데이터만 받지 못하게 됩니다.
@@ -127,6 +138,9 @@
   - 재시도를 모두 소진하면 `retryWhen`의 handler가 complete되어 `CommunicationFailedException` 대신 **`NoSuchElementException`**이 나옵니다.
   - 응답을 `uuid + type`으로만 매칭합니다. 그래서 이전 작업의 늦게 도착한 콜백(예: write-no-response의 `onCharacteristicWrite`)이 다음에 같은 UUID로 보낸 write의 응답으로 잘못 매칭될 수 있습니다.
   - 제안: 기기별 직렬 작업 큐(작업 1개 → 콜백 → 다음 작업)를 도입합니다. 타임아웃, 응답 매칭, 재시도를 큐에서 일괄 처리합니다.
+  - (실기기) 다음 두 경우를 확인했습니다.
+    - notification 해제와 다른 설정의 CCCD 쓰기가 겹치자 `writeDescriptor() - prior command is not finished`가 발생했고, 500ms 재시도로 복구됐습니다.
+    - `operationTimeoutMillis=1`로 타임아웃시킨 직후 다음 read는 이전 요청이 아직 진행 중이라 busy가 되어 579ms(재시도 1회)가 걸렸습니다.
 
 - [ ] **[버그] `connectGatt`에 transport를 지정하지 않음** — `impl/BleDeviceEngineImpl.kt:271`
   - 듀얼모드 기기에서 BR/EDR로 연결을 시도하다가 status 133으로 실패하는 대표적인 원인입니다. minSdk가 24이므로 `connectGatt(context, autoConnect, callback, BluetoothDevice.TRANSPORT_LE)`를 바로 사용할 수 있습니다.
@@ -163,6 +177,9 @@
 - [ ] **[버그] 쓰기 타입 문제** — `impl/BleDeviceEngineImpl.kt:357-401`
   - `WRITE | WRITE_NO_RESPONSE` 속성을 둘 다 가진 characteristic은 Android 기본 `writeType`이 NO_RESPONSE입니다. 그래서 응답을 기다리는 분기로 들어가도 실제로는 응답 없이 전송됩니다. 사용자가 쓰기 타입을 선택할 수도 없습니다.
   - NO_RESPONSE 분기는 `onCharacteristicWrite`를 기다리지 않고 바로 반환합니다. 그래서 연속으로 쓰면 다음 write가 busy가 되고 500ms씩 재시도하므로 처리량이 크게 떨어집니다.
+  - (실기기) 블루투스 스택 로그의 write 요청 → 완료 시간으로 비교했습니다.
+    - WRITE 전용 `2a39`는 52ms가 걸렸습니다(Write Response 대기).
+    - WRITE+WRITE NO RESPONSE를 가진 `aaa2`는 라이브러리가 응답형 분기로 처리했지만 0ms 만에 완료됐습니다. 즉 실제로는 **Write Command**로 전송됐습니다.
 - [ ] **[버그/구조] API 33에서 deprecated된 GATT API 사용** — `impl/BleDeviceEngineImpl.kt:97-154, 366, 377, 476`
   - `characteristic.value = ...` 후 `writeCharacteristic(characteristic)`을 호출하는 방식은 공유된 mutable 필드를 사용합니다. 같은 characteristic으로 notification이 들어오면 쓰려던 값이 덮어써질 수 있습니다(race).
   - API 33 이상에서는 `writeCharacteristic(char, value, writeType)`, `writeDescriptor(desc, value)`와 값을 인자로 받는 새 콜백으로 분기합니다.
