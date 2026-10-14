@@ -117,6 +117,8 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                 // onServiceChanged 로 다시 탐색한 경우에는 이미 같은 gatt 로 CONNECTED 이므로 상태를 다시 내보내지 않는다.
                 // (다시 내보내면 gattObservable 을 구독 중인 setupNotification 이 재구독되어 CCCD 를 다시 쓴다)
                 if (!alreadyConnected) {
+                    // 새 연결(새 BluetoothGatt)에는 처리 중인 요청이 없다
+                    gattRequestPendingRelay.accept(false)
                     stateRelay.accept(State.CONNECTED(it))
                 }
             }
@@ -145,6 +147,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
             super.onCharacteristicRead(gatt, characteristic, status)
             L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onCharacteristicRead:$status, ${characteristic?.uuid}:${characteristic?.value?.toHexString()}")
             characteristic?.let {
+                gattRequestPendingRelay.accept(false)
                 replyRelay.accept(ReplyData(Type.READ_CHARACTERISTIC, it.uuid, it.value ?: byteArrayOf(), status))
             }
         }
@@ -157,6 +160,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
             super.onCharacteristicWrite(gatt, characteristic, status)
             L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onCharacteristicWrite:$status, ${characteristic?.uuid}:${characteristic?.value?.toHexString()}")
             characteristic?.let {
+                gattRequestPendingRelay.accept(false)
                 replyRelay.accept(ReplyData(Type.WRITE_CHARACTERISTIC, it.uuid, it.value ?: byteArrayOf(), status))
             }
         }
@@ -180,6 +184,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
             super.onDescriptorRead(gatt, descriptor, status)
             L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onDescriptorRead:${descriptor?.characteristic?.uuid}:${descriptor?.value?.toHexString()}")
             descriptor?.let {
+                gattRequestPendingRelay.accept(false)
                 replyRelay.accept(ReplyData(Type.READ_DESCRIPTOR, it.characteristic.uuid, it.value ?: byteArrayOf(), status))
             }
         }
@@ -192,6 +197,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
             super.onDescriptorWrite(gatt, descriptor, status)
             L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onDescriptorWrite:${descriptor?.characteristic?.uuid}:${descriptor?.value?.toHexString()}")
             descriptor?.let {
+                gattRequestPendingRelay.accept(false)
                 replyRelay.accept(ReplyData(Type.WRITE_DESCRIPTOR, it.characteristic.uuid, it.value ?: byteArrayOf(), status))
             }
         }
@@ -219,6 +225,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
         override fun onMtuChanged(gatt: BluetoothGatt?, mtu: Int, status: Int) {
             super.onMtuChanged(gatt, mtu, status)
             L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onMtuChanged:$mtu, $status")
+            gattRequestPendingRelay.accept(false)
             mtuRelay.accept(Pair(mtu, status))
         }
     }
@@ -239,6 +246,8 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
     private val notificationRelay = PublishRelay.create<Pair<UUID, ByteArray>>()
     private val mtuRelay = PublishRelay.create<Pair<Int, Int>>()
     private val operationQueue = PublishRelay.create<QueuedOperation<*>>().toSerialized()
+    // GATT 요청을 보냈고 아직 콜백을 받지 못한 상태(Android BluetoothGatt 가 busy 인 상태)
+    private val gattRequestPendingRelay = BehaviorRelay.createDefault(false)
 
     init {
         operationQueue
@@ -399,9 +408,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                         replyRelay
                             .mergeWith(Completable.fromCallable {
                                 L.debug(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : readCharacteristic : $characteristicUuid")
-                                if (!gatt.readCharacteristic(characteristic)) {
-                                    throw CommunicationFailedException()
-                                }
+                                sendGattRequest { gatt.readCharacteristic(characteristic) }
                             })
                             .filter { it.uuid == characteristicUuid && it.type == Type.READ_CHARACTERISTIC }
                             .map { it.valueOrThrow() }
@@ -424,9 +431,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                                 .mergeWith(Completable.fromCallable {
                                     characteristic.value = byteArray
                                     L.debug(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : writeCharacteristic : $characteristicUuid : ${byteArray.toHexString()}")
-                                    if (!gatt.writeCharacteristic(characteristic)) {
-                                        throw CommunicationFailedException()
-                                    }
+                                    sendGattRequest { gatt.writeCharacteristic(characteristic) }
                                 })
                                 .filter { it.uuid == characteristicUuid && it.type == Type.WRITE_CHARACTERISTIC }
                                 .map { it.valueOrThrow() }
@@ -507,9 +512,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                         val descriptor = characteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG_UUID)
                         descriptor.value = byteArray
                         L.debug(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : writeDescriptor : ${characteristic.uuid} : ${byteArray.toHexString()}")
-                        if (!gatt.writeDescriptor(descriptor)) {
-                            throw CommunicationFailedException()
-                        }
+                        sendGattRequest { gatt.writeDescriptor(descriptor) }
                     }
                     .filter { it.uuid == characteristic.uuid && it.type == Type.WRITE_DESCRIPTOR }
                     .map { it.valueOrThrow() }
@@ -544,9 +547,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                 mtuRelay
                     .mergeWith(Completable.fromCallable {
                         L.debug(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : requestMtu : $mtu")
-                        if (!gatt.requestMtu(mtu)) {
-                            throw CommunicationFailedException()
-                        }
+                        sendGattRequest { gatt.requestMtu(mtu) }
                     })
                     .firstOrError()
                     .map { (negotiatedMtu, status) ->
@@ -568,7 +569,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
         operationQueue.accept(QueuedOperation(operation.guardOperation(), emitter))
     }
 
-    private class QueuedOperation<T : Any>(private val operation: Single<T>, private val emitter: SingleEmitter<T>) {
+    private inner class QueuedOperation<T : Any>(private val operation: Single<T>, private val emitter: SingleEmitter<T>) {
         fun execute(): Completable = Completable.defer {
             if (emitter.isDisposed) {
                 // 시작 전에 취소된 작업은 GATT 호출 없이 건너뛴다
@@ -579,9 +580,38 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                     .doOnSuccess { emitter.onSuccess(it) }
                     .doOnError { emitter.tryOnError(it) }
                     .ignoreElement()
-                    .onErrorComplete()
+                    .onErrorResumeNext { error ->
+                        // 타임아웃은 호출한 쪽에 바로 알리되, 보낸 요청이 아직 처리 중이면 큐는 GATT 가 풀릴 때까지 기다린다
+                        if (error is TimeoutException) waitForGattRelease() else Completable.complete()
+                    }
             }
         }
+    }
+
+    /** GATT 요청을 보내고 콜백이 올 때까지 처리 중으로 표시한다. 요청이 거절되면(busy 등) [CommunicationFailedException]. */
+    private fun sendGattRequest(request: () -> Boolean) {
+        gattRequestPendingRelay.accept(true)
+        if (!request()) {
+            gattRequestPendingRelay.accept(false)
+            throw CommunicationFailedException()
+        }
+    }
+
+    /**
+     * Android BluetoothGatt 는 콜백이 올 때까지 다음 요청을 거절한다. 그래서 타임아웃된 요청이 아직 처리 중이면
+     * 늦은 콜백이나 연결 끊김까지 기다린다. Android 는 ATT transaction timeout(30초)에 링크를 끊으므로 그 이상은 기다리지 않는다.
+     */
+    private fun waitForGattRelease(): Completable {
+        val released = gattRequestPendingRelay.filter { !it }.firstElement().ignoreElement()
+        val disconnected = stateRelay.filter { it !is State.CONNECTED }.firstElement().ignoreElement()
+        return Completable.ambArray(released, disconnected)
+            .timeout(GATT_RELEASE_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS, Completable.complete())
+            .doOnSubscribe {
+                if (gattRequestPendingRelay.value == true) {
+                    L.warning(Ble.Device.Default, "${bluetoothDevice.name}(${bluetoothDevice.address}) : operation timed out, waiting for GATT release before next operation")
+                }
+            }
+            .doFinally { gattRequestPendingRelay.accept(false) }
     }
 
     /** GATT 호출이 false 를 반환하면 잠시 후 다시 시도하고, 재시도 횟수를 넘기면 [CommunicationFailedException]으로 실패한다. */
@@ -628,6 +658,8 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
         private val CLIENT_CHARACTERISTIC_CONFIG_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
         private const val MAX_RETRY_COUNT = 5
         private const val RETRY_DELAY_MILLIS = 500L
+        // ATT transaction timeout(30초) + 여유
+        private const val GATT_RELEASE_TIMEOUT_MILLIS = 31_000L
         // BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE 와 동일
         private val DISABLE_NOTIFICATION_VALUE = byteArrayOf(0x00, 0x00)
     }

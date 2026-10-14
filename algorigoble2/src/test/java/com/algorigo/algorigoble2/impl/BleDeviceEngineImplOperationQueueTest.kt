@@ -82,14 +82,17 @@ class BleDeviceEngineImplOperationQueueTest {
     }
 
     @Test
-    fun nextOperation_startsAfterPreviousOperationTimesOut() {
+    fun nextOperation_startsAfterLateCallback_whenPreviousOperationTimedOut() {
         val firstRead = fixture.bleDevice.readCharacteristicSingle(FIRST_UUID).test()
         val secondRead = fixture.bleDevice.readCharacteristicSingle(SECOND_UUID).test()
-        verify(exactly = 0) { fixture.gatt.readCharacteristic(second) }
 
         rxRule.testScheduler.advanceTimeBy(BleDevice.DEFAULT_OPERATION_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
 
+        // 타임아웃은 바로 알리지만, 첫 요청이 아직 처리 중(BluetoothGatt busy)이므로 다음 작업은 시작하지 않는다
         firstRead.assertError(TimeoutException::class.java)
+        verify(exactly = 0) { fixture.gatt.readCharacteristic(second) }
+
+        replyRead(first)
         verify(exactly = 1) { fixture.gatt.readCharacteristic(second) }
         replyRead(second)
         secondRead.assertValue { it.contentEquals(byteArrayOf(2)) }
