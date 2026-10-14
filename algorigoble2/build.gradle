@@ -177,6 +177,9 @@ dependencies {
 
     // 공개 API 의 Ble 태그가 com.algorigo.logger.Tag 를 상속하므로 api 로 노출한다
     api 'com.algorigo.library:algorigo-logger:1.2.3'
+    // algorigo-logger 의 Tag 가 부모 태그를 KClass.objectInstance 로 찾지만 kotlin-reflect 를 POM 에 선언하지 않는다. (1.2.3~1.2.6 동일)
+    // 없으면 중첩 태그(Ble.Device 등)를 처음 사용할 때 KotlinReflectionNotSupportedError 로 크래시가 나므로 runtime 의존성으로 함께 배포한다.
+    implementation "org.jetbrains.kotlin:kotlin-reflect:$kotlin_version"
 
     //ReactiveX
     // 공개 API 가 Observable/Single/Completable 을 반환하므로 api 로 노출한다 (기존 전이 의존성으로 해석되던 버전과 동일)
