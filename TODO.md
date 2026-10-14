@@ -213,7 +213,30 @@
   - `ConnectionState.CONNECTING.apply { status = "INITIALING" }`가 enum 싱글턴 자체를 수정합니다. 그래서 이후 **모든 기기**의 CONNECTING 상태가 `"INITIALING"`으로 표시됩니다.
   - 제안: `status`를 `val`로 바꾸고 `INITIALIZING` 상태를 별도로 추가합니다(오타 `INITIALING`도 수정). `distinctUntilChanged()`도 적용합니다.
 
-- [ ] **[버그] `disconnect()`가 CONNECTED 상태에서만 동작함** — `impl/BleDeviceEngineImpl.kt:303-312`
+- [x] **[버그] `disconnect()`가 CONNECTED 상태에서만 동작함** — `impl/BleDeviceEngineImpl.kt:303-312`
+  - ✅ 해결 (`feature/disconnect_all_states`)
+    - 상태별로 처리합니다. CONNECTING/DISCONNECTING/SPP 상태가 진행 중인 gatt나 소켓을 담도록 바꿨습니다.
+
+      | 상태 | 동작 |
+      |---|---|
+      | CONNECTED | **DISCONNECTING**을 내보낸 뒤 `gatt.disconnect()`. 콜백이 오면 close와 DISCONNECTED. 콜백이 5초 안에 오지 않으면 강제로 정리 |
+      | CONNECTING | 연결을 즉시 취소(`cancelConnecting`). 기다리던 `connectCompletable()`은 `DisconnectedException` |
+      | SPP_CONNECTING | 소켓을 닫아서 진행 중인 `connect()`를 중단 |
+      | SPP_CONNECTED | 소켓을 닫고 DISCONNECTED. `connectSppSocket()` 스트림은 `DisconnectedException` |
+      | DISCONNECTED / DISCONNECTING | 아무것도 하지 않음(두 번 호출해도 안전) |
+
+    - DISCONNECTING이 되는 즉시 진행 중인 작업과 notification은 콜백을 기다리지 않고 `DisconnectedException`으로 끝납니다.
+    - 연결 취소/타임아웃으로 이미 정리된 gatt에 늦게 도착한 `onServicesDiscovered`는 무시합니다. 이전에는 닫힌 gatt로 CONNECTED가 될 수 있었습니다.
+    - `InitializableBleDevice`가 초기화 실패 시 `disconnect()`를 두 번 호출해도 두 번째 호출은 무시됩니다.
+    - 테스트: `BleDeviceEngineImplDisconnectTest`(10건). 수정 전 엔진에서는 9건이 실패했고, 나머지 1건(끊긴 상태에서 호출하면 아무것도 하지 않음)은 기존 동작 보존 테스트입니다.
+    - 실기기 확인(Fold5 → S23 시스템 GATT, 읽기만 수행):
+      - **연결 중 취소**(`connectCompletable()` 직후 `disconnect()`):
+        - 수정 전: 무시되어 261ms에 연결이 완료됐고, 2초 뒤에도 연결 상태였습니다.
+        - 수정 후: 4ms 만에 DISCONNECTED가 되고 `connectCompletable()`은 `DisconnectedException`으로 끝났습니다. 2초 뒤에도 연결되지 않았고, Android 로그에서 `connect()` → `cancelOpen()` → `close()`를 확인했습니다.
+      - **read 진행 중 연결 해제**:
+        - 수정 전: DISCONNECTING 없이 콜백 후 DISCONNECTED로 바뀌었고, read는 18ms에 `DisconnectedException`으로 끝났습니다.
+        - 수정 후: 즉시 DISCONNECTING이 되면서 read가 21ms에 `DisconnectedException`으로 끝났고, 이어서 콜백으로 DISCONNECTED가 됐습니다.
+      - SPP는 S23에 RFCOMM 서버가 없어서 단위 테스트로만 확인했습니다.
   - CONNECTING 중에는 연결을 취소할 수 없고 로그만 남습니다. `State.DISCONNECTING`(42)은 정의만 되어 있고 사용되지 않습니다. SPP_CONNECTED 상태에서 호출해도 소켓을 닫지 않습니다.
   - 제안: 상태별로 처리합니다. CONNECTING이면 `disconnect()+close()`, SPP면 소켓을 닫습니다. 처리 중에는 DISCONNECTING 상태를 내보냅니다.
 
