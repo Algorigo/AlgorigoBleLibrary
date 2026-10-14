@@ -254,7 +254,21 @@
   - 인자 검증의 `size < -2`는 `size < -1`의 오타입니다.
   - 생성자 안에서 블로킹 `connect()`를 호출하고, 연결하기 전에 `cancelDiscovery()`를 호출하지 않습니다.
 - [ ] **[버그] VirtualDevice 동작이 실기기와 다름** — `virtual/VirtualDeviceEngine.kt:44`, `virtual/VirtualDevice.kt:77`. `disconnect()`가 `bleDevice.onDisconnected()`를 호출하지 않습니다. 그래서 가상 `InitializableBleDevice`는 재연결 시 초기화하기 전부터 CONNECTED로 보고합니다. `notifyByteArray()`는 notification마다 새 `Thread`를 생성하므로 **순서가 보장되지 않습니다**.
-- [ ] **[버그] 작업이 타임아웃된 뒤에도 BluetoothGatt가 busy로 남아 다음 작업이 연달아 실패함 (실기기)** — `impl/BleDeviceEngineImpl.kt`(`enqueue`/`guardOperation`)
+- [x] **[버그] 작업이 타임아웃된 뒤에도 BluetoothGatt가 busy로 남아 다음 작업이 연달아 실패함 (실기기)** — `impl/BleDeviceEngineImpl.kt`(`enqueue`/`guardOperation`)
+  - ✅ 해결 (`feature/wait_gatt_release_after_timeout`)
+    - GATT 요청을 보낸 뒤 콜백을 받기 전까지 "요청 처리 중"(`gattRequestPendingRelay`)으로 표시합니다. 표시는 `sendGattRequest()`에서 켜고, read/write/descriptor/MTU 콜백에서 끕니다.
+    - 작업이 타임아웃되면 호출자에게는 `TimeoutException`을 바로 전달합니다. 다만 보낸 요청이 아직 처리 중이면, 큐는 **늦은 콜백 / 연결 끊김 / 최대 31초**(ATT transaction timeout 30초 + 여유) 중 먼저 오는 시점까지 다음 작업을 시작하지 않습니다(`waitForGattRelease()`).
+    - 요청을 보내지 않고 타임아웃된 경우(서비스 재탐색 대기 등)나 요청이 거절된 경우에는 기다리지 않습니다.
+    - 부수 효과로, 늦게 도착한 콜백이 다음 작업의 응답으로 잘못 매칭되던 위험도 사라졌습니다.
+    - 테스트: `BleDeviceEngineImplTimeoutReleaseTest`(7건). 수정 전 엔진에서는 핵심 대기 동작 4건이 실패했습니다. 나머지 3건은 불필요하게 기다리지 않는지 확인하는 보호 테스트입니다. `OperationQueueTest`의 "타임아웃 직후 다음 작업 시작" 테스트는 새 동작에 맞게 바꿨습니다.
+    - 실기기 확인(Fold5 → S23):
+      - **응답하지 않는 vendor characteristic**(`00000000-0000-3000-8000-000000000001`) read 후 정상 read 4건을 이어서 실행했습니다.
+        - 수정 전: 4건 모두 `CommunicationFailedException`으로 실패했고, 13초 뒤 다시 read해도 실패했습니다.
+        - 수정 후: 큐가 대기하다가, 요청 30초 뒤 Android가 `gatt_rsp_timeout`으로 링크를 끊자 4건 모두 GATT 호출 없이 **`DisconnectedException`**(실제 원인)으로 끝났습니다. busy 경고는 0건이었습니다.
+        - S23은 이 characteristic에 끝까지 응답하지 않으며, 링크가 끊기는 것은 Android 동작입니다.
+      - **늦은 콜백**(`operationTimeoutMillis=20ms`로 정상 characteristic을 강제 타임아웃시킨 뒤 바로 다음 read, 5회):
+        - 수정 전: 매회 busy 충돌로 573~605ms가 걸렸습니다(busy 경고 5건).
+        - 수정 후: 매회 늦은 콜백을 기다린 뒤 바로 실행되어 98~449ms(보통 219ms)가 걸렸습니다. busy 경고 0건, 대기 로그 5건이었습니다.
   - S23의 일부 vendor characteristic은 read에 응답하지 않았습니다. 라이브러리 타임아웃(기본 10초) 후 큐는 다음 작업으로 넘어가지만, Android `BluetoothGatt`는 콜백이 올 때까지 busy 상태를 유지합니다.
   - 그래서 이어진 read 4건이 각각 6번씩 `prior command is not finished`로 거절됐고, 결국 `CommunicationFailedException`으로 실패했습니다.
   - ATT transaction timeout은 30초이므로, 라이브러리 타임아웃이 이보다 짧으면 이런 일이 생길 수 있습니다.
@@ -281,6 +295,7 @@
 - [ ] **[기능] Connection priority** — `requestConnectionPriority(HIGH/BALANCED/LOW_POWER)`. 처리량과 지연에 큰 영향을 줍니다.
 - [ ] **[기능] RSSI 읽기** — `readRemoteRssi()`. 콜백(`impl/BleDeviceEngineImpl.kt:171`)은 있지만 로그만 남깁니다.
 - [ ] **[기능] 자동 재연결 / `autoConnect` 옵션** — 현재 `autoConnect=false`로 고정되어 있고, 끊겼을 때 재연결하는 정책이 없습니다. status 133이면 재시도하는 옵션도 필요합니다.
+  - (실기기) 이전 연결이 끊긴 직후(1~3초 이내)에 같은 기기로 다시 연결하면, 링크가 정리되는 도중이라 `connectCompletable()`이 `DisconnectedException`으로 실패하는 경우가 2회 있었습니다. 몇 초 뒤에 다시 시도하면 성공했습니다. 연결 재시도 정책을 정할 때 이 경우도 함께 고려해야 합니다.
 - [ ] **[기능] 일반 descriptor read/write API** — 현재는 CCCD 쓰기만 내부에서 사용합니다. `Type.READ_DESCRIPTOR`는 정의되어 있지만 쓰이지 않습니다.
 - [ ] **[기능] 블루투스 어댑터 상태와 권한 상태 공개 API** — 내부의 `scanAvailableObservable`을 `BleManager`에서 공개하고, BT 활성화 요청과 필요한 권한 목록을 제공하는 helper를 추가합니다.
 - [ ] **[기능] 스캔 개선**
