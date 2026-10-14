@@ -24,6 +24,7 @@ import com.algorigo.algorigoble2.virtual.VirtualDeviceEngine
 import com.algorigo.logger.L
 import io.reactivex.rxjava3.core.Observable
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 import java.util.logging.Logger
 
 @SuppressLint("MissingPermission")
@@ -32,7 +33,8 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
     private val bluetoothManager: BluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private val bluetoothAdapter: BluetoothAdapter = bluetoothManager.adapter
 
-    private val deviceMap: MutableMap<BluetoothDevice, BleDevice> = mutableMapOf()
+    // 스캔 콜백(binder thread)과 앱 스레드에서 동시에 접근한다. 생성은 createBleDevice 에서 deviceMap 을 잠그고 한다
+    private val deviceMap: MutableMap<BluetoothDevice, BleDevice> = ConcurrentHashMap()
 
     private val scanAvailableObservable = scanAvailableObservable(context)
         .doOnNext { (isLocationEnabled, isBluetoothEnabled) ->
@@ -107,7 +109,7 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
     }
 
     override fun getDevices(): Collection<BleDevice> {
-        return deviceMap.values
+        return deviceMap.values.toList()
     }
 
     override fun getBondedDevices(): List<BleDevice> {
@@ -144,19 +146,25 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
     }
 
     private fun <T : BleDevice> createBleDevice(bluetoothDevice: BluetoothDevice, scanRecord: ScanRecord? = null, clazz: Class<T>? = null): BleDevice? {
-        return if (clazz != null) {
-            clazz.newInstance()
-        } else {
-            bleDeviceDelegate.createBleDevice(bluetoothDevice, scanRecord)
-        }
-            ?.also { device ->
-                deviceMap[bluetoothDevice] = device
-                device.initEngine(BleDeviceEngineImpl(context, bluetoothDevice))
-                device.getConnectionStateObservable()
-                    .subscribe({
-                        connectionStateRelay.accept(Pair(device, it))
-                    }, {})
+        synchronized(deviceMap) {
+            // 잠금을 기다리는 동안 다른 스레드가 같은 기기를 이미 만들었을 수 있다
+            deviceMap[bluetoothDevice]?.let { return it }
+
+            return if (clazz != null) {
+                clazz.newInstance()
+            } else {
+                bleDeviceDelegate.createBleDevice(bluetoothDevice, scanRecord)
             }
+                ?.also { device ->
+                    // engine 이 붙기 전의 기기가 다른 스레드에 보이지 않도록 초기화를 마친 뒤 map 에 넣는다
+                    device.initEngine(BleDeviceEngineImpl(context, bluetoothDevice))
+                    device.getConnectionStateObservable()
+                        .subscribe({
+                            connectionStateRelay.accept(Pair(device, it))
+                        }, {})
+                    deviceMap[bluetoothDevice] = device
+                }
+        }
     }
 
     private fun locationEnabledObservable(context: Context): Observable<Boolean> = when {
