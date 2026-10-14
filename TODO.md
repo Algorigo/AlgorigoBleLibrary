@@ -147,7 +147,31 @@
   - `VirtualDevice`(`virtual/VirtualDevice.kt:23`)에는 참조 카운트가 구현되어 있어서 실기기와 동작이 다릅니다.
   - 제안: characteristic별로 공유 Observable(`share()`/`refCount()`)을 사용하거나 참조 카운트를 관리합니다.
 
-- [ ] **[구조/버그] GATT 작업 큐가 없음 (busy 상태는 재시도로만 처리)** — `impl/BleDeviceEngineImpl.kt:345-353, 391-399, 485-493`
+- [x] **[구조/버그] GATT 작업 큐가 없음 (busy 상태는 재시도로만 처리)** — `impl/BleDeviceEngineImpl.kt:345-353, 391-399, 485-493`
+  - ✅ 해결 (`feature/gatt_operation_queue`)
+    - 기기별 직렬 GATT 작업 큐를 도입했습니다(`enqueue()`/`QueuedOperation`, `PublishRelay` + `concatMapCompletable`).
+      - read, write, descriptor write(notification 설정/해제), MTU 요청을 하나씩 실행합니다.
+      - 앞 작업이 콜백을 받거나 타임아웃/연결 끊김으로 끝나야 다음 작업이 시작됩니다.
+    - 타임아웃과 연결 끊김 감지(`guardOperation`)는 큐에서 기다리는 시간이 아니라 **작업이 실제로 시작된 시점부터** 적용됩니다. 연결이 끊기면 대기 중이던 작업도 GATT 호출 없이 바로 `DisconnectedException`으로 끝납니다.
+    - 취소 처리:
+      - 시작 전에 dispose된 작업은 GATT 호출 없이 건너뜁니다.
+      - 실행 중에 dispose돼도 콜백(또는 타임아웃)이 올 때까지 다음 작업을 시작하지 않습니다. Android의 "한 번에 하나" 제약을 지키기 위해서입니다.
+    - write-without-response도 `onCharacteristicWrite`를 기다린 뒤 완료합니다. 반환값은 빈 배열 대신 쓴 값입니다.
+    - 재시도는 `retryOnCommunicationFailure()`(최대 5회, 500ms)로 통합했습니다. 재시도를 모두 소진하면 `NoSuchElementException` 대신 **`CommunicationFailedException`**으로 실패합니다.
+    - 테스트: `BleDeviceEngineImplOperationQueueTest`(8건). 수정 전 엔진에서는 8건 모두 실패하는 것을 확인했습니다.
+    - 실기기 비교(Fold5 → S23 시스템 GATT characteristic `2a00`/`2a01`/`2b3a`/`2b2a` 읽기 전용):
+
+      | 시나리오 | 수정 전 | 수정 후 |
+      |---|---|---|
+      | read 20개 동시 실행(3회) | 5/20 성공, 15건 `NoSuchElementException`, 2.54s | **20/20 성공, 1.23s** |
+      | read 20개 순차 실행 | 20/20, 1.20s | 20/20, 1.21s |
+      | MTU + read 8개 동시 실행 | 6/9 성공, 2.56s | **9/9 성공, 0.48s** |
+
+      수정 후 실행에서는 `prior command is not finished`(busy) 경고와 재시도가 0건이었습니다.
+    - 남은 작업:
+      - 응답은 여전히 `uuid + type`으로 매칭합니다. 큐 덕분에 동시에 진행되는 작업은 하나뿐이지만, 타임아웃된 작업의 콜백이 늦게 도착하면 다음 작업은 busy로 재시도합니다.
+      - GATT status 처리는 별도 P1 항목입니다.
+      - `onServiceChanged`의 `discoverServices()`는 큐 밖에서 실행됩니다. 작업은 재탐색이 끝날 때까지 기다립니다.
   - Android는 GATT 작업을 한 번에 하나만 처리할 수 있습니다. 지금은 GATT 호출이 `false`를 반환하면 500ms 간격으로 최대 5회 재시도하는 방식입니다. 부하가 걸리면 실패하고 지연도 큽니다.
   - 재시도를 모두 소진하면 `retryWhen`의 handler가 complete되어 `CommunicationFailedException` 대신 **`NoSuchElementException`**이 나옵니다.
   - 응답을 `uuid + type`으로만 매칭합니다. 그래서 이전 작업의 늦게 도착한 콜백(예: write-no-response의 `onCharacteristicWrite`)이 다음에 같은 UUID로 보낸 write의 응답으로 잘못 매칭될 수 있습니다.
@@ -190,7 +214,7 @@
 
 - [ ] **[버그] 쓰기 타입 문제** — `impl/BleDeviceEngineImpl.kt:357-401`
   - `WRITE | WRITE_NO_RESPONSE` 속성을 둘 다 가진 characteristic은 Android 기본 `writeType`이 NO_RESPONSE입니다. 그래서 응답을 기다리는 분기로 들어가도 실제로는 응답 없이 전송됩니다. 사용자가 쓰기 타입을 선택할 수도 없습니다.
-  - NO_RESPONSE 분기는 `onCharacteristicWrite`를 기다리지 않고 바로 반환합니다. 그래서 연속으로 쓰면 다음 write가 busy가 되고 500ms씩 재시도하므로 처리량이 크게 떨어집니다.
+  - ~~NO_RESPONSE 분기는 `onCharacteristicWrite`를 기다리지 않고 바로 반환합니다. 그래서 연속으로 쓰면 다음 write가 busy가 되고 500ms씩 재시도하므로 처리량이 크게 떨어집니다.~~ → `feature/gatt_operation_queue`에서 해결했습니다. 이제 `onCharacteristicWrite`를 기다리고 큐로 직렬화합니다. 쓰기 타입을 선택하는 기능은 여전히 남아 있습니다.
   - (실기기) 블루투스 스택 로그의 write 요청 → 완료 시간으로 비교했습니다.
     - WRITE 전용 `2a39`는 52ms가 걸렸습니다(Write Response 대기).
     - WRITE+WRITE NO RESPONSE를 가진 `aaa2`는 라이브러리가 응답형 분기로 처리했지만 0ms 만에 완료됐습니다. 즉 실제로는 **Write Command**로 전송됐습니다.
