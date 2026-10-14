@@ -7,13 +7,16 @@ import java.util.concurrent.TimeUnit
 
 open class BleDevice {
 
-    enum class ConnectionState(var status: String) {
+    // 기존 값의 순서(ordinal)를 바꾸지 않도록 새 상태는 끝에 추가한다
+    enum class ConnectionState(val status: String) {
         CONNECTING("CONNECTING"),
         CONNECTED("CONNECTED"),
         DISCONNECTED("DISCONNECTED"),
         DISCONNECTING("DISCONNECTING"),
         SPP_CONNECTING("SPP CONNECTING"),
         SPP_CONNECTED("SPP CONNECTED"),
+        /** [InitializableBleDevice]가 GATT 연결 후 initializeCompletable() 을 진행 중인 상태 */
+        INITIALIZING("INITIALIZING"),
     }
 
     // CCCD 값. BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE / ENABLE_INDICATION_VALUE 와 동일 (Bluetooth Core Spec 정의값)

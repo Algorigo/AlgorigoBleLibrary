@@ -60,7 +60,8 @@ class BleRecyclerAdapter(private val bleRecyclerListener: BleRecyclerListener) :
                     bindBtn.isEnabled = true
                 }
                 when (it.connectionState) {
-                    BleDevice.ConnectionState.CONNECTING -> {
+                    BleDevice.ConnectionState.CONNECTING,
+                    BleDevice.ConnectionState.INITIALIZING -> {
                         connectBtn.isEnabled = false
                         connectBtn.text = itemView.context.getString(R.string.connecting, it.connectionState.status)
                     }

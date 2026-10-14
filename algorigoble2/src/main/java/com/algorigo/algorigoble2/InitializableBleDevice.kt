@@ -18,13 +18,13 @@ abstract class InitializableBleDevice : BleDevice() {
             initializeRelay
         ) { connectionState, initialized ->
             if (connectionState == ConnectionState.CONNECTED && !initialized) {
-                ConnectionState.CONNECTING.apply {
-                    status = "INITIALING"
-                }
+                ConnectionState.INITIALIZING
             } else {
                 connectionState
             }
         }
+            // 두 relay 중 하나만 바뀌어도 combineLatest 가 다시 내보내므로 같은 상태가 연달아 나오지 않게 한다
+            .distinctUntilChanged()
     }
 
     final override fun connectCompletable(timeoutMillis: Long): Completable {
