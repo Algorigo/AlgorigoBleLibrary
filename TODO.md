@@ -1,9 +1,10 @@
 # TODO
 
-`algorigoble2` 라이브러리 정적 분석 결과입니다. (기준 커밋 `6670eb9`, `stash@{0}`의 WIP 변경은 포함하지 않음. 실기기 테스트는 하지 않음)
+`algorigoble2` 라이브러리 정적 분석 결과입니다. (기준 커밋 `6670eb9`, `stash@{0}`의 WIP 변경은 포함하지 않음)
+이후 실기기 테스트(SM-F946N, Android 16, 2026-10-14)에서 발견한 항목을 추가했고, 해당 항목에는 **(실기기)** 표시를 붙였습니다.
 
-- 소스 경로는 `algorigoble2/src/main/java/com/algorigo/algorigoble2/` 기준이며, 라인 번호는 위 커밋 기준입니다.
-- 태그: `[버그]` 잠재적 버그 · `[구조]` 구조 개선 · `[기능]` 빠진 BLE 기능 · `[배포]` 빌드/배포
+- 소스 경로는 `algorigoble2/src/main/java/com/algorigo/algorigoble2/` 기준이며, 라인 번호는 위 커밋 기준입니다. 실기기 테스트로 추가한 항목은 추가 시점의 `v2/develop` 기준입니다.
+- 태그: `[버그]` 잠재적 버그 · `[구조]` 구조 개선 · `[기능]` 빠진 BLE 기능 · `[배포]` 빌드/배포 · `[샘플앱]` `app` 모듈(샘플 앱) 문제
 - 우선순위
   - **P0**: 기능이 아예 동작하지 않거나, 크래시/배포 실패로 이어지는 문제
   - **P1**: 일반적인 사용 중에도 오동작할 가능성이 높은 문제
@@ -45,6 +46,9 @@
     - 타임아웃과 취소의 정리 로직을 `cancelConnecting()`으로 통합했습니다. 정리는 해당 구독이 직접 `connectGatt`로 만든 gatt가 있을 때만 수행합니다.
     - connect 로그에서 아직 할당되지 않은 `gatt` 대신 `bluetoothDevice`의 이름과 주소를 출력하도록 수정했습니다.
     - 테스트: `BleDeviceEngineImplConnectTest`. 수정 전 코드로 실행하면 null 반환 2건과 취소 1건이 실패하는 것을 확인했습니다.
+    - 실기기 확인(SM-F946N, Android 16):
+      - BT OFF 상태에서는 `connectGatt()`가 실제로 null을 반환하고, 즉시 `ConnectFailedException`이 납니다. 다시 시도해도 같은 결과여서 상태가 갇히지 않는 것을 확인했습니다.
+      - 존재하지 않는 MAC으로 연결하면 10초 뒤 `TimeoutException`이 나고, `cancelOpen()` → `close()`로 정리됩니다.
   - 문제: BT가 꺼져 있으면 `connectGatt()`가 `null`을 반환합니다. 하지만 상태는 `CONNECTING`으로 바뀌고, 타임아웃이 나도 `gatt?.also { ... }`가 실행되지 않아서 `DISCONNECTED`로 되돌아가지 않습니다.
   - 영향: 앱을 재시작하기 전까지 해당 기기의 connect는 모두 `IllegalStateException("Connection state is CONNECTING ...")`로 실패합니다.
   - 제안: `connectGatt()`가 null을 반환하면 즉시 에러를 내고 상태를 복구합니다. 타임아웃 처리 블록에서는 gatt가 null이어도 상태를 복구합니다. 구독자가 dispose했을 때(연결 취소)도 `doOnDispose`로 `disconnect()/close()`를 처리합니다. 지금은 취소한 뒤에도 연결이 뒤늦게 성공할 수 있습니다.
@@ -54,6 +58,7 @@
     - `stopScan()`은 scanner가 null이면 건너뛰고, `stopScan`이 던지는 예외(`IllegalStateException` 등)는 warning 로그만 남기고 무시합니다. 그래서 `doFinally`에서 `RxJavaPlugins.onError`로 예외가 새어 나가지 않습니다.
     - `startScan()`은 scanner가 null이면 NPE 대신 `SystemServiceException.BluetoothUnavailableException`으로 실패합니다.
     - 테스트: `BleScannerTest`. 수정 전 코드에서는 NPE와 `IllegalStateException`이 `RxJavaPlugins.onError`로 전달되어 테스트가 실패하는 것을 확인했습니다.
+    - 실기기 확인(SM-F946N, Android 16): 스캔 중 BT를 꺼도 크래시가 나지 않고, BT를 다시 켜면 샘플 앱의 재시도 로직으로 스캔이 재개됩니다. 다만 이 기기에서는 `stopScan()`이 예외 없이 끝나서 NPE 경로 자체는 재현되지 않았습니다. 이 경로는 타이밍과 OS 버전에 따라 달라집니다.
   - 문제: BT가 `STATE_TURNING_OFF`가 되면 `bluetoothAdapter.bluetoothLeScanner`가 `null`을 반환하는데, `doFinally`에서 호출하는 `stopScan()`이 NPE를 냅니다. `doFinally`에서 던진 예외는 `RxJavaPlugins.onError`로 전달되므로, 앱이 `RxJavaPlugins.setErrorHandler`를 설정하지 않았다면 크래시가 납니다.
   - 제안: `startScan/stopScan`에서 scanner null 체크를 하고 try/catch로 감쌉니다. `startScan`의 `doOnSubscribe`에서도 null이면 명확한 에러를 냅니다.
 
@@ -79,6 +84,16 @@
     - 남은 확인 사항: 실제 업로드는 `v2/master` CI에서만 확인할 수 있습니다. Central Portal API는 `Bearer` 뒤에 **user token의 `base64(username:password)`**를 요구하므로, CircleCI의 `MAVEN_CENTRAL_TOKEN` 값이 이 형식인지 확인이 필요합니다.
   - 문제: `--header 'Authorization: Bearer $MAVEN_CENTRAL_TOKEN'`가 작은따옴표로 감싸져 있어서 환경변수가 치환되지 않고 문자열 그대로 전송됩니다. 그래서 인증에 실패합니다.
   - 제안: 큰따옴표로 바꿉니다: `--header "Authorization: Bearer ${MAVEN_CENTRAL_TOKEN}"`. `--fail` 옵션도 추가해서 업로드가 실패하면 job이 실패하도록 합니다.
+
+- [ ] **[버그/배포] kotlin-reflect가 없는 앱에서 로그 태그를 처음 사용하는 순간 크래시남 (실기기)** — `logging/Tags.kt`, `algorigoble2/build.gradle`
+  - 문제: `algorigo-logger`의 `Tag`는 생성될 때 부모 태그를 `Class.forName(바깥 클래스).kotlin.objectInstance`로 찾습니다. 이 코드는 **kotlin-reflect가 필요**한데, logger의 POM에 의존성이 0개라서 kotlin-reflect가 함께 들어오지 않습니다. 1.2.3~1.2.6 모두 같은 상태입니다.
+    - 그 결과 `Ble.Device`, `Ble.Engine.Default` 같은 중첩 태그가 처음 초기화될 때 `KotlinReflectionNotSupportedError`가 납니다. 최상위 태그인 `Ble`는 부모를 찾지 않으므로 괜찮습니다.
+  - 영향(실기기 재현):
+    - 가상 기기 connect가 성공하면 `BleDevice.connect()`의 로그에서 Error가 나고, `UndeliverableException`으로 **프로세스가 죽습니다**.
+    - `BleManager.getDevice(mac)`는 항상 같은 Error로 실패해서 MAC 연결이 불가능합니다.
+    - GATT 콜백 로그(바인더 스레드)와 P0-4의 `stopScan` catch 블록의 로그도 같은 경로를 탑니다. Error는 `catch (Exception)`에 잡히지 않습니다.
+  - 단위 테스트는 MockK가 kotlin-reflect를 테스트 classpath에 넣기 때문에 이 문제를 잡지 못합니다.
+  - 제안: 근본 수정은 algorigo-logger에서 해야 합니다(reflection 제거 또는 kotlin-reflect 의존성 선언, POM 수정). 이 저장소에서는 `kotlin-reflect`를 runtime 의존성으로 추가해서 사용하는 앱이 자동으로 받도록 합니다. 회귀 방지를 위해 실제 앱 classpath(MockK 없음)에서 동작하는 instrumented test를 추가합니다.
 
 ---
 
@@ -119,6 +134,17 @@
   - CONNECTING 중에는 연결을 취소할 수 없고 로그만 남습니다. `State.DISCONNECTING`(42)은 정의만 되어 있고 사용되지 않습니다. SPP_CONNECTED 상태에서 호출해도 소켓을 닫지 않습니다.
   - 제안: 상태별로 처리합니다. CONNECTING이면 `disconnect()+close()`, SPP면 소켓을 닫습니다. 처리 중에는 DISCONNECTING 상태를 내보냅니다.
 
+- [ ] **[샘플앱] edge-to-edge 미대응으로 주요 UI가 시스템 바에 가려짐 (실기기)** — `app/src/main/res/layout/*.xml`, 각 Activity
+  - targetSdk 35에서는 Android 15 이상에서 edge-to-edge가 강제되는데, 레이아웃이 시스템 바 inset을 처리하지 않습니다.
+  - 시작 화면: MAIN/TEST 버튼이 상태바와 액션바 뒤에 있어서 **터치로 누를 수 없습니다**. 실기기 테스트에서는 키보드 포커스로 우회했습니다.
+  - Main 화면: MAC 입력칸과 CONNECT DEVICE는 상태바/액션바에, STOP SCAN은 내비게이션 바에 가려집니다.
+  - Device 화면: 결과 표시(`result_text_view`)와 READ 버튼이 가려져서 결과를 화면에서 볼 수 없습니다.
+  - 제안: 루트 뷰에 `ViewCompat.setOnApplyWindowInsetsListener`로 `systemBars` inset을 padding으로 적용하거나, `fitsSystemWindows`를 사용합니다. `StartActivity`에서 import만 하고 쓰지 않는 `enableEdgeToEdge`/`WindowInsetsCompat`를 정리하면서 함께 적용합니다.
+
+- [ ] **[샘플앱] Connect Device 실패 시 백그라운드 스레드에서 Toast를 띄워 크래시남 (실기기)** — `app/.../MainActivity.kt:177-205`
+  - MAC 연결 체인에 `observeOn(AndroidSchedulers.mainThread())`가 없습니다. 그래서 연결 타임아웃(`TimeoutException`)의 `onError`가 Rx computation 스레드에서 `Toast.makeText()`를 호출하고, `Can't toast on a thread that has not called Looper.prepare()`로 프로세스가 죽습니다.
+  - 제안: `subscribe` 전에 `observeOn(AndroidSchedulers.mainThread())`를 추가하고, 반환된 Disposable을 관리합니다.
+
 ---
 
 ## P2 — 중간
@@ -146,6 +172,7 @@
 - [ ] **[버그] characteristic을 UUID로만 찾음** — `impl/BleDeviceEngineImpl.kt:451-465`. 여러 서비스에 같은 UUID가 있으면 첫 번째 것이 선택됩니다. 찾지 못하면 메시지 없는 `IllegalStateException()`이 납니다. serviceUuid를 받는 오버로드와 `CharacteristicNotFoundException`을 추가해야 합니다.
 - [ ] **[버그] CCCD descriptor가 없으면 NPE** — `impl/BleDeviceEngineImpl.kt:475`. 원인을 알기 어려운 에러가 나옵니다.
 - [ ] **[버그] `onBluetoothDisabled()`가 CONNECTED 상태만 처리함** — `impl/BleDeviceEngineImpl.kt:528-537`. CONNECTING이나 SPP 상태인 기기는 정리되지 않습니다.
+  - (실기기) 연결되지 않은 기기마다 `DisconnectedException` 스택트레이스를 로그로 남깁니다. 테스트에서는 BT를 한 번 끌 때 캐시된 기기 57개에 대해 57개의 스택트레이스가 출력되었습니다. 아래 "스캔 결과가 계속 쌓이는" 문제와 함께 처리해야 합니다.
 - [ ] **[버그] SPP 관련 문제** — `impl/BleDeviceEngineImpl.kt:503`, `BleSppSocket.kt:16, 28, 40`
   - `bluetoothDevice.uuids`는 null일 수 있어서 NPE가 날 수 있습니다. 기본 SPP UUID(`00001101-...`)로 fallback하거나 `fetchUuidsWithSdp()`를 사용해야 합니다.
   - `inputStream.read()`의 반환 길이를 확인하지 않습니다. 그래서 일부만 읽혔을 때 뒤쪽이 0으로 채워진 배열이 반환됩니다.
@@ -154,6 +181,12 @@
 - [ ] **[버그] VirtualDevice 동작이 실기기와 다름** — `virtual/VirtualDeviceEngine.kt:44`, `virtual/VirtualDevice.kt:77`. `disconnect()`가 `bleDevice.onDisconnected()`를 호출하지 않습니다. 그래서 가상 `InitializableBleDevice`는 재연결 시 초기화하기 전부터 CONNECTED로 보고합니다. `notifyByteArray()`는 notification마다 새 `Thread`를 생성하므로 **순서가 보장되지 않습니다**.
 - [ ] **[버그] `InitializableBleDevice` 초기화에 타임아웃이 없음** — `InitializableBleDevice.kt:30-46`. 실패하면 `disconnect()`도 두 번 호출됩니다.
 - [ ] **[버그] BroadcastReceiver를 `finalize()`에서 해제함** — `impl/BleManagerEngineImpl.kt:69-77`. `finalize()`는 호출 시점이 보장되지 않습니다. `BleManager`를 여러 개 만들면 receiver와 deviceMap도 각각 생기므로, 같은 기기에 대한 객체가 중복됩니다. 싱글턴으로 강제하거나 `close()` API를 제공해야 합니다.
+- [ ] **[버그] `getDevice()`가 가상 기기보다 실제 엔진을 먼저 조회함 (실기기)** — `BleManager.kt:88-91`, `impl/BleManagerEngineImpl.kt:125-140`
+  - `BleManager.getDeviceInner()`는 `engine.getDevice()`를 먼저 호출하고, 결과가 없을 때만 `virtualDevices`를 봅니다.
+  - 샘플 앱의 가상 MAC(`12:34:56:78:90:ab`)은 소문자라서 `getRemoteDevice()`가 `IllegalArgumentException`을 던집니다. 그래서 가상 기기를 조회할 때마다 에러 로그와 스택트레이스가 남습니다(실기기 확인).
+  - 가상 MAC이 대문자(유효한 주소)라면 엔진이 실제 `BleDevice`를 만들어 반환하므로, **가상 기기 대신 존재하지 않는 실제 기기가 반환됩니다**. 이 경우는 코드로만 확인했습니다.
+  - 제안: `virtualDevices`를 먼저 조회하고, MAC 비교는 대소문자를 무시하도록 정규화합니다.
+- [ ] **[샘플앱] DeviceActivity가 종료돼도 notification 구독을 해제하지 않음 (실기기)** — `app/.../DeviceActivity.kt:64-127`. `notificationDisposables`를 `onDestroy`에서 dispose하지 않아서, 화면을 닫은 뒤에도 연결이 끊길 때까지 구독이 살아 있습니다. read/write/특성 조회 구독도 Disposable을 관리하지 않습니다.
 
 ### 구조 개선
 
@@ -195,6 +228,7 @@
 - [ ] **[구조]** `getDevice(mac)`에서 `getRemoteDevice`는 대문자 MAC만 허용합니다. 입력을 정규화해야 합니다.
 - [ ] **[구조]** `clazz.newInstance()`(`impl/BleManagerEngineImpl.kt:148`)는 deprecated이고, 사용하는 앱이 R8을 쓰면 no-arg 생성자가 제거될 수 있습니다. factory 람다 방식으로 바꾸거나 consumer proguard rule을 추가합니다.
 - [ ] **[배포]** Gradle에서 deprecated된 `buildDir`, `archivesBaseName`을 교체합니다.
+- [ ] **[구조]** (실기기) 라이브러리 로그가 2~3번씩 중복 출력되는 경우가 있습니다. 예를 들어 `doOnError` 한 번에 같은 줄이 2~3번 나옵니다. 원인은 확인하지 못했습니다. 샘플 앱의 `BluetoothService`가 `AndroidHandler`를 추가하는 방식과 logger의 handler 전파 구조를 확인해야 합니다.
 
 ### 장기 기능
 
