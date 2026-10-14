@@ -23,6 +23,9 @@ class BleManager(
     class DisconnectedException : Exception()
     class ConnectFailedException(message: String) : Exception(message)
     class MtuChangeFailedException(val status: Int) : Exception("MTU change failed with status $status")
+    /** GATT 콜백이 실패 status 를 돌려준 경우. [status]는 BluetoothGatt.GATT_* 값이다. (예: 0x05 인증 부족, 0x0F 암호화 부족) */
+    class GattOperationFailedException(val operation: String, val status: Int) :
+        Exception("$operation failed with GATT status $status (0x${Integer.toHexString(status)})")
 
     enum class Engine {
 //        RX_ANDROID_BLE,

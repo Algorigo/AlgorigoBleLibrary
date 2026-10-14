@@ -39,7 +39,8 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
     private sealed class State(val connectionState: BleDevice.ConnectionState) {
         class CONNECTING : State(BleDevice.ConnectionState.CONNECTING)
         class CONNECTED(val gatt: BluetoothGatt) : State(BleDevice.ConnectionState.CONNECTED)
-        class DISCONNECTED : State(BleDevice.ConnectionState.DISCONNECTED)
+        // cause: 연결 시도 중에 끊겼을 때 connectCompletable 이 낼 에러. (null 이면 DisconnectedException)
+        class DISCONNECTED(val cause: Throwable? = null) : State(BleDevice.ConnectionState.DISCONNECTED)
         class DISCONNECTING : State(BleDevice.ConnectionState.DISCONNECTING)
         class SPP_CONNECTING : State(BleDevice.ConnectionState.SPP_CONNECTING)
         class SPP_CONNECTED : State(BleDevice.ConnectionState.SPP_CONNECTED)
@@ -52,13 +53,22 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
         WRITE_DESCRIPTOR,
     }
 
-    private data class ReplyData(val type: Type, val uuid: UUID, val byteArray: ByteArray) {
+    private data class ReplyData(val type: Type, val uuid: UUID, val byteArray: ByteArray, val status: Int) {
+        /** 콜백 status 가 실패이면 값 대신 [BleManager.GattOperationFailedException]을 던진다. */
+        fun valueOrThrow(): ByteArray {
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                throw BleManager.GattOperationFailedException(type.name, status)
+            }
+            return byteArray
+        }
+
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
             if (other !is ReplyData) return false
             if (type != other.type) return false
             if (uuid != other.uuid) return false
             if (!byteArray.contentEquals(other.byteArray)) return false
+            if (status != other.status) return false
             return true
         }
 
@@ -66,6 +76,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
             var result = type.hashCode()
             result = 31 * result + uuid.hashCode()
             result = 31 * result + byteArray.contentHashCode()
+            result = 31 * result + status
             return result
         }
     }
@@ -92,9 +103,20 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
             L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onServicesDiscovered $status")
             discoveringServicesRelay.accept(false)
             gatt?.let {
+                val alreadyConnected = (stateRelay.value as? State.CONNECTED)?.gatt === it
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    if (alreadyConnected) {
+                        // onServiceChanged 후 재탐색 실패: 연결은 유지한다. (서비스 목록이 비면 이후 작업은 characteristic 을 찾지 못해 실패한다)
+                        L.warning(Ble.Device.Default, "${it.device?.name}(${it.device?.address}) : service rediscovery failed : $status")
+                    } else if (stateRelay.value is State.CONNECTING) {
+                        // 첫 서비스 탐색 실패: 서비스 없이 CONNECTED 로 만들지 않고 연결을 정리한다
+                        cancelConnecting(it, BleManager.GattOperationFailedException("DISCOVER_SERVICES", status))
+                    }
+                    return
+                }
                 // onServiceChanged 로 다시 탐색한 경우에는 이미 같은 gatt 로 CONNECTED 이므로 상태를 다시 내보내지 않는다.
                 // (다시 내보내면 gattObservable 을 구독 중인 setupNotification 이 재구독되어 CCCD 를 다시 쓴다)
-                if ((stateRelay.value as? State.CONNECTED)?.gatt !== it) {
+                if (!alreadyConnected) {
                     stateRelay.accept(State.CONNECTED(it))
                 }
             }
@@ -123,7 +145,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
             super.onCharacteristicRead(gatt, characteristic, status)
             L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onCharacteristicRead:$status, ${characteristic?.uuid}:${characteristic?.value?.toHexString()}")
             characteristic?.let {
-                replyRelay.accept(ReplyData(Type.READ_CHARACTERISTIC, it.uuid, it.value ?: byteArrayOf()))
+                replyRelay.accept(ReplyData(Type.READ_CHARACTERISTIC, it.uuid, it.value ?: byteArrayOf(), status))
             }
         }
 
@@ -135,7 +157,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
             super.onCharacteristicWrite(gatt, characteristic, status)
             L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onCharacteristicWrite:$status, ${characteristic?.uuid}:${characteristic?.value?.toHexString()}")
             characteristic?.let {
-                replyRelay.accept(ReplyData(Type.WRITE_CHARACTERISTIC, it.uuid, it.value ?: byteArrayOf()))
+                replyRelay.accept(ReplyData(Type.WRITE_CHARACTERISTIC, it.uuid, it.value ?: byteArrayOf(), status))
             }
         }
 
@@ -158,7 +180,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
             super.onDescriptorRead(gatt, descriptor, status)
             L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onDescriptorRead:${descriptor?.characteristic?.uuid}:${descriptor?.value?.toHexString()}")
             descriptor?.let {
-                replyRelay.accept(ReplyData(Type.READ_DESCRIPTOR, it.characteristic.uuid, it.value ?: byteArrayOf()))
+                replyRelay.accept(ReplyData(Type.READ_DESCRIPTOR, it.characteristic.uuid, it.value ?: byteArrayOf(), status))
             }
         }
 
@@ -170,7 +192,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
             super.onDescriptorWrite(gatt, descriptor, status)
             L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onDescriptorWrite:${descriptor?.characteristic?.uuid}:${descriptor?.value?.toHexString()}")
             descriptor?.let {
-                replyRelay.accept(ReplyData(Type.WRITE_DESCRIPTOR, it.characteristic.uuid, it.value ?: byteArrayOf()))
+                replyRelay.accept(ReplyData(Type.WRITE_DESCRIPTOR, it.characteristic.uuid, it.value ?: byteArrayOf(), status))
             }
         }
 
@@ -303,7 +325,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                                 ?: throw BleManager.ConnectFailedException("connectGatt returned null (bluetooth may be off)")
                             stateRelay.accept(State.CONNECTING())
                         } else {
-                            throw BleManager.DisconnectedException()
+                            throw (it.second as State.DISCONNECTED).cause ?: BleManager.DisconnectedException()
                         }
                     }
                 }
@@ -325,11 +347,12 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                 }
         })
 
-    private fun cancelConnecting(gatt: BluetoothGatt) {
+    /** 진행 중인 연결을 정리한다. [cause]가 있으면 기다리던 connectCompletable 이 그 에러로 실패한다. (상태는 이미 DISCONNECTED 인 채로 전달된다) */
+    private fun cancelConnecting(gatt: BluetoothGatt, cause: Throwable? = null) {
         L.debug(Ble.Device.Default, "${bluetoothDevice.name}(${bluetoothDevice.address}) : cancel connecting")
         gatt.disconnect()
         gatt.close()
-        stateRelay.accept(State.DISCONNECTED())
+        stateRelay.accept(State.DISCONNECTED(cause))
         bleDevice.onDisconnected()
     }
 
@@ -381,7 +404,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                                 }
                             })
                             .filter { it.uuid == characteristicUuid && it.type == Type.READ_CHARACTERISTIC }
-                            .map { it.byteArray }
+                            .map { it.valueOrThrow() }
                             .firstOrError()
                     }
                     .retryOnCommunicationFailure()
@@ -406,7 +429,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                                     }
                                 })
                                 .filter { it.uuid == characteristicUuid && it.type == Type.WRITE_CHARACTERISTIC }
-                                .map { it.byteArray }
+                                .map { it.valueOrThrow() }
                                 .firstOrError()
                         }
                     }
@@ -489,7 +512,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                         }
                     }
                     .filter { it.uuid == characteristic.uuid && it.type == Type.WRITE_DESCRIPTOR }
-                    .map { it.byteArray }
+                    .map { it.valueOrThrow() }
                     .firstOrError()
                     .retryOnCommunicationFailure()
             }
