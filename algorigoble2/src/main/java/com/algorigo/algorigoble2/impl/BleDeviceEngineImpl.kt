@@ -246,6 +246,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
     private val notificationRelay = PublishRelay.create<Pair<UUID, ByteArray>>()
     private val mtuRelay = PublishRelay.create<Pair<Int, Int>>()
     private val operationQueue = PublishRelay.create<QueuedOperation<*>>().toSerialized()
+    private val notificationSubscriptions = mutableMapOf<UUID, SharedNotification>()
     // GATT 요청을 보냈고 아직 콜백을 받지 못한 상태(Android BluetoothGatt 가 busy 인 상태)
     private val gattRequestPendingRelay = BehaviorRelay.createDefault(false)
 
@@ -460,9 +461,39 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
         }
     }
 
+    /**
+     * 같은 characteristic 의 notification 구독은 하나의 설정을 공유한다.
+     * 첫 구독자가 CCCD 를 켜고, 마지막 구독자가 해제할 때 CCCD 를 끈다. (나중에 구독한 쪽은 설정 완료 결과를 바로 받는다)
+     * 구독 중인 characteristic 에 다른 [BleDevice.NotificationType]을 요청하면 기존 구독이 끊기지 않도록 [IllegalStateException]으로 실패한다.
+     */
     override fun setupNotification(type: BleDevice.NotificationType, characteristicUuid: UUID): Observable<Observable<ByteArray>> {
+        return Observable.defer {
+            val subscription = synchronized(notificationSubscriptions) {
+                val existing = notificationSubscriptions[characteristicUuid]
+                when {
+                    existing == null || existing.subscriberCount == 0 ->
+                        SharedNotification(type, createNotificationObservable(type, characteristicUuid).replay(1).refCount())
+                            .also { notificationSubscriptions[characteristicUuid] = it }
+                    existing.type == type -> existing
+                    else -> return@defer Observable.error<Observable<ByteArray>>(
+                        IllegalStateException("$characteristicUuid notification is already set up as ${existing.type}")
+                    )
+                }.also { it.subscriberCount++ }
+            }
+            subscription.observable
+                .doFinally { synchronized(notificationSubscriptions) { subscription.subscriberCount-- } }
+        }
+    }
+
+    private class SharedNotification(val type: BleDevice.NotificationType, val observable: Observable<Observable<ByteArray>>) {
+        // notificationSubscriptions 로 동기화한다
+        var subscriberCount = 0
+    }
+
+    private fun createNotificationObservable(type: BleDevice.NotificationType, characteristicUuid: UUID): Observable<Observable<ByteArray>> = Observable.defer {
+        // refCount 로 다시 구독될 수 있으므로 구독마다 새로 만든다
         var characteristic: BluetoothGattCharacteristic? = null
-        return gattObservable
+        gattObservable
             .flatMap { gatt ->
                 getCharacteristic(characteristicUuid)
                     .flatMap {
