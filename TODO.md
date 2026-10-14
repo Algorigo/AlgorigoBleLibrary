@@ -154,7 +154,17 @@
     - 그래서 연결이 유지되는 동안은 물론, **같은 프로세스에서 끊었다 다시 연결한 뒤에도**(OS가 `onSearchComplete`로 새 목록을 받았는데도) `getCharacteristicsSingle()`이 이전 목록을 반환했습니다. 앱 프로세스를 재시작해야 새 서비스가 보였습니다.
     - 참고: bonded 기기는 robust caching(Database Hash)으로 해시가 같으면 OS가 탐색을 생략합니다. 이것은 정상적인 OS 동작입니다.
 
-- [ ] **[버그] 같은 characteristic을 여러 곳에서 notification 구독하면, 하나만 해제해도 전부 끊김** — `impl/BleDeviceEngineImpl.kt:403-433`
+- [x] **[버그] 같은 characteristic을 여러 곳에서 notification 구독하면, 하나만 해제해도 전부 끊김** — `impl/BleDeviceEngineImpl.kt:403-433`
+  - ✅ 해결 (`feature/share_notification_subscription`)
+    - 같은 characteristic UUID의 notification 구독은 설정 하나를 공유합니다(`SharedNotification`, `replay(1).refCount()`).
+      - 첫 구독자가 `setCharacteristicNotification(true)`와 CCCD 활성화를 하고, **마지막 구독자가 해제할 때만** CCCD를 비활성화합니다.
+      - 나중에 구독한 쪽은 CCCD를 다시 쓰지 않고 설정 완료 결과를 바로 받습니다. 설정이 끝나기 전에 구독한 경우에도 같은 설정을 공유합니다.
+    - 구독 중인 characteristic에 다른 `NotificationType`(NOTIFICATION/INDICATION)을 요청하면, 기존 구독자의 CCCD 값이 바뀌지 않도록 `IllegalStateException`으로 실패합니다. 모든 구독이 해제된 뒤에는 다른 타입을 쓸 수 있습니다.
+    - 연결이 끊기면 모든 구독자가 `DisconnectedException`을 받고, 재연결 후 새로 구독하면 새 gatt에서 다시 설정합니다.
+    - 테스트: `BleDeviceEngineImplNotificationSharingTest`(8건). 수정 전 엔진에서는 5건이 실패했고, 나머지 3건(전부 해제 후 재구독, 해제 후 타입 변경, 재연결 후 재설정)은 기존 동작을 보존하는지 확인하는 테스트입니다.
+    - 실기기 확인(Fold5 → S23 nRF Connect GATT 서버 `aaa1`): A와 B가 같은 characteristic을 구독한 뒤 A만 해제하고, S23에서 notification을 보냈습니다.
+      - 수정 전: CCCD 활성화를 2번 썼고, A를 해제하는 즉시 `setCharacteristicNotification(false)`와 CCCD `0000`이 쓰였습니다. 그 뒤 S23이 보낸 `0x78`을 **B는 받지 못했습니다**(120초 대기).
+      - 수정 후: CCCD 활성화(`0100`)는 1번이었고 A를 해제해도 비활성화하지 않았습니다. S23이 보낸 `0x91`을 **B가 수신했고**, B를 해제할 때 CCCD `0000`이 1번 쓰였습니다.
   - 구독할 때마다 CCCD를 활성화하고, 하나라도 dispose되면 `doFinally`에서 CCCD를 비활성화합니다. 그래서 나머지 구독자는 에러 없이 데이터만 받지 못하게 됩니다.
   - `VirtualDevice`(`virtual/VirtualDevice.kt:23`)에는 참조 카운트가 구현되어 있어서 실기기와 동작이 다릅니다.
   - 제안: characteristic별로 공유 Observable(`share()`/`refCount()`)을 사용하거나 참조 카운트를 관리합니다.
