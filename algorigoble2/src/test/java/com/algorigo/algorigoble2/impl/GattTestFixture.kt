@@ -17,18 +17,27 @@ import java.util.UUID
 /**
  * [BleDeviceEngineImpl]을 mock [BluetoothDevice]/[BluetoothGatt] 위에서 구동한다.
  * connectGatt 에 전달된 [BluetoothGattCallback]을 캡처해 두므로, 테스트에서 시스템 콜백을 직접 호출할 수 있다.
+ *
+ * mock gatt 는 실제 [BluetoothGatt]처럼 동작한다:
+ * - [BluetoothGatt.getServices]는 마지막 서비스 탐색 시점의 목록을 반환한다.
+ * - [BluetoothGatt.discoverServices]를 호출하면 목록이 비워지고, [simulateServicesDiscovered] 시점에 서버 DB 가 반영된다.
  */
 internal class GattTestFixture(val bleDevice: BleDevice = BleDevice()) {
 
+    private class FakeGattState {
+        val serverServices = mutableListOf<BluetoothGattService>()
+        var discoveredServices = listOf<BluetoothGattService>()
+    }
+
     val context: Context = mockk(relaxed = true)
     val bluetoothDevice: BluetoothDevice = mockk(relaxed = true)
-    val gatt: BluetoothGatt = mockk(relaxed = true)
+
+    private val gattStates = mutableMapOf<BluetoothGatt, FakeGattState>()
+    val gatt: BluetoothGatt = newGatt()
 
     private val callbackSlot = slot<BluetoothGattCallback>()
     val callback: BluetoothGattCallback
         get() = callbackSlot.captured
-
-    private val services = mutableListOf<BluetoothGattService>()
 
     val engine = BleDeviceEngineImpl(context, bluetoothDevice)
 
@@ -37,11 +46,23 @@ internal class GattTestFixture(val bleDevice: BleDevice = BleDevice()) {
         every { bluetoothDevice.address } returns ADDRESS
         every { bluetoothDevice.name } returns NAME
         every { bluetoothDevice.connectGatt(any(), any(), capture(callbackSlot)) } returns gatt
-        every { gatt.device } returns bluetoothDevice
-        every { gatt.services } answers { services.toList() }
-        every { gatt.readCharacteristic(any()) } returns true
-        every { gatt.writeCharacteristic(any()) } returns true
-        every { gatt.writeDescriptor(any()) } returns true
+    }
+
+    /** 재연결 시 connectGatt 가 반환할 새 gatt 를 만든다. 서버 DB 는 비어 있는 상태로 시작한다. */
+    fun newGatt(): BluetoothGatt {
+        val newGatt = mockk<BluetoothGatt>(relaxed = true)
+        val state = FakeGattState()
+        gattStates[newGatt] = state
+        every { newGatt.device } returns bluetoothDevice
+        every { newGatt.services } answers { state.discoveredServices }
+        every { newGatt.discoverServices() } answers {
+            state.discoveredServices = listOf()
+            true
+        }
+        every { newGatt.readCharacteristic(any()) } returns true
+        every { newGatt.writeCharacteristic(any()) } returns true
+        every { newGatt.writeDescriptor(any()) } returns true
+        return newGatt
     }
 
     /** connectGatt 반환값을 호출 순서대로 지정한다. null 은 블루투스가 꺼져 있을 때의 반환값이다. */
@@ -56,17 +77,23 @@ internal class GattTestFixture(val bleDevice: BleDevice = BleDevice()) {
         observer.assertComplete()
     }
 
-    fun simulateConnected() {
-        callback.onConnectionStateChange(gatt, BluetoothGatt.GATT_SUCCESS, BluetoothProfile.STATE_CONNECTED)
-        callback.onServicesDiscovered(gatt, BluetoothGatt.GATT_SUCCESS)
+    fun simulateConnected(targetGatt: BluetoothGatt = gatt) {
+        callback.onConnectionStateChange(targetGatt, BluetoothGatt.GATT_SUCCESS, BluetoothProfile.STATE_CONNECTED)
+        simulateServicesDiscovered(targetGatt)
     }
 
-    fun disconnectFromRemote() {
-        callback.onConnectionStateChange(gatt, BluetoothGatt.GATT_SUCCESS, BluetoothProfile.STATE_DISCONNECTED)
+    /** 서버 DB 를 탐색 결과로 반영한 뒤 onServicesDiscovered 를 보낸다. */
+    fun simulateServicesDiscovered(targetGatt: BluetoothGatt = gatt) {
+        gattStates.getValue(targetGatt).let { it.discoveredServices = it.serverServices.toList() }
+        callback.onServicesDiscovered(targetGatt, BluetoothGatt.GATT_SUCCESS)
     }
 
-    /** 첫 GATT 작업 전에 호출해야 한다. (서비스 목록은 처음 조회할 때 캐시된다) */
-    fun addCharacteristic(uuid: UUID, properties: Int): BluetoothGattCharacteristic {
+    fun disconnectFromRemote(targetGatt: BluetoothGatt = gatt) {
+        callback.onConnectionStateChange(targetGatt, BluetoothGatt.GATT_SUCCESS, BluetoothProfile.STATE_DISCONNECTED)
+    }
+
+    /** 서버 DB 에 characteristic 을 추가한다. 다음 서비스 탐색부터 gatt.services 에 나타난다. */
+    fun addCharacteristic(uuid: UUID, properties: Int, targetGatt: BluetoothGatt = gatt): BluetoothGattCharacteristic {
         val characteristic = mockk<BluetoothGattCharacteristic>(relaxed = true)
         val descriptor = mockk<BluetoothGattDescriptor>(relaxed = true)
         val service = mockk<BluetoothGattService>(relaxed = true)
@@ -77,7 +104,7 @@ internal class GattTestFixture(val bleDevice: BleDevice = BleDevice()) {
         every { service.getCharacteristic(any()) } returns null
         every { service.getCharacteristic(uuid) } returns characteristic
         every { service.characteristics } returns listOf(characteristic)
-        services.add(service)
+        gattStates.getValue(targetGatt).serverServices.add(service)
         return characteristic
     }
 
