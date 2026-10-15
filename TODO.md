@@ -389,7 +389,19 @@
 - [ ] **[버그] 런타임 권한을 확인하지 않음** — 전역 `@SuppressLint("MissingPermission")`. API 31 이상에서 `BLUETOOTH_SCAN/CONNECT`가 없으면 `deviceName`, `bonded`, `toString()`, 로그 출력에서도 `SecurityException`이 납니다. 작업 전에 권한을 확인하고 명확한 예외(`PermissionDeniedException`)를 내야 합니다.
 - [ ] **[버그] characteristic을 UUID로만 찾음** — `impl/BleDeviceEngineImpl.kt:451-465`. 여러 서비스에 같은 UUID가 있으면 첫 번째 것이 선택됩니다. 찾지 못하면 메시지 없는 `IllegalStateException()`이 납니다. serviceUuid를 받는 오버로드와 `CharacteristicNotFoundException`을 추가해야 합니다.
 - [ ] **[버그] CCCD descriptor가 없으면 NPE** — `impl/BleDeviceEngineImpl.kt:475`. 원인을 알기 어려운 에러가 나옵니다.
-- [ ] **[버그] `onBluetoothDisabled()`가 CONNECTED 상태만 처리함** — `impl/BleDeviceEngineImpl.kt:528-537`. CONNECTING이나 SPP 상태인 기기는 정리되지 않습니다.
+- [x] **[버그] `onBluetoothDisabled()`가 CONNECTED 상태만 처리함** — `impl/BleDeviceEngineImpl.kt:528-537`. CONNECTING이나 SPP 상태인 기기는 정리되지 않습니다.
+  - ✅ 해결 (`feature/bluetooth_off_all_states`)
+    - `onBluetoothDisabled()`가 상태별로 기다리지 않고 바로 정리합니다(`stateLock` 안에서).
+      - CONNECTED / DISCONNECTING: gatt close → DISCONNECTED → `onDisconnected()`. DISCONNECTING은 `disconnect()`의 5초 fallback을 기다리지 않습니다(타이머는 상태가 바뀌었으므로 아무것도 하지 않음).
+      - CONNECTING: `cancelConnecting()`. 기다리던 `connectCompletable`은 연결 타임아웃 전에 바로 `ConnectFailedException("bluetooth is disabled")`로 실패합니다.
+      - SPP_CONNECTING / SPP_CONNECTED: `disconnect()`와 같이 소켓을 닫습니다.
+      - DISCONNECTED: 아무것도 하지 않습니다.
+    - 테스트: `BleDeviceEngineImplBluetoothOffTest`(6건). 수정 전 코드에서는 CONNECTING(오류 없이 계속 대기), DISCONNECTING(DISCONNECTING 유지), SPP_CONNECTED·SPP_CONNECTING(소켓을 닫지 않음) 4건이 실패했습니다. CONNECTED와 DISCONNECTED 2건은 기존 동작이 바뀌지 않는지 확인합니다.
+    - 실기기 확인(Fold5, 호스트에서 `cmd bluetooth_manager disable/enable`로 블루투스를 끄고 켬. 확인 전 Fold5에 연결된 기기가 없음을 확인함):
+      - 연결 중(도달할 수 없는 주소 `00:00:5E:00:53:01`로 CONNECTING)에 블루투스를 끔: Android는 연결 콜백을 보내지 않았습니다. 수정 전에는 블루투스를 끈 지 **18초 뒤에** 20초 연결 타임아웃(`TimeoutException`)으로 끝났고, 수정 후에는 **664ms 뒤에** `ConnectFailedException(bluetooth is disabled)`으로 끝났습니다(호스트 감지 지연 포함).
+      - S23에 연결(CONNECTED)된 상태에서 블루투스를 끔: 수정 전과 후 모두 DISCONNECTED가 됐습니다.
+      - 블루투스를 다시 켜고 3초 뒤 S23 재연결: 수정 전 실행에서는 status 133으로 실패했고, 수정 후 실행에서는 성공했습니다. 블루투스를 켠 직후의 스택 타이밍 문제로 보이며 이번 수정과는 관계없습니다.
+      - DISCONNECTING 구간은 너무 짧아(약 100ms) 실기기에서 맞추지 못했고, SPP는 실기기로 확인하지 못했습니다.
   - (실기기) 연결되지 않은 기기마다 `DisconnectedException` 스택트레이스를 로그로 남깁니다. 테스트에서는 BT를 한 번 끌 때 캐시된 기기 57개에 대해 57개의 스택트레이스가 출력되었습니다. 아래 "스캔 결과가 계속 쌓이는" 문제와 함께 처리해야 합니다.
 - [ ] **[버그] SPP 관련 문제** — `impl/BleDeviceEngineImpl.kt:503`, `BleSppSocket.kt:16, 28, 40`
   - `bluetoothDevice.uuids`는 null일 수 있어서 NPE가 날 수 있습니다. 기본 SPP UUID(`00001101-...`)로 fallback하거나 `fetchUuidsWithSdp()`를 사용해야 합니다.

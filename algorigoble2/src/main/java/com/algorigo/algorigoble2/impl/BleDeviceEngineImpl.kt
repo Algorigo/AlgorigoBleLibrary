@@ -775,15 +775,33 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
             .timeout(bleDevice.operationTimeoutMillis, TimeUnit.MILLISECONDS)
     }
 
+    /** 블루투스가 꺼지면 연결 콜백이 오지 않을 수 있으므로, 어떤 상태든 기다리지 않고 바로 정리한다. */
     internal fun onBluetoothDisabled() {
-        getGattSingle()
-            .subscribe({
+        val closed = synchronized(stateLock) {
+            val state = stateRelay.value
+            L.debug(Ble.Device.Default, "${bluetoothDevice.name}(${bluetoothDevice.address}) : bluetooth disabled, state is ${state?.connectionState}")
+            when (state) {
+                is State.CONNECTED -> state.gatt
+                // disconnect() 의 fallback 타이머를 기다리지 않는다. (타이머는 상태가 바뀌었으므로 아무것도 하지 않는다)
+                is State.DISCONNECTING -> state.gatt
+                is State.CONNECTING -> {
+                    // 기다리던 connectCompletable 은 연결 타임아웃 전에 바로 실패한다
+                    cancelConnecting(state.gatt, BleManager.ConnectFailedException("bluetooth is disabled"))
+                    null
+                }
+                is State.SPP_CONNECTING, is State.SPP_CONNECTED -> {
+                    disconnect()
+                    null
+                }
+                else -> null
+            }?.also { gatt ->
+                gatt.close()
                 setState(State.DISCONNECTED())
-                bleDevice.onDisconnected()
-                it.close()
-            }, {
-                L.debug(Ble, "onBluetoothDisabled error:$deviceId", it)
-            })
+            }
+        }
+        if (closed != null) {
+            bleDevice.onDisconnected()
+        }
     }
 
     companion object {
