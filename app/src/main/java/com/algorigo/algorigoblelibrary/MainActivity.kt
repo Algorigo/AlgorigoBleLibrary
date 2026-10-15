@@ -96,6 +96,7 @@ class MainActivity : RequestPermissionActivity() {
 
     private var disposable: Disposable? = null
     private var connectionStateDisposable: Disposable? = null
+    private var connectDisposable: Disposable? = null
 
     private lateinit var macAddressEditText: EditText
     private lateinit var macAddressButton: Button
@@ -136,6 +137,11 @@ class MainActivity : RequestPermissionActivity() {
     override fun onPause() {
         super.onPause()
         connectionStateDisposable?.dispose()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        connectDisposable?.dispose()
     }
 
     private fun requestGPSEnabledObservable(): Observable<Boolean> {
@@ -180,7 +186,7 @@ class MainActivity : RequestPermissionActivity() {
 
         macAddressButton.setOnClickListener {
             macAddressEditText.text.toString().also { str ->
-                Rx2ServiceBindingFactory.bind<BluetoothService.BluetoothBinder>(this, Intent(this, BluetoothService::class.java))
+                connectDisposable = Rx2ServiceBindingFactory.bind<BluetoothService.BluetoothBinder>(this, Intent(this, BluetoothService::class.java))
                     .map { binder ->
                         val macAddress =
                             when {
@@ -198,11 +204,19 @@ class MainActivity : RequestPermissionActivity() {
                     }
                     .firstOrError()
                     .flatMapCompletable { it.connectCompletable() }
+                    // 연결 타임아웃은 computation 스레드에서 오므로 Toast 를 띄우기 전에 main thread 로 옮긴다
+                    .observeOn(AndroidSchedulers.mainThread())
+                    .doOnSubscribe {
+                        macAddressButton.isEnabled = false
+                    }
+                    .doFinally {
+                        macAddressButton.isEnabled = true
+                    }
                     .subscribe({
                         Log.e(TAG, "device connected")
                     }, {
                         Log.e(TAG, "", it)
-                        Toast.makeText(this, it.localizedMessage, Toast.LENGTH_LONG).show()
+                        Toast.makeText(this, it.localizedMessage ?: it.javaClass.simpleName, Toast.LENGTH_LONG).show()
                     })
             }
         }

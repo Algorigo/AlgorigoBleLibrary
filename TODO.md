@@ -292,7 +292,20 @@
   - Device 화면: 결과 표시(`result_text_view`)와 READ 버튼이 가려져서 결과를 화면에서 볼 수 없습니다.
   - 제안: 루트 뷰에 `ViewCompat.setOnApplyWindowInsetsListener`로 `systemBars` inset을 padding으로 적용하거나, `fitsSystemWindows`를 사용합니다. `StartActivity`에서 import만 하고 쓰지 않는 `enableEdgeToEdge`/`WindowInsetsCompat`를 정리하면서 함께 적용합니다.
 
-- [ ] **[샘플앱] Connect Device 실패 시 백그라운드 스레드에서 Toast를 띄워 크래시남 (실기기)** — `app/.../MainActivity.kt:177-205`
+- [x] **[샘플앱] Connect Device 실패 시 백그라운드 스레드에서 Toast를 띄워 크래시남 (실기기)** — `app/.../MainActivity.kt:177-205`
+  - ✅ 해결 (`feature/fix_connect_device_toast_crash`)
+    - `subscribe` 전에 `observeOn(AndroidSchedulers.mainThread())`를 추가해서 `onError`(Toast)가 main thread에서 실행되게 했습니다.
+    - 반환된 Disposable을 `connectDisposable`로 보관하고 `onDestroy()`에서 dispose합니다. 화면을 나가면 진행 중인 연결 시도도 취소됩니다.
+    - 연결 중에는 Connect Device 버튼을 비활성화하고, 성공하거나 실패하면 다시 활성화합니다(중복 클릭 방지, 기존 START SCAN 버튼과 같은 방식).
+    - 메시지가 없는 예외(예: `getDevice()`가 null일 때 `!!`에서 나는 NPE)는 Toast에 예외 클래스 이름을 표시합니다.
+    - 테스트: `app/src/androidTest/.../ConnectDeviceFailureTest`. 문서용 MAC 주소(`00:00:5E:00:53:01`, RFC 7042)로 연결해서 10초 타임아웃을 일으킨 뒤, 화면이 RESUMED인지와 버튼이 비활성화됐다가 다시 활성화되는지 확인합니다.
+      - 수정 전(Fold5): `RxComputationThreadPool-1`에서 `FATAL EXCEPTION: Can't toast on a thread that has not called Looper.prepare()`가 나서 실패했습니다(`Process crashed`). 원인 오류는 연결 타임아웃 `TimeoutException`이었습니다.
+      - 수정 후(Fold5): 통과(11초). `onError`가 main thread에서 호출됐습니다.
+    - 실기기 확인(Fold5, 직접 조작):
+      - 도달할 수 없는 MAC: 연결 중 버튼 비활성화 → 10초 후 Toast `The source did not signal an event for 10000 milliseconds and has been terminated.` 표시, 버튼 다시 활성화, 크래시 없음.
+      - 잘못된 형식(`hello`): Toast `mac address pattern wrong`, 버튼 다시 활성화.
+      - 가상 기기(`12:34:56:78:90:ab`): `device connected`, 버튼 다시 활성화.
+      - 연결 중 뒤로 가기: `onDestroy()`에서 dispose되어 `cancel connecting`이 기록됐고, 이후 Toast, 오류, 크래시가 없었습니다.
   - MAC 연결 체인에 `observeOn(AndroidSchedulers.mainThread())`가 없습니다. 그래서 연결 타임아웃(`TimeoutException`)의 `onError`가 Rx computation 스레드에서 `Toast.makeText()`를 호출하고, `Can't toast on a thread that has not called Looper.prepare()`로 프로세스가 죽습니다.
   - 제안: `subscribe` 전에 `observeOn(AndroidSchedulers.mainThread())`를 추가하고, 반환된 Disposable을 관리합니다.
 
