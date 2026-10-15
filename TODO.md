@@ -344,7 +344,20 @@
   - ⚠️ 새 콜백 오버로드는 기본 구현이 deprecated 콜백을 호출합니다. 그래서 새 오버로드에서 `super`를 호출하면서 relay에도 emit하면 **이벤트가 두 번 전달됩니다**. `stash@{0}`의 WIP 코드가 이 구조이므로 적용하기 전에 수정이 필요합니다.
 - [ ] **[버그] `discoverServices()` 반환값을 무시함** — `impl/BleDeviceEngineImpl.kt:78`. false를 반환하면 연결 타임아웃이 날 때까지 의미 없이 대기합니다.
 - [ ] **[버그] `stateRelay`가 serialized되어 있지 않음** — `impl/BleDeviceEngineImpl.kt:182`. 바인더 스레드, Rx 스레드, 앱 스레드에서 동시에 `accept`되어 Rx 규약을 위반합니다. `toSerialized()`를 적용하거나 단일 스레드로 처리합니다.
-- [ ] **[버그] connect를 동시에 호출하면 `connectGatt`가 두 번 불릴 수 있음** — `impl/BleDeviceEngineImpl.kt:262-272`. `checkConnectionState`와 `CONNECTING`으로 전환하는 동작이 원자적이지 않아서, 먼저 만들어진 gatt가 close되지 않고 누수됩니다.
+- [x] **[버그] connect를 동시에 호출하면 `connectGatt`가 두 번 불릴 수 있음** — `impl/BleDeviceEngineImpl.kt:262-272`. `checkConnectionState`와 `CONNECTING`으로 전환하는 동작이 원자적이지 않아서, 먼저 만들어진 gatt가 close되지 않고 누수됩니다.
+  - ✅ 해결 (`feature/atomic_connect`)
+    - `startConnecting()`을 추가했습니다. DISCONNECTED인지 확인하고 → 연결을 시작하고(`connectGatt` / RFCOMM 소켓 생성) → 상태를 바꾸는 과정을 하나의 잠금(`connectLock`) 안에서 처리합니다. GATT 연결(`connectCompletable`)과 SPP 연결(`connectSppSocket`)이 모두 이 함수를 쓰므로, 동시에 호출해도 gatt/소켓은 하나만 만들어집니다. 나머지 호출은 기존처럼 `IllegalStateException`으로 바로 실패합니다.
+    - `connectCompletable`은 CONNECTING으로 바꾼 뒤에 상태를 구독합니다. 그래서 이후에 보이는 DISCONNECTED는 이번 연결 시도가 끝났다는 뜻이 되어, 기존의 `enumerated()` 인덱스 검사가 필요 없어졌습니다. dispose할 때는 상태가 **자기 gatt의** CONNECTING일 때만 연결을 취소합니다.
+    - 함께 발견한 문제: `connectSppSocket`의 `doFinally`는 상태가 DISCONNECTED가 아니면 무조건 DISCONNECTED로 바꿨습니다. 그래서 GATT가 연결된 상태에서 SPP 연결을 시도하면, 상태 확인이 실패하는데도 **GATT 연결 상태가 DISCONNECTED로 바뀌었습니다**(gatt는 열린 채로 남음). 이제는 이 구독이 시작한 SPP 연결(같은 SPP_CONNECTING 상태 또는 같은 소켓)일 때만 정리합니다.
+    - 오류 메시지는 `Connection state is CONNECTING not DISCONNECTED`처럼 상태 이름으로 표시합니다(기존에는 State 객체의 toString).
+    - 테스트: `BleDeviceEngineImplConcurrentConnectTest`(3건). 수정 전 코드에서는 3건 모두 실패했습니다(3회 반복 모두).
+      - 8개 스레드 동시 connect(`connectGatt` 50ms 지연): 수정 전 `connectGatt` 8회 → 수정 후 1회. 1건은 연결 대기, 7건은 `IllegalStateException`.
+      - GATT 연결과 SPP 연결을 동시에 시도: 수정 전에는 `connectGatt`와 RFCOMM 소켓이 둘 다 만들어짐 → 수정 후 하나만 만들어짐.
+      - GATT 연결 상태에서 SPP 연결 시도: 수정 전에는 상태가 DISCONNECTED로 바뀜 → 수정 후 CONNECTED가 유지되고 gatt를 close하지 않음.
+    - 실기기 확인(Fold5 → S23, 8개 스레드가 동시에 `connectCompletable`, 호스트에서 `dumpsys bluetooth_manager`의 Registered App > Client 목록으로 이 앱의 GATT client 수 확인):
+      - 수정 전: 8건 모두 OK로 끝났지만 **GATT client가 8개 등록**됐고, `disconnect()` 뒤에도 **7개가 close되지 않고 남았습니다**(프로세스가 끝나야 사라짐).
+      - 수정 후: OK 1건, `IllegalStateException` 7건. GATT client는 1개만 등록됐고 `disconnect()` 뒤 0개가 됐습니다. 이어서 재연결 → Device Name read → disconnect도 정상이었고 client는 다시 0개가 됐습니다.
+    - SPP 경로는 단위 테스트로만 확인했습니다(실기기 SPP 미검증).
 - [ ] **[버그] `BleDevice.equals()`만 override하고 `hashCode()`는 override하지 않음** — `BleDevice.kt:90`. `HashSet`/`HashMap`/`distinct()`에서 같은 기기가 서로 다른 기기로 취급됩니다. 또 `initEngine()` 전에 `equals/toString`을 호출하면 `UninitializedPropertyAccessException`이 납니다.
 - [ ] **[버그] `getConnectedDevices()`가 실제 연결 상태와 맞지 않음** — `impl/BleManagerEngineImpl.kt:120-122`. `bluetoothManager.getConnectedDevices(GATT)`는 시스템 전체(다른 앱, OS가 맺은 연결 포함)를 반환합니다. 그래서 `connected == false`인 `BleDevice`가 목록에 포함됩니다. 라이브러리 engine의 상태를 기준으로 필터링해야 합니다.
 - [ ] **[버그] 스캔 결과가 계속 쌓이고 구독이 해제되지 않음(메모리 누수)** — `impl/BleManagerEngineImpl.kt:153-159`. 스캔된 모든 기기가 `deviceMap`에 영구히 남고, 기기마다 만든 connection-state 구독의 Disposable도 버려집니다. 기기가 많은 환경에서 장시간 스캔하면 계속 늘어납니다. 새 기기마다 초기 `DISCONNECTED` 이벤트도 `getConnectionStateObservable()`로 전달됩니다.
