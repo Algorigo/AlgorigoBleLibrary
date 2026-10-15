@@ -19,7 +19,6 @@ import com.algorigo.algorigoble2.logging.Ble
 import com.algorigo.logger.L
 import com.jakewharton.rxrelay3.BehaviorRelay
 import com.jakewharton.rxrelay3.PublishRelay
-import enumerated
 import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Flowable
 import io.reactivex.rxjava3.core.Observable
@@ -241,6 +240,8 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
     private val stateRelay = BehaviorRelay.create<State>().apply {
         accept(State.DISCONNECTED())
     }
+    // DISCONNECTED 에서 연결을 시작하는 전환(GATT/SPP)은 이 잠금 안에서만 한다. (startConnecting)
+    private val connectLock = Any()
     private val gattObservable: Observable<BluetoothGatt>
         get() = stateRelay.map {
             if (it is State.CONNECTED) {
@@ -329,43 +330,51 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
         return stateRelay.map { it.connectionState }
     }
 
-    override fun connectCompletable(timeoutMillis: Long): Completable = checkConnectionState(BleDevice.ConnectionState.DISCONNECTED)
-        .andThen(Completable.defer {
-            var gatt: BluetoothGatt? = null
-            stateRelay
-                .enumerated()
-                .doOnNext {
-                    if (it.second is State.DISCONNECTED) {
-                        if (it.first == 0) {
-                            L.debug(Ble.Device.Default, "${bluetoothDevice.name}(${bluetoothDevice.address}) : connectGatt call")
-                            // 블루투스가 꺼져 있으면 connectGatt 가 null 을 반환한다. 상태를 CONNECTING 으로 바꾸기 전에 실패시킨다.
-                            // transport 를 지정하지 않으면(AUTO) 듀얼모드 기기에서 BR/EDR 로 GATT 연결을 시도해 status 133 으로 실패할 수 있다
-                            val newGatt = bluetoothDevice.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
-                                ?: throw BleManager.ConnectFailedException("connectGatt returned null (bluetooth may be off)")
-                            gatt = newGatt
-                            stateRelay.accept(State.CONNECTING(newGatt))
-                        } else {
-                            throw (it.second as State.DISCONNECTED).cause ?: BleManager.DisconnectedException()
-                        }
-                    }
+    override fun connectCompletable(timeoutMillis: Long): Completable = Completable.defer {
+        val gatt = startConnecting {
+            L.debug(Ble.Device.Default, "${bluetoothDevice.name}(${bluetoothDevice.address}) : connectGatt call")
+            // 블루투스가 꺼져 있으면 connectGatt 가 null 을 반환한다. 상태를 CONNECTING 으로 바꾸기 전에 실패시킨다.
+            // transport 를 지정하지 않으면(AUTO) 듀얼모드 기기에서 BR/EDR 로 GATT 연결을 시도해 status 133 으로 실패할 수 있다
+            val newGatt = bluetoothDevice.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+                ?: throw BleManager.ConnectFailedException("connectGatt returned null (bluetooth may be off)")
+            State.CONNECTING(newGatt)
+        }.gatt
+        // CONNECTING 으로 바꾼 뒤에 구독하므로, 여기서 보이는 DISCONNECTED 는 이번 연결 시도가 끝났다는 뜻이다
+        stateRelay
+            .doOnNext {
+                if (it is State.DISCONNECTED) {
+                    throw it.cause ?: BleManager.DisconnectedException()
                 }
-                .filter { it.second is State.CONNECTED }
-                .firstOrError()
-                .ignoreElement()
-                .timeout(timeoutMillis, TimeUnit.MILLISECONDS)
-                .doOnError {
-                    L.error(Ble.Device.Default, "${bluetoothDevice.name}(${bluetoothDevice.address}) : doOnError", it)
-                    if (it is TimeoutException) {
-                        gatt?.also { cancelConnecting(it) }
-                    }
+            }
+            .filter { it is State.CONNECTED }
+            .firstOrError()
+            .ignoreElement()
+            .timeout(timeoutMillis, TimeUnit.MILLISECONDS)
+            .doOnError {
+                L.error(Ble.Device.Default, "${bluetoothDevice.name}(${bluetoothDevice.address}) : doOnError", it)
+                if (it is TimeoutException) {
+                    cancelConnecting(gatt)
                 }
-                .doOnDispose {
-                    // 연결이 완료되기 전에 구독이 해제되면 진행 중인 연결을 취소한다. (연결 완료 후의 dispose 는 무시)
-                    if (stateRelay.value is State.CONNECTING) {
-                        gatt?.also { cancelConnecting(it) }
-                    }
+            }
+            .doOnDispose {
+                // 연결이 완료되기 전에 구독이 해제되면 진행 중인 연결을 취소한다. (연결 완료 후의 dispose 는 무시)
+                if ((stateRelay.value as? State.CONNECTING)?.gatt === gatt) {
+                    cancelConnecting(gatt)
                 }
-        })
+            }
+    }
+
+    /**
+     * 현재 상태가 DISCONNECTED 일 때만 [start]로 연결을 시작하고 그 상태로 바꾼다. 아니면 [IllegalStateException].
+     * 상태 확인과 전환을 한 번에 해서, 동시에 연결해도 gatt/소켓이 하나만 만들어지게 한다.
+     */
+    private fun <S : State> startConnecting(start: () -> S): S = synchronized(connectLock) {
+        val current = stateRelay.value
+        if (current !is State.DISCONNECTED) {
+            throw IllegalStateException("Connection state is ${current?.connectionState} not ${BleDevice.ConnectionState.DISCONNECTED}")
+        }
+        start().also { stateRelay.accept(it) }
+    }
 
     /** 진행 중인 연결을 정리한다. [cause]가 있으면 기다리던 connectCompletable 이 그 에러로 실패한다. (상태는 이미 DISCONNECTED 인 채로 전달된다) */
     private fun cancelConnecting(gatt: BluetoothGatt, cause: Throwable? = null) {
@@ -606,25 +615,28 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
         })
     }
 
-    override fun connectSppSocket(uuid: UUID?): Observable<BleSppSocket> {
+    override fun connectSppSocket(uuid: UUID?): Observable<BleSppSocket> = Observable.defer {
+        var connecting: State.SPP_CONNECTING? = null
         var socket: BleSppSocket? = null
-        return checkConnectionState(BleDevice.ConnectionState.DISCONNECTED)
-            .andThen(Observable.create<BleSppSocket> { emitter ->
-                val aUuid = uuid ?: bluetoothDevice.uuids.first().uuid
-                val bluetoothSocket = bluetoothDevice.createRfcommSocketToServiceRecord(aUuid)
-                // 연결 중에 disconnect() 가 불리면 소켓을 닫아 connect() 를 중단할 수 있도록 상태에 소켓을 담는다
-                stateRelay.accept(State.SPP_CONNECTING(bluetoothSocket))
-                BleSppSocket(bluetoothSocket).also { theSocket ->
-                    socket = theSocket
-                    stateRelay.accept(State.SPP_CONNECTED(theSocket))
-                    // disconnect() 로 SPP 연결이 끊기면 스트림을 끝낸다
-                    emitter.setDisposable(stateRelay.filter { it !is State.SPP_CONNECTED }.firstElement()
-                        .subscribe { emitter.tryOnError(BleManager.DisconnectedException()) })
-                    emitter.onNext(theSocket)
-                }
-            })
+        Observable.create<BleSppSocket> { emitter ->
+            val aUuid = uuid ?: bluetoothDevice.uuids.first().uuid
+            // 연결 중에 disconnect() 가 불리면 소켓을 닫아 connect() 를 중단할 수 있도록 상태에 소켓을 담는다
+            val state = startConnecting { State.SPP_CONNECTING(bluetoothDevice.createRfcommSocketToServiceRecord(aUuid)) }
+            connecting = state
+            BleSppSocket(state.socket).also { theSocket ->
+                socket = theSocket
+                stateRelay.accept(State.SPP_CONNECTED(theSocket))
+                // disconnect() 로 SPP 연결이 끊기면 스트림을 끝낸다
+                emitter.setDisposable(stateRelay.filter { it !is State.SPP_CONNECTED }.firstElement()
+                    .subscribe { emitter.tryOnError(BleManager.DisconnectedException()) })
+                emitter.onNext(theSocket)
+            }
+        }
             .doFinally {
-                if (stateRelay.value !is State.DISCONNECTED) {
+                // 이 구독이 시작한 SPP 연결만 정리한다. (연결을 시작하지 못했다면 다른 연결의 상태를 건드리지 않는다)
+                val current = stateRelay.value
+                if ((current is State.SPP_CONNECTING && current === connecting) ||
+                    (current is State.SPP_CONNECTED && current.socket === socket)) {
                     stateRelay.accept(State.DISCONNECTED())
                 }
                 socket?.close()
