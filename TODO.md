@@ -380,7 +380,7 @@
       - 수정 후: OK 1건, `IllegalStateException` 7건. GATT client는 1개만 등록됐고 `disconnect()` 뒤 0개가 됐습니다. 이어서 재연결 → Device Name read → disconnect도 정상이었고 client는 다시 0개가 됐습니다.
     - SPP 경로는 단위 테스트로만 확인했습니다(실기기 SPP 미검증).
 - [ ] **[버그] `BleDevice.equals()`만 override하고 `hashCode()`는 override하지 않음** — `BleDevice.kt:90`. `HashSet`/`HashMap`/`distinct()`에서 같은 기기가 서로 다른 기기로 취급됩니다. 또 `initEngine()` 전에 `equals/toString`을 호출하면 `UninitializedPropertyAccessException`이 납니다.
-- [ ] **[버그] `getConnectedDevices()`가 실제 연결 상태와 맞지 않음** — `impl/BleManagerEngineImpl.kt:120-122`. `bluetoothManager.getConnectedDevices(GATT)`는 시스템 전체(다른 앱, OS가 맺은 연결 포함)를 반환합니다. 그래서 `connected == false`인 `BleDevice`가 목록에 포함됩니다. 라이브러리 engine의 상태를 기준으로 필터링해야 합니다.
+- [x] **[버그] `getConnectedDevices()`가 실제 연결 상태와 맞지 않음** — `impl/BleManagerEngineImpl.kt:120-122`. `bluetoothManager.getConnectedDevices(GATT)`는 시스템 전체(다른 앱, OS가 맺은 연결 포함)를 반환합니다. 그래서 `connected == false`인 `BleDevice`가 목록에 포함됩니다. 라이브러리 engine의 상태를 기준으로 필터링해야 합니다.
   - ✅ 해결 (`feature/connected_devices_from_engine_state`)
     - `getConnectedDevices()`는 이 라이브러리가 관리하는 기기(`deviceMap`) 중 `connected`(engine이 GATT CONNECTED)이거나 `SPP_CONNECTED`인 기기만 돌려줍니다. 시스템 목록을 쓰지 않으므로, 다른 앱이 연결한 기기 때문에 `BleDevice`를 새로 만들거나 delegate를 호출하지도 않습니다. `getConnectedDevice(mac)`도 이 목록을 사용합니다.
     - ⚠️ 동작 변경: 다른 앱이나 OS가 연결한 기기는 더 이상 포함되지 않습니다. `InitializableBleDevice`는 기존 `connected` 기준과 같이 초기화 중(GATT 연결됨)에도 포함됩니다.
