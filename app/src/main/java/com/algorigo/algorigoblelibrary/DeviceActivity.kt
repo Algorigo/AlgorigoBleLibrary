@@ -4,8 +4,10 @@ import android.content.Intent
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import android.util.Log
+import android.view.View
 import android.widget.EditText
 import android.widget.TextView
+import androidx.activity.enableEdgeToEdge
 import androidx.recyclerview.widget.RecyclerView
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.library.rx.Rx2ServiceBindingFactory
@@ -24,6 +26,7 @@ class DeviceActivity : AppCompatActivity(), CharacteristicAdapter.Callback {
     private val characteristicAdapter = CharacteristicAdapter(this)
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
         intent.getStringExtra(DEVICE_MAC_ADDRESS)?.let {
@@ -46,6 +49,7 @@ class DeviceActivity : AppCompatActivity(), CharacteristicAdapter.Callback {
 
     private fun initView() {
         setContentView(R.layout.activity_device)
+        findViewById<View>(R.id.main).applySystemBarsPadding()
         resultTextView = findViewById(R.id.result_text_view)
         characteristicRecyclerView = findViewById(R.id.characteristic_list_view)
         characteristicRecyclerView.adapter = characteristicAdapter
