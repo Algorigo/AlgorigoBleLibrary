@@ -389,7 +389,18 @@
       - 다른 앱만 연결: 수정 전 `[5D:81:16:EA:56:94(connected=false)]` → 수정 후 `[]` (시스템 GATT 목록에는 S23이 있음)
       - 이 앱도 연결: 수정 전과 후 모두 `[5D:81:16:EA:56:94(connected=true)]`
       - 이 앱이 연결 해제: 수정 전 `[...(connected=false)]` → 수정 후 `[]`
-- [ ] **[버그] 스캔 결과가 계속 쌓이고 구독이 해제되지 않음(메모리 누수)** — `impl/BleManagerEngineImpl.kt:153-159`. 스캔된 모든 기기가 `deviceMap`에 영구히 남고, 기기마다 만든 connection-state 구독의 Disposable도 버려집니다. 기기가 많은 환경에서 장시간 스캔하면 계속 늘어납니다. 새 기기마다 초기 `DISCONNECTED` 이벤트도 `getConnectionStateObservable()`로 전달됩니다.
+- [x] **[버그] 스캔 결과가 계속 쌓이고 구독이 해제되지 않음(메모리 누수)** — `impl/BleManagerEngineImpl.kt:153-159`. 스캔된 모든 기기가 `deviceMap`에 영구히 남고, 기기마다 만든 connection-state 구독의 Disposable도 버려집니다. 기기가 많은 환경에서 장시간 스캔하면 계속 늘어납니다. 새 기기마다 초기 `DISCONNECTED` 이벤트도 `getConnectionStateObservable()`로 전달됩니다.
+  - ✅ 해결 (`feature/release_unused_devices`)
+    - `deviceMap`은 기기를 약한 참조(`DeviceEntry`: `WeakReference` + `ReferenceQueue`)로 들고 있습니다. 앱이 참조하는 동안에는 같은 인스턴스가 유지되고(`deviceMap` thread-safety 수정의 "기기당 하나" 보장 유지), 아무도 참조하지 않는 연결되지 않은 기기는 GC됩니다. GC된 항목은 다음 기기를 만들 때 map에서 지웁니다.
+    - 상태가 DISCONNECTED가 아닌 기기(CONNECTING/CONNECTED/DISCONNECTING/SPP)는 `DeviceEntry.active`로 강하게 참조합니다. 그래서 앱이 참조를 버려도 연결을 정리할 수 있습니다. 실제 앱에서는 연결된 `BluetoothGatt`의 콜백을 Bluetooth 서비스가 binder로 붙잡고 있어서 그 경로로도 유지되지만, 그 밖의 경우까지 확실히 유지하기 위한 장치입니다.
+    - 기기마다 만든 상태 구독은 기기 안의 relay가 들고 있으므로 기기가 GC되면 함께 사라집니다(별도로 dispose할 필요 없음).
+    - 기기를 만들 때의 처음 상태(DISCONNECTED)는 `BleManager.getConnectionStateObservable()`로 전달하지 않습니다(`skip(1)`). 상태 변화만 전달합니다. 가상 기기도 같습니다.
+    - ⚠️ 동작 변경: 앱이 참조하지 않는, 연결되지 않은 기기는 `getDevices()`(내부)와 스캔 이후 조회에서 사라질 수 있습니다. 같은 MAC으로 `getDevice()`를 다시 부르면 새 인스턴스가 만들어집니다(이전 인스턴스는 아무도 참조하지 않으므로 구분할 수 없음). 처음 DISCONNECTED 이벤트에 의존하던 코드는 더 이상 그 이벤트를 받지 않습니다.
+    - 테스트: `BleManagerEngineImplDeviceReleaseTest`(4건). 수정 전 코드에서는 3건이 실패했습니다(GC 후에도 남음, 연결 해제 후에도 남음, 처음 DISCONNECTED 전달). "참조 중인 기기는 GC 후에도 같은 인스턴스"는 기존 동작을 지키기 위한 테스트입니다. "연결된 기기는 앱 참조 없이도 유지"는 `active`를 설정하지 않게 바꾸면 실패하는 것을 확인했습니다. (TestScheduler는 취소된 타이머를 그 시각까지 큐에 남겨 두고 그 작업이 기기를 참조하므로, 테스트에서 시간을 진행해 큐를 비웁니다.)
+    - 실기기 확인(Fold5, 8초 실제 스캔 후 GC. 화면이 꺼지면 필터 없는 스캔이 멈추므로 화면만 깨운 상태에서 진행):
+      - 수정 전: 스캔 기기 116개 → 캐시 116개, 상태 이벤트 **116건(모두 처음 DISCONNECTED)**, GC 후에도 **116개**가 남음.
+      - 수정 후: 스캔 기기 79개 → 상태 이벤트 **0건**, GC 후 캐시 **1개**(프로브가 들고 있는 S23, 같은 인스턴스).
+      - S23 연결 후 프로브가 참조를 버리고 GC: 수정 전과 후 모두 연결된 기기 1개(같은 인스턴스)가 유지되고 Device Name read가 정상이었습니다. 연결부터 해제까지의 이벤트는 수정 후 4건(CONNECTING → CONNECTED → DISCONNECTING → DISCONNECTED)이었습니다.
 - [ ] **[버그] API ≤ 30에서 위치 provider가 바뀌면 스캔이 중복 실행됨** — `impl/BleManagerEngineImpl.kt:84`. `combineLatest`가 `(true, true)`를 다시 내보내면 `flatMap`이 두 번째 스캔을 시작합니다. 그러면 두 스캔의 목록이 번갈아 전달됩니다. `distinctUntilChanged()`와 `switchMap`을 사용해야 합니다.
 - [ ] **[버그] `CALLBACK_TYPE_MATCH_LOST`를 처리하지 않음** — `impl/BleScanner.kt:20`. `callbackType`을 무시하므로, 사라진 기기도 발견된 기기로 목록에 추가됩니다.
 - [ ] **[버그] API 32 이하에서 `ScanInfo.advertisingDataMap`이 항상 비어 있음** — `ScanInfo.kt:20-27`. `bytes`를 읽기만 하고 파싱하지 않은 채 빈 map을 반환합니다. AD structure(length-type-value)를 직접 파싱해야 합니다.
