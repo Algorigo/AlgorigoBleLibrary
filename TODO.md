@@ -381,6 +381,14 @@
     - SPP 경로는 단위 테스트로만 확인했습니다(실기기 SPP 미검증).
 - [ ] **[버그] `BleDevice.equals()`만 override하고 `hashCode()`는 override하지 않음** — `BleDevice.kt:90`. `HashSet`/`HashMap`/`distinct()`에서 같은 기기가 서로 다른 기기로 취급됩니다. 또 `initEngine()` 전에 `equals/toString`을 호출하면 `UninitializedPropertyAccessException`이 납니다.
 - [ ] **[버그] `getConnectedDevices()`가 실제 연결 상태와 맞지 않음** — `impl/BleManagerEngineImpl.kt:120-122`. `bluetoothManager.getConnectedDevices(GATT)`는 시스템 전체(다른 앱, OS가 맺은 연결 포함)를 반환합니다. 그래서 `connected == false`인 `BleDevice`가 목록에 포함됩니다. 라이브러리 engine의 상태를 기준으로 필터링해야 합니다.
+  - ✅ 해결 (`feature/connected_devices_from_engine_state`)
+    - `getConnectedDevices()`는 이 라이브러리가 관리하는 기기(`deviceMap`) 중 `connected`(engine이 GATT CONNECTED)이거나 `SPP_CONNECTED`인 기기만 돌려줍니다. 시스템 목록을 쓰지 않으므로, 다른 앱이 연결한 기기 때문에 `BleDevice`를 새로 만들거나 delegate를 호출하지도 않습니다. `getConnectedDevice(mac)`도 이 목록을 사용합니다.
+    - ⚠️ 동작 변경: 다른 앱이나 OS가 연결한 기기는 더 이상 포함되지 않습니다. `InitializableBleDevice`는 기존 `connected` 기준과 같이 초기화 중(GATT 연결됨)에도 포함됩니다.
+    - 테스트: `BleManagerEngineImplConnectedDevicesTest`(2건). 수정 전 코드에서는 2건 모두 실패했습니다. 다른 앱이 연결한 기기가 `connected=false`인 채로 목록에 들어갔고, 그 기기의 `BleDevice`가 delegate로 만들어졌습니다.
+    - 실기기 확인(Fold5 → S23. 샘플 앱 프로세스가 임시 instrumentation test로 S23 연결을 40초 동안 유지하고, 그동안 별도 앱인 라이브러리 테스트 APK에서 호출. Fold5가 보안 잠금 상태라 화면 조작 없이 진행):
+      - 다른 앱만 연결: 수정 전 `[5D:81:16:EA:56:94(connected=false)]` → 수정 후 `[]` (시스템 GATT 목록에는 S23이 있음)
+      - 이 앱도 연결: 수정 전과 후 모두 `[5D:81:16:EA:56:94(connected=true)]`
+      - 이 앱이 연결 해제: 수정 전 `[...(connected=false)]` → 수정 후 `[]`
 - [ ] **[버그] 스캔 결과가 계속 쌓이고 구독이 해제되지 않음(메모리 누수)** — `impl/BleManagerEngineImpl.kt:153-159`. 스캔된 모든 기기가 `deviceMap`에 영구히 남고, 기기마다 만든 connection-state 구독의 Disposable도 버려집니다. 기기가 많은 환경에서 장시간 스캔하면 계속 늘어납니다. 새 기기마다 초기 `DISCONNECTED` 이벤트도 `getConnectionStateObservable()`로 전달됩니다.
 - [ ] **[버그] API ≤ 30에서 위치 provider가 바뀌면 스캔이 중복 실행됨** — `impl/BleManagerEngineImpl.kt:84`. `combineLatest`가 `(true, true)`를 다시 내보내면 `flatMap`이 두 번째 스캔을 시작합니다. 그러면 두 스캔의 목록이 번갈아 전달됩니다. `distinctUntilChanged()`와 `switchMap`을 사용해야 합니다.
 - [ ] **[버그] `CALLBACK_TYPE_MATCH_LOST`를 처리하지 않음** — `impl/BleScanner.kt:20`. `callbackType`을 무시하므로, 사라진 기기도 발견된 기기로 목록에 추가됩니다.
