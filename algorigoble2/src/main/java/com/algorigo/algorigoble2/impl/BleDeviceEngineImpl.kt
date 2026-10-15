@@ -89,7 +89,16 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
             L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onConnectionStateChange $status -> $newState")
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
-                    gatt?.discoverServices()
+                    // false 는 gatt 가 이미 해제됐거나 Bluetooth 서비스와 통신하지 못한 경우라 다시 시도해도 소용없다.
+                    // 연결 타임아웃까지 기다리지 않고 바로 연결 시도를 정리한다
+                    if (gatt != null && !gatt.discoverServices()) {
+                        synchronized(stateLock) {
+                            if ((stateRelay.value as? State.CONNECTING)?.gatt === gatt) {
+                                L.warning(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : discoverServices failed")
+                                cancelConnecting(gatt, BleManager.ConnectFailedException("discoverServices returned false"))
+                            }
+                        }
+                    }
                 }
 
                 BluetoothProfile.STATE_DISCONNECTED -> {
