@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
-import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.ScanRecord
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -119,9 +118,10 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
     }
 
     override fun getConnectedDevices(): List<BleDevice> {
-        return bluetoothManager.getConnectedDevices(BluetoothProfile.GATT).mapNotNull {
-            getBleDevice(it)
-        } + deviceMap.values.filter { it.connectionState == BleDevice.ConnectionState.SPP_CONNECTED }
+        // bluetoothManager.getConnectedDevices(GATT) 는 다른 앱/OS 가 맺은 연결까지 포함하므로, 이 라이브러리가 연결한 기기만 돌려준다
+        return deviceMap.values.filter {
+            it.connected || it.connectionState == BleDevice.ConnectionState.SPP_CONNECTED
+        }
     }
 
     override fun <T : BleDevice> getDevice(macAddress: String, clazz: Class<T>?): BleDevice? {
