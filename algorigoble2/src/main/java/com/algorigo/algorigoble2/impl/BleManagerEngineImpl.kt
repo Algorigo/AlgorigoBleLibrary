@@ -22,6 +22,8 @@ import com.algorigo.algorigoble2.virtual.VirtualDevice
 import com.algorigo.algorigoble2.virtual.VirtualDeviceEngine
 import com.algorigo.logger.L
 import io.reactivex.rxjava3.core.Observable
+import java.lang.ref.ReferenceQueue
+import java.lang.ref.WeakReference
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.logging.Logger
@@ -32,8 +34,20 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
     private val bluetoothManager: BluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private val bluetoothAdapter: BluetoothAdapter = bluetoothManager.adapter
 
+    /**
+     * 기기마다 하나의 [BleDevice]를 돌려주기 위한 캐시. 스캔된 모든 기기가 영구히 남지 않도록 기기는 약하게 참조한다.
+     * 앱이 참조하는 동안에는 같은 인스턴스가 유지되고, 아무도 참조하지 않는 연결되지 않은 기기는 GC 된다.
+     * 연결 중이거나 연결된 기기는 앱이 참조를 버려도 연결을 정리할 수 있도록 [DeviceEntry.active]로 강하게 참조한다.
+     */
+    private class DeviceEntry(val key: BluetoothDevice, device: BleDevice, queue: ReferenceQueue<BleDevice>) :
+        WeakReference<BleDevice>(device, queue) {
+        @Volatile
+        var active: BleDevice? = null
+    }
+
     // 스캔 콜백(binder thread)과 앱 스레드에서 동시에 접근한다. 생성은 createBleDevice 에서 deviceMap 을 잠그고 한다
-    private val deviceMap: MutableMap<BluetoothDevice, BleDevice> = ConcurrentHashMap()
+    private val deviceMap: MutableMap<BluetoothDevice, DeviceEntry> = ConcurrentHashMap()
+    private val releasedDevices = ReferenceQueue<BleDevice>()
 
     private val scanAvailableObservable = scanAvailableObservable(context)
         .doOnNext { (isLocationEnabled, isBluetoothEnabled) ->
@@ -108,7 +122,7 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
     }
 
     override fun getDevices(): Collection<BleDevice> {
-        return deviceMap.values.toList()
+        return deviceMap.values.mapNotNull { it.get() }
     }
 
     override fun getBondedDevices(): List<BleDevice> {
@@ -119,7 +133,7 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
 
     override fun getConnectedDevices(): List<BleDevice> {
         // bluetoothManager.getConnectedDevices(GATT) 는 다른 앱/OS 가 맺은 연결까지 포함하므로, 이 라이브러리가 연결한 기기만 돌려준다
-        return deviceMap.values.filter {
+        return getDevices().filter {
             it.connected || it.connectionState == BleDevice.ConnectionState.SPP_CONNECTED
         }
     }
@@ -142,13 +156,14 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
     }
 
     private fun getBleDevice(bluetoothDevice: BluetoothDevice, scanRecord: ScanRecord? = null): BleDevice? {
-        return deviceMap[bluetoothDevice] ?: (createBleDevice<BleDevice>(bluetoothDevice, scanRecord))
+        return deviceMap[bluetoothDevice]?.get() ?: (createBleDevice<BleDevice>(bluetoothDevice, scanRecord))
     }
 
     private fun <T : BleDevice> createBleDevice(bluetoothDevice: BluetoothDevice, scanRecord: ScanRecord? = null, clazz: Class<T>? = null): BleDevice? {
         synchronized(deviceMap) {
             // 잠금을 기다리는 동안 다른 스레드가 같은 기기를 이미 만들었을 수 있다
-            deviceMap[bluetoothDevice]?.let { return it }
+            deviceMap[bluetoothDevice]?.get()?.let { return it }
+            removeReleasedDevices()
 
             return if (clazz != null) {
                 clazz.newInstance()
@@ -158,11 +173,11 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
                 ?.also { device ->
                     // engine 이 붙기 전의 기기가 다른 스레드에 보이지 않도록 초기화를 마친 뒤 map 에 넣는다
                     device.initEngine(BleDeviceEngineImpl(context, bluetoothDevice))
-                    device.getConnectionStateObservable()
-                        .subscribe({
-                            connectionStateRelay.accept(Pair(device, it))
-                        }, {})
-                    deviceMap[bluetoothDevice] = device
+                    val entry = DeviceEntry(bluetoothDevice, device, releasedDevices)
+                    subscribeConnectionState(device) { state ->
+                        entry.active = if (state == BleDevice.ConnectionState.DISCONNECTED) null else device
+                    }
+                    deviceMap[bluetoothDevice] = entry
                 }
         }
     }
@@ -218,10 +233,29 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
     override fun initVirtualDevice(virtualDevice: VirtualDevice, bleDevice: BleDevice): BleDevice {
         return bleDevice.also { device ->
             device.initEngine(VirtualDeviceEngine(virtualDevice))
-            device.getConnectionStateObservable()
-                .subscribe({
-                    connectionStateRelay.accept(Pair(device, it))
-                }, {})
+            subscribeConnectionState(device)
+        }
+    }
+
+    /**
+     * 기기의 상태 변화를 [connectionStateRelay]로 전달한다. 처음 상태(DISCONNECTED)는 변화가 아니므로 전달하지 않는다.
+     * (기기가 만들어질 때마다 DISCONNECTED 가 전달되면 스캔 중에 의미 없는 이벤트가 쏟아진다)
+     */
+    private fun subscribeConnectionState(device: BleDevice, onChanged: (BleDevice.ConnectionState) -> Unit = {}) {
+        // 구독은 기기 안의 relay 가 들고 있으므로 기기가 GC 되면 함께 사라진다
+        device.getConnectionStateObservable()
+            .skip(1)
+            .subscribe({
+                onChanged(it)
+                connectionStateRelay.accept(Pair(device, it))
+            }, {})
+    }
+
+    /** GC 된 기기의 항목을 map 에서 지운다. (deviceMap 잠금 안에서 호출) */
+    private fun removeReleasedDevices() {
+        while (true) {
+            val entry = releasedDevices.poll() as? DeviceEntry ?: return
+            deviceMap.remove(entry.key, entry)
         }
     }
 }
