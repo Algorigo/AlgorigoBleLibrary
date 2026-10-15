@@ -343,7 +343,20 @@
   - API 33 이상에서는 `writeCharacteristic(char, value, writeType)`, `writeDescriptor(desc, value)`와 값을 인자로 받는 새 콜백으로 분기합니다.
   - ⚠️ 새 콜백 오버로드는 기본 구현이 deprecated 콜백을 호출합니다. 그래서 새 오버로드에서 `super`를 호출하면서 relay에도 emit하면 **이벤트가 두 번 전달됩니다**. `stash@{0}`의 WIP 코드가 이 구조이므로 적용하기 전에 수정이 필요합니다.
 - [ ] **[버그] `discoverServices()` 반환값을 무시함** — `impl/BleDeviceEngineImpl.kt:78`. false를 반환하면 연결 타임아웃이 날 때까지 의미 없이 대기합니다.
-- [ ] **[버그] `stateRelay`가 serialized되어 있지 않음** — `impl/BleDeviceEngineImpl.kt:182`. 바인더 스레드, Rx 스레드, 앱 스레드에서 동시에 `accept`되어 Rx 규약을 위반합니다. `toSerialized()`를 적용하거나 단일 스레드로 처리합니다.
+- [x] **[버그] `stateRelay`가 serialized되어 있지 않음** — `impl/BleDeviceEngineImpl.kt:182`. 바인더 스레드, Rx 스레드, 앱 스레드에서 동시에 `accept`되어 Rx 규약을 위반합니다. `toSerialized()`를 적용하거나 단일 스레드로 처리합니다.
+  - ✅ 해결 (`feature/serialize_state_transitions`)
+    - 모든 상태 전환은 `setState()`를 거치고, 전환과 그 조건 확인(현재 상태 읽기 → 바꾸기)은 하나의 잠금(`stateLock`) 안에서 처리합니다. 관찰자는 상태를 한 번에 하나씩, 바뀐 순서대로 받습니다. 앞 브랜치의 `connectLock`도 이 잠금으로 합쳤습니다(잠금이 두 개면 잠그는 순서가 엇갈려 교착될 수 있음).
+    - 적용한 곳: `onConnectionStateChange`, `onServicesDiscovered`(CONNECTING 확인 → CONNECTED), `startConnecting`, `cancelConnecting`, connect dispose, `disconnect()` 전체, 5초 fallback 타이머, SPP 연결/정리, `onBluetoothDisabled`.
+    - `toSerialized()`를 쓰지 않은 이유: 다른 스레드가 전달 중이면 값을 큐에 넣고 바로 반환합니다. 그래서 `accept` 직후에 읽은 `stateRelay.value`가 이전 값일 수 있는데, engine은 이런 읽기에 의존합니다(예: `startConnecting` 직후 구독).
+    - 함께 막은 경쟁: `onServicesDiscovered`가 CONNECTING을 확인한 직후 타임아웃 스레드가 gatt를 close하고 DISCONNECTED로 바꾸면, 그 뒤에 close된 gatt로 CONNECTED가 될 수 있었습니다. `disconnect()`가 CONNECTED를 읽은 직후 원격 끊김 콜백이 오는 경우도 같습니다. 이제 확인과 전환 사이에 다른 전환이 끼어들지 않습니다.
+    - ⚠️ 동작 변경: 상태 관찰자(연결 완료 뒤 이어지는 체인 포함)는 이 잠금을 잡은 스레드에서 실행됩니다. 관찰자가 오래 걸리면 다른 스레드의 상태 전환(`disconnect()` 호출 등)이 그만큼 기다립니다. 관찰자 안에서 **다음 상태 변화를 블로킹으로 기다리면**(예: DISCONNECTED 관찰자 안에서 `connectCompletable().blockingAwait()`) 멈춥니다. 이는 onNext를 직렬로 호출해야 한다는 Rx 규약상 원래 허용되지 않는 사용입니다.
+    - 테스트: `BleDeviceEngineImplStateSerializationTest`. `disconnect()`(앱 스레드)와 원격 끊김 콜백(바인더 스레드)을 동시에 일으키고, 상태를 받을 때마다 10ms씩 처리하는 관찰자로 20회 반복합니다.
+      - 수정 전: 3회 반복 모두 "관찰자가 상태를 동시에 받음"으로 실패했습니다. 순서 역전도 관찰됐습니다(20회 중 1회 `received=[CONNECTED, DISCONNECTED, DISCONNECTING]`인데 현재 상태는 DISCONNECTED → 앱은 계속 DISCONNECTING으로 판단).
+      - 수정 후: 3회 반복 모두 통과.
+    - 실기기 확인(Fold5 → S23): CONNECTED를 1.5초 동안 처리하는 관찰자를 붙이고, 다른 스레드가 상태 값이 CONNECTED가 되자마자 `disconnect()`를 호출합니다.
+      - 수정 전: **`overlapped=true`**. 바인더 스레드가 CONNECTED를 처리하는 도중에 `Thread-2`가 DISCONNECTING을 동시에 전달했습니다(`disconnect()`는 6ms 만에 반환).
+      - 수정 후: `overlapped=false`. `disconnect()`가 CONNECTED 전달이 끝날 때까지 기다렸다가(1507ms) DISCONNECTING을 전달했습니다. 순서는 `CONNECTING → CONNECTED → DISCONNECTING → DISCONNECTED`.
+      - 이어서 connect → Device Name read → disconnect를 5회 반복했고 모두 정상이었습니다(각 약 250ms. 첫 회는 1024~1970ms로 수정 전 592~1102ms와 비슷한 편차).
 - [x] **[버그] connect를 동시에 호출하면 `connectGatt`가 두 번 불릴 수 있음** — `impl/BleDeviceEngineImpl.kt:262-272`. `checkConnectionState`와 `CONNECTING`으로 전환하는 동작이 원자적이지 않아서, 먼저 만들어진 gatt가 close되지 않고 누수됩니다.
   - ✅ 해결 (`feature/atomic_connect`)
     - `startConnecting()`을 추가했습니다. DISCONNECTED인지 확인하고 → 연결을 시작하고(`connectGatt` / RFCOMM 소켓 생성) → 상태를 바꾸는 과정을 하나의 잠금(`connectLock`) 안에서 처리합니다. GATT 연결(`connectCompletable`)과 SPP 연결(`connectSppSocket`)이 모두 이 함수를 쓰므로, 동시에 호출해도 gatt/소켓은 하나만 만들어집니다. 나머지 호출은 기존처럼 `IllegalStateException`으로 바로 실패합니다.
