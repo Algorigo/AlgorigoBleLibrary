@@ -342,7 +342,15 @@
   - `characteristic.value = ...` 후 `writeCharacteristic(characteristic)`을 호출하는 방식은 공유된 mutable 필드를 사용합니다. 같은 characteristic으로 notification이 들어오면 쓰려던 값이 덮어써질 수 있습니다(race).
   - API 33 이상에서는 `writeCharacteristic(char, value, writeType)`, `writeDescriptor(desc, value)`와 값을 인자로 받는 새 콜백으로 분기합니다.
   - ⚠️ 새 콜백 오버로드는 기본 구현이 deprecated 콜백을 호출합니다. 그래서 새 오버로드에서 `super`를 호출하면서 relay에도 emit하면 **이벤트가 두 번 전달됩니다**. `stash@{0}`의 WIP 코드가 이 구조이므로 적용하기 전에 수정이 필요합니다.
-- [ ] **[버그] `discoverServices()` 반환값을 무시함** — `impl/BleDeviceEngineImpl.kt:78`. false를 반환하면 연결 타임아웃이 날 때까지 의미 없이 대기합니다.
+- [x] **[버그] `discoverServices()` 반환값을 무시함** — `impl/BleDeviceEngineImpl.kt:78`. false를 반환하면 연결 타임아웃이 날 때까지 의미 없이 대기합니다.
+  - ✅ 해결 (`feature/handle_discover_services_failure`)
+    - `STATE_CONNECTED`에서 `discoverServices()`가 false를 반환하면, 상태가 그 gatt의 CONNECTING일 때 바로 연결 시도를 정리합니다(`cancelConnecting`: disconnect/close, DISCONNECTED). 기다리던 `connectCompletable`은 `ConnectFailedException("discoverServices returned false")`로 실패합니다.
+    - 다시 시도하지 않는 이유: Android `BluetoothGatt.discoverServices()`는 Bluetooth 서비스가 없거나 client 등록이 해제됐을 때(`mClientIf == 0`), 또는 RemoteException일 때만 false를 반환합니다. 모두 같은 gatt로 다시 시도해도 소용없는 경우입니다.
+    - 이미 정리된 이전 gatt의 늦은 콜백이면 현재 연결은 건드리지 않습니다.
+    - 테스트: `BleDeviceEngineImplDiscoverServicesTest`(2건).
+      - false 반환 시 바로 실패: 수정 전에는 타임아웃 시간을 진행하지 않으면 오류 없이 계속 기다려서 실패했습니다(`No errors`). 수정 후에는 바로 `ConnectFailedException`이 나고, DISCONNECTED, `gatt.close()` 1회, `onDisconnected()` 1회를 확인합니다.
+      - 이전 gatt의 콜백: 현재 CONNECTED 연결이 유지됩니다(이번 수정이 다른 연결을 끊지 않는지 확인하는 테스트).
+    - 실기기 확인(Fold5 → S23): 실기기에서는 `discoverServices()`가 false를 반환하게 만들 수 없어서 정상 경로 회귀만 확인했습니다. connect → Device Name read → characteristic 목록(41개) → disconnect를 3회 반복했고 모두 정상이었습니다.
 - [x] **[버그] `stateRelay`가 serialized되어 있지 않음** — `impl/BleDeviceEngineImpl.kt:182`. 바인더 스레드, Rx 스레드, 앱 스레드에서 동시에 `accept`되어 Rx 규약을 위반합니다. `toSerialized()`를 적용하거나 단일 스레드로 처리합니다.
   - ✅ 해결 (`feature/serialize_state_transitions`)
     - 모든 상태 전환은 `setState()`를 거치고, 전환과 그 조건 확인(현재 상태 읽기 → 바꾸기)은 하나의 잠금(`stateLock`) 안에서 처리합니다. 관찰자는 상태를 한 번에 하나씩, 바뀐 순서대로 받습니다. 앞 브랜치의 `connectLock`도 이 잠금으로 합쳤습니다(잠금이 두 개면 잠그는 순서가 엇갈려 교착될 수 있음).
