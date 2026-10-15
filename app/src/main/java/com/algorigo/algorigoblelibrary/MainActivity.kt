@@ -7,9 +7,11 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.Toast
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.recyclerview.widget.RecyclerView
 import com.algorigo.algorigoble2.BleDevice
@@ -104,6 +106,7 @@ class MainActivity : RequestPermissionActivity() {
     private val socketDisposables = mutableMapOf<String, Disposable>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         Intent(this, BluetoothService::class.java).also {
             startService(it)
@@ -167,6 +170,7 @@ class MainActivity : RequestPermissionActivity() {
 
     private fun initView() {
         setContentView(R.layout.activity_main)
+        findViewById<View>(R.id.main).applySystemBarsPadding()
 
         macAddressEditText = findViewById(R.id.mac_address_edittext)
         macAddressButton = findViewById(R.id.mac_address_btn)

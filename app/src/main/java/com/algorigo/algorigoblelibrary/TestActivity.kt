@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.view.View
+import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.RecyclerView
 import com.algorigo.algorigoble2.BleDevice
@@ -54,8 +56,10 @@ class TestActivity : RequestPermissionActivity() {
     private var disposable: Disposable? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_test)
+        findViewById<View>(R.id.main).applySystemBarsPadding()
 
         findViewById<RecyclerView>(R.id.ble_device_recycler).adapter = bleDeviceAdapter
         findViewById<RecyclerView>(R.id.test_device_recycler).adapter = testDeviceAdapter
