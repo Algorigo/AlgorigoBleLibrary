@@ -271,7 +271,21 @@
   - CONNECTING 중에는 연결을 취소할 수 없고 로그만 남습니다. `State.DISCONNECTING`(42)은 정의만 되어 있고 사용되지 않습니다. SPP_CONNECTED 상태에서 호출해도 소켓을 닫지 않습니다.
   - 제안: 상태별로 처리합니다. CONNECTING이면 `disconnect()+close()`, SPP면 소켓을 닫습니다. 처리 중에는 DISCONNECTING 상태를 내보냅니다.
 
-- [ ] **[샘플앱] edge-to-edge 미대응으로 주요 UI가 시스템 바에 가려짐 (실기기)** — `app/src/main/res/layout/*.xml`, 각 Activity
+- [x] **[샘플앱] edge-to-edge 미대응으로 주요 UI가 시스템 바에 가려짐 (실기기)** — `app/src/main/res/layout/*.xml`, 각 Activity
+  - ✅ 해결 (`feature/sample_edge_to_edge`)
+    - `View.applySystemBarsPadding()`(`EdgeToEdgeExtension.kt`)을 추가했습니다. 시스템 바, 디스플레이 컷아웃, 키보드(IME) inset을 레이아웃 루트의 padding으로 적용합니다.
+    - 4개 Activity(Start, Main, Device, Test)에서 `enableEdgeToEdge()`를 호출하고 루트 뷰(`R.id.main`)에 위 함수를 적용했습니다. Android 15 미만에서도 같은 방식으로 동작하도록 `enableEdgeToEdge()`를 명시적으로 호출합니다. `activity_main.xml`, `activity_device.xml` 루트에 `android:id="@+id/main"`을 추가했고, `StartActivity`에서 쓰지 않던 import를 정리했습니다.
+    - 액션바 테마(`DarkActionBar`)는 그대로 둡니다. 실기기에서 확인해 보니 AppCompat이 루트 뷰에 넘겨주는 상단 inset은 상태바와 액션바를 합친 값(Fold5 커버 화면 기준 85 + 147 = 232px)이었습니다. 그래서 루트에 inset을 적용하는 것만으로 콘텐츠가 액션바 아래에서 시작합니다.
+    - 테스트: `app/src/androidTest/.../EdgeToEdgeLayoutTest`(3건, Start/Main/Device). 화면을 띄운 뒤 루트 아래 보이는 뷰가 상태바, 액션바, 내비게이션 바/키보드, 좌우 바 영역과 겹치지 않는지 검사합니다. 수정 전 코드에서도 컴파일되도록 루트는 `android.R.id.content`의 첫 자식으로 찾습니다.
+      - 수정 전(Fold5): 3건 모두 실패. 예: `mac_address_edittext [0,0][904,159] is covered by status bar/action bar`, `mac_address_btn ... covered by action bar`, `stop_btn [0,2190][904,2316] is covered by navigation bar`, `main_button [0,0][904,126] ...`, `result_text_view [0,0][904,39] ...`
+      - 수정 후(Fold5): 3건 모두 통과.
+      - 실행: `./gradlew :app:installDebug :app:installDebugAndroidTest` 후 `adb shell am instrument -w -e class com.algorigo.algorigoblelibrary.EdgeToEdgeLayoutTest com.algorigo.algorigoblelibrary.test/androidx.test.runner.AndroidJUnitRunner`. `./gradlew :app:connectedDebugAndroidTest`로도 실행할 수 있지만, 끝나면 샘플 앱을 삭제하므로 앱 권한과 데이터가 사라집니다.
+    - 실기기 확인(Fold5 커버 화면 904x2316, Android 16, 직접 터치로 조작):
+      - 시작 화면: MAIN/TEST 버튼이 액션바 아래(`y=232~`)에 나오고, **터치로 MAIN을 눌러 Main 화면으로 이동**했습니다(수정 전에는 키보드 포커스로만 가능했음).
+      - Main 화면: MAC 입력칸과 CONNECT DEVICE가 액션바 아래에, START/STOP SCAN이 내비게이션 바 위(`~2190`)에 표시됩니다. 키보드를 띄우면 START/STOP SCAN이 키보드 위(`y=1201~1453`)로 올라옵니다.
+      - Device 화면(가상 기기 연결 후 선택): 결과 표시줄이 액션바 바로 아래(`y=232~271`)에 보이고, READ 결과 `read complete : 0x00`을 화면에서 확인했습니다.
+      - Test 화면: 두 목록이 액션바와 내비게이션 바 사이(`232~2190`)에 배치됩니다.
+      - 펼친 화면(가로 방향, 컷아웃)은 원격으로 기기를 펼칠 수 없어서 확인하지 못했습니다. 좌우 inset과 컷아웃도 padding에 포함되도록 처리했습니다.
   - targetSdk 35에서는 Android 15 이상에서 edge-to-edge가 강제되는데, 레이아웃이 시스템 바 inset을 처리하지 않습니다.
   - 시작 화면: MAIN/TEST 버튼이 상태바와 액션바 뒤에 있어서 **터치로 누를 수 없습니다**. 실기기 테스트에서는 키보드 포커스로 우회했습니다.
   - Main 화면: MAC 입력칸과 CONNECT DEVICE는 상태바/액션바에, STOP SCAN은 내비게이션 바에 가려집니다.
