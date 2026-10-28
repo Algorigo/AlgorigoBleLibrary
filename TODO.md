@@ -839,7 +839,13 @@
       - 변경 전 `required="true"` → 변경 후 `required="false"`.
       - KDoc의 예시 세 줄(`uses-feature required="true"`, `BLUETOOTH_SCAN tools:remove`, `ACCESS_FINE_LOCATION tools:remove`)을 샘플 앱 manifest에 잠시 넣으면 `required="true"`, 플래그 없는 `BLUETOOTH_SCAN`, `maxSdkVersion` 없는 `ACCESS_FINE_LOCATION`으로 병합됐습니다(확인 후 되돌림).
       - 라이브러리/샘플 앱 lint 통과. (manifest 선언 변경이라 실기기 확인은 하지 않았습니다)
-- [ ] **[구조]** notification마다 로그 문자열(hex 변환, `device.name`)을 즉시 생성합니다. 고속 스트리밍에서 비용이 큽니다. 지연 평가로 바꾸거나 별도 verbose 레벨로 분리합니다.
+- [x] **[구조]** notification마다 로그 문자열(hex 변환, `device.name`)을 즉시 생성합니다. 고속 스트리밍에서 비용이 큽니다. 지연 평가로 바꾸거나 별도 verbose 레벨로 분리합니다.
+  - ✅ 해결 (`feature/lazy_notification_log`): 두 가지를 모두 했습니다.
+    - 지연 평가: `algorigo-logger`에는 메시지 람다 API가 없어서, 같은 logger의 레벨을 먼저 확인하고 남길 때만 메시지를 만드는 `logDebug`/`logVerbose`(internal inline, `logging/LazyLog.kt`)를 추가했습니다. `L.log`가 `java.util.logging.Logger.log`를 그대로 부르므로 남기는 결과는 같습니다. `BleDeviceEngineImpl`의 debug 로그 31곳을 바꿨습니다. 모두 로그 라벨(`bluetoothDevice.name`, Bluetooth 서비스 IPC)을 만들고, 일부는 hex 변환도 합니다.
+    - verbose 분리: notification 수신 로그(`onCharacteristicChanged`)는 매번 남으므로 VERBOSE로 내렸습니다.
+    - ⚠️ 동작 변화: 로그 레벨을 DEBUG로 둔 앱에서는 notification 수신 로그가 더 이상 보이지 않습니다(VERBOSE로 두면 보임).
+    - 테스트: `LazyLogTest`(2건: 로그가 꺼져 있으면 notification 100개에 기기 이름 조회 0번·로그 0건, DEBUG에서는 notification 로그가 없고 VERBOSE에서는 남음). 수정 전 코드로 실행하면 둘 다 실패합니다(이름 조회 100번, DEBUG에서 10번).
+    - 실기기 확인(Fold5, M446K에 연결한 상태에서 엔진의 notification 콜백을 20바이트 값으로 1만 번 호출, 로그 레벨 INFO): 수정 전 506.5µs → 수정 후 2.1µs(notification 하나당). 같은 기기에서 `BluetoothDevice.name` 한 번이 약 330µs여서, 수정 전 비용의 대부분이 이름 조회 IPC였습니다.
 - [ ] **[구조]** `getDevice(mac)`에서 `getRemoteDevice`는 대문자 MAC만 허용합니다. 입력을 정규화해야 합니다.
 - [ ] **[구조]** `clazz.newInstance()`(`impl/BleManagerEngineImpl.kt:148`)는 deprecated이고, 사용하는 앱이 R8을 쓰면 no-arg 생성자가 제거될 수 있습니다. factory 람다 방식으로 바꾸거나 consumer proguard rule을 추가합니다.
 - [ ] **[배포]** Gradle에서 deprecated된 `buildDir`, `archivesBaseName`을 교체합니다.
