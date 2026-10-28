@@ -9,7 +9,11 @@ import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.BluetoothSocket
+import android.bluetooth.BluetoothStatusCodes
 import android.content.Context
+import android.os.Build
+import androidx.annotation.ChecksSdkIntAtLeast
+import androidx.annotation.RequiresApi
 import com.algorigo.algorigoble2.BleCharacterisic
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleDeviceEngine
@@ -30,9 +34,15 @@ import java.util.*
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 
+/**
+ * @param sdkInt 값을 인자로 주고받는 GATT API(API 33+)를 쓸지 정하는 SDK 버전. 테스트에서 두 경로를 모두 확인할 수 있도록 주입한다.
+ */
 @SuppressLint("MissingPermission")
-internal class BleDeviceEngineImpl(private val context: Context, private val bluetoothDevice: BluetoothDevice):
-    BleDeviceEngine() {
+internal class BleDeviceEngineImpl(
+    private val context: Context,
+    private val bluetoothDevice: BluetoothDevice,
+    private val sdkInt: Int = Build.VERSION.SDK_INT,
+) : BleDeviceEngine() {
 
     class CommunicationFailedException: Exception()
     class IllegalCharacteristicProperty(val property: Int, val type: String): Exception()
@@ -55,6 +65,7 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
         WRITE_DESCRIPTOR,
     }
 
+    // 쓰기 응답은 값을 담지 않는다. (쓴 값은 요청한 쪽이 알고 있고, characteristic.value 는 다른 콜백이 덮어쓸 수 있다)
     private data class ReplyData(val type: Type, val uuid: UUID, val byteArray: ByteArray, val status: Int) {
         /** 콜백 status 가 실패이면 값 대신 [BleManager.GattOperationFailedException]을 던진다. */
         fun valueOrThrow(): ByteArray {
@@ -156,17 +167,34 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
             }
         }
 
+        // API 33 이상에서는 값을 인자로 받는 콜백이 호출된다. 공유된 characteristic.value / descriptor.value 를 읽지 않으므로
+        // 그 사이에 들어온 다른 콜백(notification 등)이 값을 덮어써도 영향이 없다.
+        // super 를 호출하지 않는다. 기본 구현이 아래의 deprecated 콜백을 다시 호출해서 이벤트가 두 번 전달된다.
+        override fun onCharacteristicRead(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            value: ByteArray,
+            status: Int
+        ) {
+            handleCharacteristicRead(gatt, characteristic, value, status)
+        }
+
+        @Deprecated("API 32 이하에서만 호출된다")
         override fun onCharacteristicRead(
             gatt: BluetoothGatt?,
             characteristic: BluetoothGattCharacteristic?,
             status: Int
         ) {
-            super.onCharacteristicRead(gatt, characteristic, status)
-            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onCharacteristicRead:$status, ${characteristic?.uuid}:${characteristic?.value?.toHexString()}")
-            characteristic?.let {
-                gattRequestPendingRelay.accept(false)
-                replyRelay.accept(ReplyData(Type.READ_CHARACTERISTIC, it.uuid, it.value ?: byteArrayOf(), status))
+            if (usesValueGattApi()) {
+                return
             }
+            characteristic?.let { handleCharacteristicRead(gatt, it, it.value ?: byteArrayOf(), status) }
+        }
+
+        private fun handleCharacteristicRead(gatt: BluetoothGatt?, characteristic: BluetoothGattCharacteristic, value: ByteArray, status: Int) {
+            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onCharacteristicRead:$status, ${characteristic.uuid}:${value.toHexString()}")
+            gattRequestPendingRelay.accept(false)
+            replyRelay.accept(ReplyData(Type.READ_CHARACTERISTIC, characteristic.uuid, value, status))
         }
 
         override fun onCharacteristicWrite(
@@ -175,35 +203,63 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
             status: Int
         ) {
             super.onCharacteristicWrite(gatt, characteristic, status)
-            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onCharacteristicWrite:$status, ${characteristic?.uuid}:${characteristic?.value?.toHexString()}")
+            // characteristic.value 는 쓴 값이 아닐 수 있으므로(API 33+ 에서는 갱신되지 않고, 그 전에는 notification 이 덮어씀) 남기지 않는다
+            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onCharacteristicWrite:$status, ${characteristic?.uuid}")
             characteristic?.let {
                 gattRequestPendingRelay.accept(false)
-                replyRelay.accept(ReplyData(Type.WRITE_CHARACTERISTIC, it.uuid, it.value ?: byteArrayOf(), status))
+                replyRelay.accept(ReplyData(Type.WRITE_CHARACTERISTIC, it.uuid, byteArrayOf(), status))
             }
         }
 
         override fun onCharacteristicChanged(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            value: ByteArray
+        ) {
+            handleCharacteristicChanged(gatt, characteristic, value)
+        }
+
+        @Deprecated("API 32 이하에서만 호출된다")
+        override fun onCharacteristicChanged(
             gatt: BluetoothGatt?,
             characteristic: BluetoothGattCharacteristic?
         ) {
-            super.onCharacteristicChanged(gatt, characteristic)
-            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onCharacteristicChanged:${characteristic?.uuid}:${characteristic?.value?.toHexString()}")
-            characteristic?.let {
-                notificationRelay.accept(Pair(it.uuid, it.value))
+            if (usesValueGattApi()) {
+                return
             }
+            characteristic?.let { handleCharacteristicChanged(gatt, it, it.value ?: byteArrayOf()) }
         }
 
+        private fun handleCharacteristicChanged(gatt: BluetoothGatt?, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
+            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onCharacteristicChanged:${characteristic.uuid}:${value.toHexString()}")
+            notificationRelay.accept(Pair(characteristic.uuid, value))
+        }
+
+        override fun onDescriptorRead(
+            gatt: BluetoothGatt,
+            descriptor: BluetoothGattDescriptor,
+            status: Int,
+            value: ByteArray
+        ) {
+            handleDescriptorRead(gatt, descriptor, value, status)
+        }
+
+        @Deprecated("API 32 이하에서만 호출된다")
         override fun onDescriptorRead(
             gatt: BluetoothGatt?,
             descriptor: BluetoothGattDescriptor?,
             status: Int
         ) {
-            super.onDescriptorRead(gatt, descriptor, status)
-            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onDescriptorRead:${descriptor?.characteristic?.uuid}:${descriptor?.value?.toHexString()}")
-            descriptor?.let {
-                gattRequestPendingRelay.accept(false)
-                replyRelay.accept(ReplyData(Type.READ_DESCRIPTOR, it.characteristic.uuid, it.value ?: byteArrayOf(), status))
+            if (usesValueGattApi()) {
+                return
             }
+            descriptor?.let { handleDescriptorRead(gatt, it, it.value ?: byteArrayOf(), status) }
+        }
+
+        private fun handleDescriptorRead(gatt: BluetoothGatt?, descriptor: BluetoothGattDescriptor, value: ByteArray, status: Int) {
+            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onDescriptorRead:${descriptor.characteristic?.uuid}:${value.toHexString()}")
+            gattRequestPendingRelay.accept(false)
+            replyRelay.accept(ReplyData(Type.READ_DESCRIPTOR, descriptor.characteristic.uuid, value, status))
         }
 
         override fun onDescriptorWrite(
@@ -212,10 +268,10 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
             status: Int
         ) {
             super.onDescriptorWrite(gatt, descriptor, status)
-            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onDescriptorWrite:${descriptor?.characteristic?.uuid}:${descriptor?.value?.toHexString()}")
+            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onDescriptorWrite:$status, ${descriptor?.characteristic?.uuid}")
             descriptor?.let {
                 gattRequestPendingRelay.accept(false)
-                replyRelay.accept(ReplyData(Type.WRITE_DESCRIPTOR, it.characteristic.uuid, it.value ?: byteArrayOf(), status))
+                replyRelay.accept(ReplyData(Type.WRITE_DESCRIPTOR, it.characteristic.uuid, byteArrayOf(), status))
             }
         }
 
@@ -504,14 +560,21 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                             // write-no-response 도 onCharacteristicWrite 가 와야 BluetoothGatt 가 다음 작업을 받으므로 응답을 기다린다
                             replyRelay
                                 .mergeWith(Completable.fromCallable {
-                                    // writeType 을 매번 지정한다. 지정하지 않으면 Android 는 WRITE NO RESPONSE 속성이 있는 characteristic 을 응답 없이 쓴다
-                                    characteristic.writeType = gattWriteType
-                                    characteristic.value = byteArray
                                     L.debug(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : writeCharacteristic : $characteristicUuid : ${byteArray.toHexString()} : $writeType")
-                                    sendGattRequest { gatt.writeCharacteristic(characteristic) }
+                                    sendGattRequest {
+                                        if (usesValueGattApi()) {
+                                            // 값과 쓰기 타입을 인자로 넘기므로, 같은 characteristic 으로 들어온 notification 이 쓰려던 값을 덮어쓰지 못한다
+                                            gatt.writeCharacteristic(characteristic, byteArray, gattWriteType).isGattRequestAccepted("writeCharacteristic")
+                                        } else {
+                                            // writeType 을 매번 지정한다. 지정하지 않으면 Android 는 WRITE NO RESPONSE 속성이 있는 characteristic 을 응답 없이 쓴다
+                                            characteristic.writeType = gattWriteType
+                                            characteristic.value = byteArray
+                                            gatt.writeCharacteristic(characteristic)
+                                        }
+                                    }
                                 })
                                 .filter { it.uuid == characteristicUuid && it.type == Type.WRITE_CHARACTERISTIC }
-                                .map { it.valueOrThrow() }
+                                .map { it.valueOrThrow(); byteArray }
                                 .firstOrError()
                         }
                     }
@@ -632,12 +695,18 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                 replyRelay
                     .doOnSubscribe {
                         val descriptor = characteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG_UUID)
-                        descriptor.value = byteArray
                         L.debug(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : writeDescriptor : ${characteristic.uuid} : ${byteArray.toHexString()}")
-                        sendGattRequest { gatt.writeDescriptor(descriptor) }
+                        sendGattRequest {
+                            if (usesValueGattApi()) {
+                                gatt.writeDescriptor(descriptor, byteArray).isGattRequestAccepted("writeDescriptor")
+                            } else {
+                                descriptor.value = byteArray
+                                gatt.writeDescriptor(descriptor)
+                            }
+                        }
                     }
                     .filter { it.uuid == characteristic.uuid && it.type == Type.WRITE_DESCRIPTOR }
-                    .map { it.valueOrThrow() }
+                    .map { it.valueOrThrow(); byteArray }
                     .firstOrError()
                     .retryOnCommunicationFailure()
             }
@@ -720,6 +789,24 @@ internal class BleDeviceEngineImpl(private val context: Context, private val blu
                     }
             }
         }
+    }
+
+    /**
+     * API 33 부터 쓰기 값을 인자로 넘기고, 콜백도 값을 인자로 받는다. (`characteristic.value`/`descriptor.value` 와 그 setter 는 deprecated)
+     * 공유된 value 필드는 notification 등 다른 콜백이 덮어쓸 수 있으므로, 쓸 수 있으면 새 API 를 쓴다.
+     */
+    @ChecksSdkIntAtLeast(api = Build.VERSION_CODES.TIRAMISU)
+    private fun usesValueGattApi() = sdkInt >= Build.VERSION_CODES.TIRAMISU
+
+    /** API 33 이상의 GATT 쓰기 호출은 Boolean 대신 BluetoothStatusCodes 를 반환한다. 거절 사유를 남기고 성공 여부로 바꾼다. */
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    private fun Int.isGattRequestAccepted(operation: String): Boolean {
+        if (this != BluetoothStatusCodes.SUCCESS) {
+            // ERROR_GATT_WRITE_REQUEST_BUSY(201) 는 이전 요청이 아직 처리 중이라는 뜻이며, 다른 거절과 같이 재시도한다
+            L.warning(Ble.Device.Default, "${bluetoothDevice.name}(${bluetoothDevice.address}) : $operation rejected : $this")
+            return false
+        }
+        return true
     }
 
     /** GATT 요청을 보내고 콜백이 올 때까지 처리 중으로 표시한다. 요청이 거절되면(busy 등) [CommunicationFailedException]. */
