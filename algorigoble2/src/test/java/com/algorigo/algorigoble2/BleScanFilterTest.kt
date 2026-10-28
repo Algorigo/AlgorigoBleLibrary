@@ -51,6 +51,26 @@ class BleScanFilterTest {
     }
 
     @Test
+    fun rssiThreshold_filtersWeakResults() {
+        val filter = BleScanFilter.Builder().setRssiThreshold(-60).build()
+        val device = mockk<android.bluetooth.BluetoothDevice>(relaxed = true)
+
+        assertEquals(false, filter.isOk(device, -70, null))
+        assertEquals(true, filter.isOk(device, -60, null))
+        assertEquals(true, BleScanFilter.Builder().build().isOk(device, -100, null))
+    }
+
+    // 가상 기기는 스캔 결과에 합칠 때 이름과 주소로 필터를 적용한다
+    @Test
+    fun nameAndAddress_matchVirtualDevices() {
+        val byName = BleScanFilter.Builder().setDeviceName("Sensor").build()
+
+        assertEquals(true, byName.isOk("Sensor", "12:34:56:78:90:AA"))
+        assertEquals(false, byName.isOk("Other", "12:34:56:78:90:AA"))
+        assertEquals(true, BleScanFilter.Builder().build().isOk(null, "12:34:56:78:90:AA"))
+    }
+
+    @Test
     fun validMasks_areStored() {
         val filter = BleScanFilter.Builder()
             .setServiceUuid(uuid, mask)

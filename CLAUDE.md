@@ -15,12 +15,15 @@ Android BLE library built on RxJava3 (`com.algorigo.rx:algorigoble2`), published
 ./gradlew :algorigoble2:assembleRelease           # build the AAR
 ./gradlew :app:installDebug                       # install the sample app on a connected device
 ./gradlew :algorigoble2:testDebugUnitTest         # JVM unit tests
-./gradlew :algorigoble2:testDebugUnitTest --tests "com.algorigo.algorigoble2.ExampleUnitTest"   # single test
+./gradlew :algorigoble2:testDebugUnitTest --tests "*BleDeviceEngineImplConnectTest"   # single test class
 ./gradlew :algorigoble2:connectedDebugAndroidTest # instrumented tests (device required)
 ./gradlew lint
 ```
 
-Only placeholder example tests exist; BLE behavior is effectively verified through the `app` module on hardware (or via virtual devices, see below).
+### Tests
+- JVM unit tests (`algorigoble2/src/test`, MockK + `unitTests.returnDefaultValues`, so `Build.VERSION.SDK_INT` is 0): engine behavior is driven through `impl/GattTestFixture` (mock `BluetoothDevice`/`BluetoothGatt`, captured `BluetoothGattCallback`, `sdkInt` injection for API-33 paths) and `testutil/RxTestSchedulerRule` (computation → `TestScheduler`, io → trampoline). `virtual/VirtualDeviceIntegrationTest` exercises `BleManager` + `VirtualDevice` end to end. Create objects that grab schedulers at construction (e.g. `VirtualDevice`) after the rule has started (`@Before`).
+- Instrumented tests (`src/androidTest`, device required): Android framework builders that are stubs on the JVM (`BleScanOptionsConverterInstrumentedTest`) and logging/kotlin-reflect runtime checks. The sample app has its own instrumented tests (`app/src/androidTest`).
+- Real BLE behavior still needs hardware; verify fixes with the `app` module or temporary probes on a phone.
 
 ### Build configuration gotchas
 - The library version is set in `algorigoble2/build.gradle` (`versionStr`). On any branch whose name doesn't contain `master`, the version becomes `<versionStr>-<user.name>-SNAPSHOT` and the publishing block references `NEXUS_SNAPSHOT_REPOSITORY_URL` / `nexusUsername` / `nexusPassword`. These come from `~/.gradle/gradle.properties` (CI downloads it); without them Gradle configuration fails on non-master branches.
