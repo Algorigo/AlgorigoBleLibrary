@@ -7,6 +7,7 @@ import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Flowable
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Single
+import io.reactivex.rxjava3.disposables.Disposable
 import io.reactivex.rxjava3.observers.DisposableCompletableObserver
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -278,13 +279,15 @@ open class BleDevice {
         return timeoutMillis
     }
 
-    fun connect() {
-        connectCompletable().subscribe({
-            L.info(Ble.Device, "connected")
-        }, {
-            L.error(Ble.Device, "conntection fail", it)
-        })
-    }
+    /**
+     * 기본 timeout 으로 연결을 시작하고 결과는 로그로만 남긴다. 결과를 받으려면 [connectCompletable]을 쓴다.
+     * 돌려준 Disposable 을 해제하면 진행 중인 연결을 취소한다. (연결된 뒤에 해제해도 연결은 유지된다)
+     */
+    fun connect(): Disposable = connectCompletable().subscribe({
+        L.info(Ble.Device, "$this : connected")
+    }, {
+        L.error(Ble.Device, "$this : connection failed", it)
+    })
 
     /** 연결을 끊는다. 자동 재연결([autoReconnect])도 멈춘다. */
     fun disconnect() {
