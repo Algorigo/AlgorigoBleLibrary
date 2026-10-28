@@ -1,7 +1,7 @@
 package com.algorigo.algorigoblelibrary
 
 import android.util.Log
-import com.algorigo.algorigoble2.BleCharacterisic
+import com.algorigo.algorigoble2.BleCharacteristic
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.virtual.VirtualDevice
 import com.algorigo.library.toByteArray
@@ -23,9 +23,9 @@ class VirtualBleDevice : VirtualDevice("12:34:56:78:90:ab", "Virtual Device") {
 
     private var byteArray: ByteArray = byteArrayOf(0x00.toByte())
 
-    override fun getCharacteristicsSingle(): Single<List<BleCharacterisic>> {
+    override fun getCharacteristicsSingle(): Single<List<BleCharacteristic>> {
         return Single.just(listOf(
-            object : BleCharacterisic() {
+            object : BleCharacteristic() {
                 override val uuid = CHARACTERISTIC_UUID
                 override fun isReadable() = true
                 override fun isWritable() = true

@@ -1,6 +1,6 @@
 package com.algorigo.algorigoble2.virtual
 
-import com.algorigo.algorigoble2.BleCharacterisic
+import com.algorigo.algorigoble2.BleCharacteristic
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleManager
 import com.algorigo.algorigoble2.InitializableBleDevice
@@ -16,7 +16,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 internal class TestVirtualDevice : VirtualDevice("12:34:56:78:90:AB", "Virtual") {
-    override fun getCharacteristicsSingle(): Single<List<BleCharacterisic>> = Single.just(listOf())
+    override fun getCharacteristicsSingle(): Single<List<BleCharacteristic>> = Single.just(listOf())
     override fun readCharacteristicSingle(characteristicUuid: UUID): Single<ByteArray> = Single.just(byteArrayOf())
     override fun writeCharacteristicSingle(characteristicUuid: UUID, byteArray: ByteArray): Single<ByteArray> = Single.just(byteArray)
     override fun onNotificationStarted(type: BleDevice.NotificationType, characteristicUuid: UUID) {}

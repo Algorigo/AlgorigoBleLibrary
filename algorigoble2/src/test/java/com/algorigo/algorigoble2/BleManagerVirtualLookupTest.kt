@@ -28,7 +28,7 @@ class BleManagerVirtualLookupTest {
     val rxRule = RxTestSchedulerRule()
 
     private class Virtual(address: String) : VirtualDevice(address, "Virtual") {
-        override fun getCharacteristicsSingle(): Single<List<BleCharacterisic>> = Single.just(listOf())
+        override fun getCharacteristicsSingle(): Single<List<BleCharacteristic>> = Single.just(listOf())
         override fun readCharacteristicSingle(characteristicUuid: UUID): Single<ByteArray> = Single.just(byteArrayOf())
         override fun writeCharacteristicSingle(characteristicUuid: UUID, byteArray: ByteArray): Single<ByteArray> = Single.just(byteArray)
         override fun onNotificationStarted(type: BleDevice.NotificationType, characteristicUuid: UUID) {}

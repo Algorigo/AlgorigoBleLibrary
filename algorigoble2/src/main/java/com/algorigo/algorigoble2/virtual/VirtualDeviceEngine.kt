@@ -1,6 +1,6 @@
 package com.algorigo.algorigoble2.virtual
 
-import com.algorigo.algorigoble2.BleCharacterisic
+import com.algorigo.algorigoble2.BleCharacteristic
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleDeviceEngine
 import com.algorigo.algorigoble2.BleManager
@@ -72,7 +72,7 @@ internal class VirtualDeviceEngine(private val virtualDevice: VirtualDevice) : B
         }
     }
 
-    override fun getCharacteristicsSingle(): Single<List<BleCharacterisic>> {
+    override fun getCharacteristicsSingle(): Single<List<BleCharacteristic>> {
         return virtualDevice.getCharacteristicsSingle()
     }
 

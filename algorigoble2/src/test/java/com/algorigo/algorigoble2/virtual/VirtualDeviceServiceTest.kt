@@ -1,7 +1,7 @@
 package com.algorigo.algorigoble2.virtual
 
 import android.bluetooth.BluetoothGattCharacteristic
-import com.algorigo.algorigoble2.BleCharacterisic
+import com.algorigo.algorigoble2.BleCharacteristic
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleManager
 import com.algorigo.algorigoble2.testutil.RxTestSchedulerRule
@@ -21,14 +21,14 @@ class VirtualDeviceServiceTest {
     private lateinit var bleDevice: BleDevice
 
     // 기존 가상 characteristic 처럼 새 항목을 override 하지 않은 것
-    private val plain = object : BleCharacterisic() {
+    private val plain = object : BleCharacteristic() {
         override val uuid: UUID = PLAIN_UUID
         override fun isReadable() = true
         override fun isWritable() = false
         override fun isNotifyAvailable() = true
     }
 
-    private val inService = object : BleCharacterisic() {
+    private val inService = object : BleCharacteristic() {
         override val uuid: UUID = IN_SERVICE_UUID
         override fun isReadable() = false
         override fun isWritable() = true
@@ -39,7 +39,7 @@ class VirtualDeviceServiceTest {
     @Before
     fun setUp() {
         val virtualDevice = object : VirtualDevice("AA:BB:CC:DD:EE:03", "Virtual") {
-            override fun getCharacteristicsSingle(): Single<List<BleCharacterisic>> = Single.just(listOf(plain, inService))
+            override fun getCharacteristicsSingle(): Single<List<BleCharacteristic>> = Single.just(listOf(plain, inService))
             override fun readCharacteristicSingle(characteristicUuid: UUID): Single<ByteArray> = Single.just(byteArrayOf())
             override fun writeCharacteristicSingle(characteristicUuid: UUID, byteArray: ByteArray): Single<ByteArray> = Single.just(byteArray)
             override fun onNotificationStarted(type: BleDevice.NotificationType, characteristicUuid: UUID) {}
