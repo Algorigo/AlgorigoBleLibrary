@@ -136,8 +136,23 @@ open class BleDevice {
     private var reconnectTimeoutMillis: Long? = null
     private var reconnectTask: DisposableCompletableObserver? = null
 
-    fun bondCompletable() = engine.bondCompletable().deliverToCallback()
-    fun unbondCompletable() = engine.unbondCompletable().deliverToCallback()
+    /**
+     * 기기와 본딩(페어링)한다. 이미 본딩돼 있으면 바로 완료한다.
+     * 사용자가 시스템 페어링 화면에서 확인해야 할 수 있으므로 [timeoutMillis]를 넉넉하게 준다. (시간이 지나도 시스템의 페어링 과정은 계속될 수 있다)
+     * 거절, 취소, 기기 응답 없음 등으로 실패하면 [BleManager.BondFailedException], 시간 안에 끝나지 않으면 [BleManager.OperationTimeoutException]("BOND").
+     */
+    @JvmOverloads
+    fun bondCompletable(timeoutMillis: Long = DEFAULT_BOND_TIMEOUT_MILLIS): Completable =
+        engine.bondCompletable(timeoutMillis).deliverToCallback()
+
+    /**
+     * 본딩을 해제한다. 본딩돼 있지 않으면 바로 완료한다.
+     * Android 에 공개 API 가 없어 숨겨진 BluetoothDevice.removeBond() 를 리플렉션으로 부른다. 막힌 기기에서는 [BleManager.BondFailedException].
+     * 시간 안에 끝나지 않으면 [BleManager.OperationTimeoutException]("UNBOND").
+     */
+    @JvmOverloads
+    fun unbondCompletable(timeoutMillis: Long = DEFAULT_BOND_TIMEOUT_MILLIS): Completable =
+        engine.unbondCompletable(timeoutMillis).deliverToCallback()
 
     /** 상태를 바꾼 스레드에서 바로 전달되는 상태 스트림. 라이브러리 내부에서만 쓴다. */
     internal open fun connectionStateObservableInternal(): Observable<ConnectionState> = engine.getConnectionStateObservable()
@@ -415,6 +430,7 @@ open class BleDevice {
     companion object {
         const val DEFAULT_OPERATION_TIMEOUT_MILLIS = 10_000L
         const val DEFAULT_CONNECT_RETRY_DELAY_MILLIS = 1_000L
+        const val DEFAULT_BOND_TIMEOUT_MILLIS = 60_000L
 
         // GATT_ILLEGAL_PARAMETER. Android 가 연결 요청 자체를 받지 않은 경우 (예: autoConnect 로 본딩하지 않은 RPA 기기에 연결)
         private const val GATT_ILLEGAL_PARAMETER = 0x87
