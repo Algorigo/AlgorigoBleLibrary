@@ -7,7 +7,7 @@ import java.util.*
  * 연결된 기기의 characteristic. 가상 기기는 이 클래스를 상속해서 만든다.
  * ([serviceUuid], [properties], [descriptorUuids]는 기본값이 있으므로 가상 기기에서 필요할 때만 override 한다)
  */
-abstract class BleCharacterisic {
+abstract class BleCharacteristic {
 
     abstract val uuid: UUID
 
@@ -35,3 +35,7 @@ abstract class BleCharacterisic {
     override fun toString(): String =
         "BleCharacteristic($uuid, service $serviceUuid, properties 0x${Integer.toHexString(properties)}, descriptors $descriptorUuids)"
 }
+
+/** 이전 이름(오타). [BleCharacteristic]을 쓴다. */
+@Deprecated("Renamed to BleCharacteristic", ReplaceWith("BleCharacteristic", "com.algorigo.algorigoble2.BleCharacteristic"))
+typealias BleCharacterisic = BleCharacteristic

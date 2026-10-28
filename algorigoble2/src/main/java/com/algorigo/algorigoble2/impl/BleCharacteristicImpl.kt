@@ -1,10 +1,10 @@
 package com.algorigo.algorigoble2.impl
 
 import android.bluetooth.BluetoothGattCharacteristic
-import com.algorigo.algorigoble2.BleCharacterisic
+import com.algorigo.algorigoble2.BleCharacteristic
 import java.util.*
 
-internal class BleCharacteristicImpl(private val bluetoothGattCharacteristic: BluetoothGattCharacteristic) : BleCharacterisic() {
+internal class BleCharacteristicImpl(private val bluetoothGattCharacteristic: BluetoothGattCharacteristic) : BleCharacteristic() {
     override val uuid: UUID
         get() = bluetoothGattCharacteristic.uuid
 

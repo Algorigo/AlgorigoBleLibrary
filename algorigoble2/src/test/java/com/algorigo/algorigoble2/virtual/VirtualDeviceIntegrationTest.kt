@@ -8,7 +8,7 @@ import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.location.LocationManager
-import com.algorigo.algorigoble2.BleCharacterisic
+import com.algorigo.algorigoble2.BleCharacteristic
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleManager
 import com.algorigo.algorigoble2.BleScanFilter
@@ -44,7 +44,7 @@ class VirtualDeviceIntegrationTest {
         var value = byteArrayOf(0)
         val notifying = mutableSetOf<UUID>()
 
-        override fun getCharacteristicsSingle(): Single<List<BleCharacterisic>> = Single.just(listOf(object : BleCharacterisic() {
+        override fun getCharacteristicsSingle(): Single<List<BleCharacteristic>> = Single.just(listOf(object : BleCharacteristic() {
             override val uuid = CHARACTERISTIC
             override fun isReadable() = true
             override fun isWritable() = true

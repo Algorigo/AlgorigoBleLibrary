@@ -788,7 +788,11 @@
   - ✅ 해결 (`feature/internal_helpers`): 세 가지를 `internal`로 바꿨습니다. 같은 이유로 엔진만 쓰는 `extension.Context.locationManager`와 `rx_util.RxBroadcastReceiver`도 `internal`로 바꿨습니다. `rx_util.collectListLastSortedIndex`는 범용 유틸로 공개해 둔 것이라(P2에서 버그를 고침) 그대로 두었습니다.
     - ⚠️ 공개 API 축소: 사용하는 앱이 이 함수들을 import 해서 쓰고 있었다면 컴파일되지 않습니다. `characteristic`은 `BleCharacterisic` 타입으로 받으므로 `BleCharacteristicImpl`을 직접 쓸 일은 없습니다.
     - 확인: 샘플 앱 모듈에 다섯 가지를 쓰는 임시 파일을 넣고 컴파일하면 모두 `Cannot access ...: it is internal`로 실패했습니다(확인 후 지움). 이때 `byteArrayOf(1).toHexString()`은 라이브러리 함수 대신 표준 라이브러리의 실험 API(`@ExperimentalStdlibApi`)로 해석되어, 두 함수가 이름으로 충돌하던 것을 확인했습니다. 라이브러리 빌드, 단위 테스트 통과. (동작 변화가 없어 실기기 확인은 하지 않았습니다)
-- [ ] **[구조]** `BleCharacterisic` 오타: 올바른 이름의 타입을 추가하고 기존 이름은 `@Deprecated typealias`로 남겨서 호환성을 유지합니다.
+- [x] **[구조]** `BleCharacterisic` 오타: 올바른 이름의 타입을 추가하고 기존 이름은 `@Deprecated typealias`로 남겨서 호환성을 유지합니다.
+  - ✅ 해결 (`feature/rename_ble_characteristic`): 클래스 이름을 `BleCharacteristic`으로 바꾸고, `BleCharacterisic`은 `@Deprecated(ReplaceWith("BleCharacteristic")) typealias`로 남겼습니다. 라이브러리, 테스트, 샘플 앱은 새 이름을 씁니다.
+    - Kotlin 소스 호환: 샘플 앱을 옛 이름 그대로 두고 컴파일하면 `import`, 상속(`object : BleCharacterisic()`), `override fun getCharacteristicsSingle(): Single<List<BleCharacterisic>>` 모두 deprecated 경고만 나고 컴파일됐습니다. typealias는 같은 타입이라 override 반환 타입도 그대로 맞습니다. (새 이름으로 옮긴 뒤에는 경고 없음)
+    - ⚠️ 바이너리/Java 호환 아님: JVM 클래스 이름이 바뀌므로 사용하는 앱은 다시 컴파일해야 하고, typealias는 Java에서 보이지 않으므로 Java 코드는 새 이름으로 바꿔야 합니다.
+    - 확인: 라이브러리 빌드, 샘플 앱 컴파일, 단위 테스트 통과. (이름 변경이라 실기기 확인은 하지 않았습니다)
 - [ ] **[구조]** 죽은 코드 제거:
   - 코드: `BleManager.Engine` enum(RX_ANDROID_BLE 흔적), `BleScanFilter.isOk`의 LOLLIPOP 분기, `@RequiresApi(LOLLIPOP/M)`, `BleManagerEngineImpl`의 pre-N 분기(minSdk 24), 미사용 `ConnectionStateData`, `Ble.*.Rx`/`Provisioning` Tag, 미사용 `TAG`/`LOG_TAG`
   - 빌드: 미사용 `gson`/`rxkotlin`/`rxandroid` 의존성(현재 POM에 runtime 의존성으로 배포됨), 미사용 `jreleaser` 플러그인, CI의 android-29 system image 설치

@@ -1,6 +1,6 @@
 package com.algorigo.algorigoble2.virtual
 
-import com.algorigo.algorigoble2.BleCharacterisic
+import com.algorigo.algorigoble2.BleCharacteristic
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleManager
 import com.algorigo.algorigoble2.BleService
@@ -115,11 +115,11 @@ abstract class VirtualDevice(
     open fun writeDescriptorSingle(characteristicUuid: UUID, descriptorUuid: UUID, byteArray: ByteArray): Single<ByteArray> =
         Single.error(BleManager.DescriptorNotFoundException(characteristicUuid, descriptorUuid))
 
-    abstract fun getCharacteristicsSingle(): Single<List<BleCharacterisic>>
+    abstract fun getCharacteristicsSingle(): Single<List<BleCharacteristic>>
 
     /**
      * 연결된 동안 [BleDevice.getServicesSingle]이 부른다. 기본은 [getCharacteristicsSingle]의 characteristic 을
-     * [BleCharacterisic.serviceUuid]로 묶은 primary 서비스들이고, serviceUuid 가 없는 characteristic 은 [UNKNOWN_SERVICE_UUID] 서비스로 묶는다.
+     * [BleCharacteristic.serviceUuid]로 묶은 primary 서비스들이고, serviceUuid 가 없는 characteristic 은 [UNKNOWN_SERVICE_UUID] 서비스로 묶는다.
      */
     open fun getServicesSingle(): Single<List<BleService>> = getCharacteristicsSingle()
         .map { characteristics ->

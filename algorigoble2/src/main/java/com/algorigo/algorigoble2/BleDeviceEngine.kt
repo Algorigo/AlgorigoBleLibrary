@@ -25,7 +25,7 @@ internal abstract class BleDeviceEngine() {
 
     abstract fun disconnect()
 
-    abstract fun getCharacteristicsSingle(): Single<List<BleCharacterisic>>
+    abstract fun getCharacteristicsSingle(): Single<List<BleCharacteristic>>
     abstract fun getServicesSingle(): Single<List<BleService>>
 
     // serviceUuid 가 null 이면 모든 서비스에서 처음 찾은 characteristic 을 쓴다

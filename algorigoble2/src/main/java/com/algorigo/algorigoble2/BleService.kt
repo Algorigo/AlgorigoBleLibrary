@@ -9,5 +9,5 @@ import java.util.UUID
 data class BleService(
     val uuid: UUID,
     val isPrimary: Boolean,
-    val characteristics: List<BleCharacterisic>,
+    val characteristics: List<BleCharacteristic>,
 )

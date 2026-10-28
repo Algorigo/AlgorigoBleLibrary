@@ -14,7 +14,7 @@ import android.os.Build
 import androidx.annotation.ChecksSdkIntAtLeast
 import androidx.annotation.Keep
 import androidx.annotation.RequiresApi
-import com.algorigo.algorigoble2.BleCharacterisic
+import com.algorigo.algorigoble2.BleCharacteristic
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleDeviceEngine
 import com.algorigo.algorigoble2.BleManager
@@ -557,12 +557,12 @@ internal class BleDeviceEngineImpl(
         }
     }
 
-    override fun getCharacteristicsSingle(): Single<List<BleCharacterisic>> {
+    override fun getCharacteristicsSingle(): Single<List<BleCharacteristic>> {
         return getServices()
             .map { services ->
                 services.map { it.characteristics }.flatten()
             }
-            .map<List<BleCharacterisic>> {
+            .map<List<BleCharacteristic>> {
                 it.map { BleCharacteristicImpl(it) }
             }
             .guardOperation(OPERATION_GET_CHARACTERISTICS)
