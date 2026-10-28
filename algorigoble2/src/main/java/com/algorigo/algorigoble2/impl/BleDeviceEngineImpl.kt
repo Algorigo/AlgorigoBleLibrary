@@ -7,6 +7,7 @@ import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattService
+import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.BluetoothSocket
 import android.bluetooth.BluetoothStatusCodes
@@ -771,12 +772,16 @@ internal class BleDeviceEngineImpl(
         var socket: BleSppSocket? = null
         Observable.create<BleSppSocket> { emitter ->
             BlePermissions.checkConnect(context, sdkInt)
-            val aUuid = uuid ?: bluetoothDevice.uuids.first().uuid
+            val aUuid = uuid ?: defaultSppUuid()
             // 연결 중에 disconnect() 가 불리면 소켓을 닫아 connect() 를 중단할 수 있도록 상태에 소켓을 담는다
             val state = startConnecting { State.SPP_CONNECTING(bluetoothDevice.createRfcommSocketToServiceRecord(aUuid)) }
             connecting = state
-            BleSppSocket(state.socket).also { theSocket ->
+            BleSppSocket.unconnected(state.socket).also { theSocket ->
+                // 연결에 실패해도 doFinally 에서 소켓을 닫을 수 있도록 먼저 담는다
                 socket = theSocket
+                // 기기 검색이 진행 중이면 연결이 느려지거나 실패하므로 먼저 멈춘다
+                cancelDiscovery()
+                theSocket.connect()
                 setState(State.SPP_CONNECTED(theSocket))
                 // disconnect() 로 SPP 연결이 끊기면 스트림을 끝낸다
                 emitter.setDisposable(stateRelay.filter { it !is State.SPP_CONNECTED }.firstElement()
@@ -796,6 +801,28 @@ internal class BleDeviceEngineImpl(
                 socket?.close()
             }
             .subscribeOn(Schedulers.io())
+    }
+
+    /**
+     * uuid 를 지정하지 않았을 때 쓸 RFCOMM 서비스 UUID. 기기가 알려 준 UUID 에 SPP 가 있으면 SPP, 없으면 첫 UUID,
+     * 기기의 UUID 를 모르면(SDP 를 한 적이 없으면 null) 표준 SPP UUID 를 쓴다.
+     */
+    private fun defaultSppUuid(): UUID {
+        val uuids = bluetoothDevice.uuids?.map { it.uuid }.orEmpty()
+        return when {
+            SPP_UUID in uuids -> SPP_UUID
+            uuids.isNotEmpty() -> uuids.first()
+            else -> SPP_UUID
+        }
+    }
+
+    private fun cancelDiscovery() {
+        try {
+            (context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter?.cancelDiscovery()
+        } catch (exception: SecurityException) {
+            // API 31+ 에서 BLUETOOTH_SCAN 권한이 없으면 검색을 멈출 수 없으므로 그대로 연결한다
+            L.warning(Ble.Device.Default, "$logLabel : cancelDiscovery is not permitted", exception)
+        }
     }
 
     override fun requestMtuSingle(mtu: Int): Single<Int> {
@@ -949,6 +976,8 @@ internal class BleDeviceEngineImpl(
         private val LOG_TAG = BleDeviceEngineImpl::class.java.simpleName
 
         private val CLIENT_CHARACTERISTIC_CONFIG_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+        // Serial Port Profile
+        private val SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805f9b34fb")
         private const val MAX_RETRY_COUNT = 5
         private const val RETRY_DELAY_MILLIS = 500L
         // ATT transaction timeout(30초) + 여유
