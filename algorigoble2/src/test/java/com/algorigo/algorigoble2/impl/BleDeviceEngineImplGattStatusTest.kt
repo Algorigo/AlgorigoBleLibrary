@@ -121,7 +121,7 @@ class BleDeviceEngineImplGattStatusTest {
         verify(exactly = 0) { fixture.gatt.disconnect() }
         assertEquals(BleDevice.ConnectionState.CONNECTED, fixture.bleDevice.connectionState)
         // 서비스 목록이 비어 있으므로 작업은 기다리지 않고 바로 실패한다
-        fixture.bleDevice.readCharacteristicSingle(UUID_A).test().assertError(IllegalStateException::class.java)
+        fixture.bleDevice.readCharacteristicSingle(UUID_A).test().assertError(BleManager.CharacteristicNotFoundException::class.java)
     }
 
     companion object {

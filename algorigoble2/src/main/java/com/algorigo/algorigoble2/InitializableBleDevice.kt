@@ -31,7 +31,7 @@ abstract class InitializableBleDevice : BleDevice() {
     }
 
     /**
-     * [initializeCompletable]의 최대 대기 시간. 넘기면 연결을 끊고 [java.util.concurrent.TimeoutException]으로 실패한다.
+     * [initializeCompletable]의 최대 대기 시간. 넘기면 연결을 끊고 [BleManager.OperationTimeoutException]으로 실패한다.
      * (연결 타임아웃과 별개로, GATT 연결이 된 뒤부터 적용된다)
      */
     var initializeTimeoutMillis = DEFAULT_INITIALIZE_TIMEOUT_MILLIS
@@ -48,7 +48,10 @@ abstract class InitializableBleDevice : BleDevice() {
             // Completable.doOnDispose 는 끝난 뒤에 해제해도 불리므로, 끝나기 전에 해제한 경우만 구분한다
             val terminated = AtomicBoolean(false)
             initializeCompletable()
-                .timeout(initializeTimeoutMillis, TimeUnit.MILLISECONDS)
+                .let { initialize ->
+                    val timeoutMillis = initializeTimeoutMillis
+                    initialize.timeout(timeoutMillis, TimeUnit.MILLISECONDS, Completable.error(BleManager.OperationTimeoutException("INITIALIZE", timeoutMillis)))
+                }
                 .doOnComplete {
                     initializeRelay.accept(true)
                 }

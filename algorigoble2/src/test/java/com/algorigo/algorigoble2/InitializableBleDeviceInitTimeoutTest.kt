@@ -11,7 +11,6 @@ import org.junit.Rule
 import org.junit.Test
 import java.util.UUID
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
 
 /**
  * InitializableBleDevice 의 초기화에 타임아웃이 없고, 실패하면 disconnect() 가 두 번 호출되던 문제(P2) 테스트.
@@ -58,7 +57,7 @@ class InitializableBleDeviceInitTimeoutTest {
 
         rxRule.testScheduler.advanceTimeBy(InitializableBleDevice.DEFAULT_INITIALIZE_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
 
-        connect.assertError(TimeoutException::class.java)
+        connect.assertError(BleManager.OperationTimeoutException::class.java)
         assertEquals(1, engine.disconnectCount)
         assertEquals(BleDevice.ConnectionState.DISCONNECTED, device.connectionState)
     }
@@ -72,7 +71,7 @@ class InitializableBleDeviceInitTimeoutTest {
         connect.assertNotComplete().assertNoErrors()
         rxRule.testScheduler.advanceTimeBy(1, TimeUnit.MILLISECONDS)
 
-        connect.assertError(TimeoutException::class.java)
+        connect.assertError(BleManager.OperationTimeoutException::class.java)
     }
 
     @Test

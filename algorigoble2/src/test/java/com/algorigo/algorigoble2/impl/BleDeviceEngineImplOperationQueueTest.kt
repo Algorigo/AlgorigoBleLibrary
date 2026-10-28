@@ -12,7 +12,6 @@ import org.junit.Rule
 import org.junit.Test
 import java.util.UUID
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
 
 /**
  * GATT 작업 큐(P1) 테스트. Android 는 BluetoothGatt 당 한 번에 하나의 작업만 처리하므로,
@@ -89,7 +88,7 @@ class BleDeviceEngineImplOperationQueueTest {
         rxRule.testScheduler.advanceTimeBy(BleDevice.DEFAULT_OPERATION_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
 
         // 타임아웃은 바로 알리지만, 첫 요청이 아직 처리 중(BluetoothGatt busy)이므로 다음 작업은 시작하지 않는다
-        firstRead.assertError(TimeoutException::class.java)
+        firstRead.assertError(BleManager.OperationTimeoutException::class.java)
         verify(exactly = 0) { fixture.gatt.readCharacteristic(second) }
 
         replyRead(first)
@@ -157,7 +156,7 @@ class BleDeviceEngineImplOperationQueueTest {
         rxRule.testScheduler.advanceTimeBy(500L * 5, TimeUnit.MILLISECONDS)
 
         verify(exactly = 6) { fixture.gatt.readCharacteristic(first) }
-        read.assertError(BleDeviceEngineImpl.CommunicationFailedException::class.java)
+        read.assertError(BleManager.GattRequestRejectedException::class.java)
     }
 
     companion object {

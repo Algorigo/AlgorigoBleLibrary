@@ -33,7 +33,6 @@ import io.reactivex.rxjava3.schedulers.Schedulers
 import java.io.IOException
 import java.util.*
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
 
 /**
  * @param sdkInt 값을 인자로 주고받는 GATT API(API 33+)를 쓸지 정하는 SDK 버전. 테스트에서 두 경로를 모두 확인할 수 있도록 주입한다.
@@ -45,14 +44,12 @@ internal class BleDeviceEngineImpl(
     private val sdkInt: Int = Build.VERSION.SDK_INT,
 ) : BleDeviceEngine() {
 
-    class CommunicationFailedException: Exception()
-    class IllegalCharacteristicProperty(val property: Int, val type: String): Exception()
 
     private sealed class State(val connectionState: BleDevice.ConnectionState) {
         // 각 상태는 disconnect() 가 정리할 수 있도록 진행 중인 gatt / 소켓을 담는다
         class CONNECTING(val gatt: BluetoothGatt) : State(BleDevice.ConnectionState.CONNECTING)
         class CONNECTED(val gatt: BluetoothGatt) : State(BleDevice.ConnectionState.CONNECTED)
-        // cause: 연결 시도 중에 끊겼을 때 connectCompletable 이 낼 에러. (null 이면 DisconnectedException)
+        // cause: 이 상태 때문에 끝나는 연결 시도/작업/notification 이 낼 에러. (null 이면 사유를 모르는 DisconnectedException)
         class DISCONNECTED(val cause: Throwable? = null) : State(BleDevice.ConnectionState.DISCONNECTED)
         class DISCONNECTING(val gatt: BluetoothGatt) : State(BleDevice.ConnectionState.DISCONNECTING)
         class SPP_CONNECTING(val socket: BluetoothSocket) : State(BleDevice.ConnectionState.SPP_CONNECTING)
@@ -114,7 +111,8 @@ internal class BleDeviceEngineImpl(
                 }
 
                 BluetoothProfile.STATE_DISCONNECTED -> {
-                    setState(State.DISCONNECTED())
+                    // 끊긴 사유(status)를 진행 중이던 작업과 notification 의 에러로 전달한다
+                    setState(State.DISCONNECTED(BleManager.DisconnectedException(status)))
                     bleDevice.onDisconnected()
                     gatt?.close()
                 }
@@ -316,7 +314,7 @@ internal class BleDeviceEngineImpl(
             if (it is State.CONNECTED) {
                 it.gatt
             } else {
-                throw BleManager.DisconnectedException()
+                throw it.disconnectedError()
             }
         }
     private val discoveringServicesRelay = BehaviorRelay.createDefault(false)
@@ -377,7 +375,7 @@ internal class BleDeviceEngineImpl(
                             BluetoothDevice.BOND_BONDED -> true
                             BluetoothDevice.BOND_BONDING -> false
                             BluetoothDevice.BOND_NONE -> throw BleManager.BondFailedException()
-                            else -> throw IllegalStateException("bond state is wrong:${bluetoothDevice.bondState}")
+                            else -> throw BleManager.BondFailedException("Unexpected bond state ${bluetoothDevice.bondState}")
                         }
                     }
                     .filter { it }
@@ -405,7 +403,7 @@ internal class BleDeviceEngineImpl(
                             BluetoothDevice.BOND_BONDED -> throw BleManager.BondFailedException()
                             BluetoothDevice.BOND_BONDING -> false
                             BluetoothDevice.BOND_NONE -> true
-                            else -> throw IllegalStateException("bond state is wrong:${bluetoothDevice.bondState}")
+                            else -> throw BleManager.BondFailedException("Unexpected bond state ${bluetoothDevice.bondState}")
                         }
                     }
                     .filter { it }
@@ -427,7 +425,7 @@ internal class BleDeviceEngineImpl(
             // 블루투스가 꺼져 있으면 connectGatt 가 null 을 반환한다. 상태를 CONNECTING 으로 바꾸기 전에 실패시킨다.
             // transport 를 지정하지 않으면(AUTO) 듀얼모드 기기에서 BR/EDR 로 GATT 연결을 시도해 status 133 으로 실패할 수 있다
             val newGatt = bluetoothDevice.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
-                ?: throw BleManager.ConnectFailedException("connectGatt returned null (bluetooth may be off)")
+                ?: throw BleManager.BluetoothDisabledException()
             State.CONNECTING(newGatt)
         }.gatt
         // CONNECTING 으로 바꾼 뒤에 구독하므로, 여기서 보이는 DISCONNECTED 는 이번 연결 시도가 끝났다는 뜻이다
@@ -440,10 +438,10 @@ internal class BleDeviceEngineImpl(
             .filter { it is State.CONNECTED }
             .firstOrError()
             .ignoreElement()
-            .timeout(timeoutMillis, TimeUnit.MILLISECONDS)
+            .timeout(timeoutMillis, TimeUnit.MILLISECONDS, Completable.error(BleManager.OperationTimeoutException(OPERATION_CONNECT, timeoutMillis)))
             .doOnError {
                 L.error(Ble.Device.Default, "$logLabel : doOnError", it)
-                if (it is TimeoutException) {
+                if (it is BleManager.OperationTimeoutException) {
                     cancelConnecting(gatt)
                 }
             }
@@ -458,13 +456,14 @@ internal class BleDeviceEngineImpl(
     }
 
     /**
-     * 현재 상태가 DISCONNECTED 일 때만 [start]로 연결을 시작하고 그 상태로 바꾼다. 아니면 [IllegalStateException].
+     * 현재 상태가 DISCONNECTED 일 때만 [start]로 연결을 시작하고 그 상태로 바꾼다. 아니면 [BleManager.InvalidConnectionStateException].
      * 상태 확인과 전환을 한 번에 해서, 동시에 연결해도 gatt/소켓이 하나만 만들어지게 한다.
      */
     private fun <S : State> startConnecting(start: () -> S): S = synchronized(stateLock) {
-        val current = stateRelay.value
+        // 처음부터 DISCONNECTED 로 시작하므로 null 이 아니다
+        val current = stateRelay.value!!
         if (current !is State.DISCONNECTED) {
-            throw IllegalStateException("Connection state is ${current?.connectionState} not ${BleDevice.ConnectionState.DISCONNECTED}")
+            throw BleManager.InvalidConnectionStateException(current.connectionState, BleDevice.ConnectionState.DISCONNECTED)
         }
         start().also { setState(it) }
     }
@@ -487,7 +486,7 @@ internal class BleDeviceEngineImpl(
     private fun checkConnectionState(connectionState: BleDevice.ConnectionState): Completable {
         return stateRelay.doOnNext {
             if (it.connectionState != connectionState) {
-                throw IllegalStateException("Connection state is $it not $connectionState")
+                throw BleManager.InvalidConnectionStateException(it.connectionState, connectionState)
             }
         }.firstOrError().ignoreElement()
     }
@@ -545,23 +544,23 @@ internal class BleDeviceEngineImpl(
             .map<List<BleCharacterisic>> {
                 it.map { BleCharacteristicImpl(it) }
             }
-            .guardOperation()
+            .guardOperation(OPERATION_GET_CHARACTERISTICS)
     }
 
     override fun readCharacteristicSingle(serviceUuid: UUID?, characteristicUuid: UUID): Single<ByteArray> {
-        return enqueue(getGattSingle()
+        return enqueue(Type.READ_CHARACTERISTIC.name, getGattSingle()
             .flatMap { gatt ->
                 getCharacteristic(serviceUuid, characteristicUuid)
                     .doOnSuccess {
                         if (it.properties and BluetoothGattCharacteristic.PROPERTY_READ == 0) {
-                            throw IllegalCharacteristicProperty(it.properties, "READ_CHARACTERISTIC")
+                            throw BleManager.IllegalCharacteristicPropertyException(characteristicUuid, it.properties, Type.READ_CHARACTERISTIC.name)
                         }
                     }
                     .flatMap { characteristic ->
                         replyRelay
                             .mergeWith(Completable.fromCallable {
                                 L.debug(Ble.Device.Default, "$logLabel : readCharacteristic : $characteristicUuid")
-                                sendGattRequest { gatt.readCharacteristic(characteristic) }
+                                sendGattRequest(Type.READ_CHARACTERISTIC.name) { gatt.readCharacteristic(characteristic) }
                             })
                             .filter { it.uuid == characteristicUuid && it.type == Type.READ_CHARACTERISTIC }
                             .map { it.valueOrThrow() }
@@ -572,19 +571,21 @@ internal class BleDeviceEngineImpl(
     }
 
     override fun writeCharacteristicSingle(serviceUuid: UUID?, characteristicUuid: UUID, byteArray: ByteArray, writeType: BleDevice.WriteType): Single<ByteArray> {
-        return enqueue(getGattSingle()
+        return enqueue(Type.WRITE_CHARACTERISTIC.name, getGattSingle()
             .flatMap { gatt ->
                 getCharacteristic(serviceUuid, characteristicUuid)
                     .flatMap { characteristic ->
                         val gattWriteType = resolveWriteType(characteristic.properties, writeType)
                         if (gattWriteType == null) {
-                            Single.error(IllegalCharacteristicProperty(characteristic.properties, "WRITE_CHARACTERISTIC($writeType)"))
+                            Single.error(BleManager.IllegalCharacteristicPropertyException(
+                                characteristicUuid, characteristic.properties, "${Type.WRITE_CHARACTERISTIC.name}($writeType)"
+                            ))
                         } else {
                             // write-no-response 도 onCharacteristicWrite 가 와야 BluetoothGatt 가 다음 작업을 받으므로 응답을 기다린다
                             replyRelay
                                 .mergeWith(Completable.fromCallable {
                                     L.debug(Ble.Device.Default, "$logLabel : writeCharacteristic : $characteristicUuid : ${byteArray.toHexString()} : $writeType")
-                                    sendGattRequest {
+                                    sendGattRequest(Type.WRITE_CHARACTERISTIC.name) {
                                         if (usesValueGattApi()) {
                                             // 값과 쓰기 타입을 인자로 넘기므로, 같은 characteristic 으로 들어온 notification 이 쓰려던 값을 덮어쓰지 못한다
                                             gatt.writeCharacteristic(characteristic, byteArray, gattWriteType).isGattRequestAccepted("writeCharacteristic")
@@ -623,7 +624,7 @@ internal class BleDeviceEngineImpl(
     /**
      * 같은 characteristic 의 notification 구독은 하나의 설정을 공유한다.
      * 첫 구독자가 CCCD 를 켜고, 마지막 구독자가 해제할 때 CCCD 를 끈다. (나중에 구독한 쪽은 설정 완료 결과를 바로 받는다)
-     * 구독 중인 characteristic 에 다른 [BleDevice.NotificationType]을 요청하면 기존 구독이 끊기지 않도록 [IllegalStateException]으로 실패한다.
+     * 구독 중인 characteristic 에 다른 [BleDevice.NotificationType]을 요청하면 기존 구독이 끊기지 않도록 [BleManager.NotificationTypeConflictException]으로 실패한다.
      * 같은 characteristic 인지는 서비스까지 보고 판단한다. (여러 서비스에 같은 UUID 의 characteristic 이 있을 수 있다)
      */
     override fun setupNotification(type: BleDevice.NotificationType, serviceUuid: UUID?, characteristicUuid: UUID): Observable<Observable<ByteArray>> {
@@ -638,7 +639,7 @@ internal class BleDeviceEngineImpl(
                             .also { notificationSubscriptions[key] = it }
                     existing.type == type -> existing
                     else -> return@defer Observable.error<Observable<ByteArray>>(
-                        IllegalStateException("$characteristicUuid notification is already set up as ${existing.type}")
+                        BleManager.NotificationTypeConflictException(characteristicUuid, existing.type, type)
                     )
                 }.also { it.subscriberCount++ }
             }
@@ -733,7 +734,7 @@ internal class BleDeviceEngineImpl(
     private fun notificationSetupError(characteristic: BluetoothGattCharacteristic): Throwable? = when {
         characteristic.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY == 0 &&
                 characteristic.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE == 0 ->
-            IllegalCharacteristicProperty(characteristic.properties, "WRITE_DESCRIPTOR")
+            BleManager.IllegalCharacteristicPropertyException(characteristic.uuid, characteristic.properties, "NOTIFY/INDICATE")
         // CCCD 가 없으면 원격 기기에 notification 을 켜 달라고 요청할 방법이 없다
         characteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG_UUID) == null ->
             BleManager.DescriptorNotFoundException(characteristic.uuid, CLIENT_CHARACTERISTIC_CONFIG_UUID)
@@ -741,7 +742,7 @@ internal class BleDeviceEngineImpl(
     }
 
     private fun writeDescriptor(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, byteArray: ByteArray): Single<ByteArray> {
-        return enqueue(Single.defer {
+        return enqueue(Type.WRITE_DESCRIPTOR.name, Single.defer {
             val error = notificationSetupError(characteristic)
             if (error != null) {
                 Single.error(error)
@@ -750,7 +751,7 @@ internal class BleDeviceEngineImpl(
                     .doOnSubscribe {
                         val descriptor = characteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG_UUID)
                         L.debug(Ble.Device.Default, "$logLabel : writeDescriptor : ${characteristic.uuid} : ${byteArray.toHexString()}")
-                        sendGattRequest {
+                        sendGattRequest(Type.WRITE_DESCRIPTOR.name) {
                             if (usesValueGattApi()) {
                                 gatt.writeDescriptor(descriptor, byteArray).isGattRequestAccepted("writeDescriptor")
                             } else {
@@ -826,12 +827,12 @@ internal class BleDeviceEngineImpl(
     }
 
     override fun requestMtuSingle(mtu: Int): Single<Int> {
-        return enqueue(getGattSingle()
+        return enqueue(OPERATION_REQUEST_MTU, getGattSingle()
             .flatMap { gatt ->
                 mtuRelay
                     .mergeWith(Completable.fromCallable {
                         L.debug(Ble.Device.Default, "$logLabel : requestMtu : $mtu")
-                        sendGattRequest { gatt.requestMtu(mtu) }
+                        sendGattRequest(OPERATION_REQUEST_MTU) { gatt.requestMtu(mtu) }
                     })
                     .firstOrError()
                     .map { (negotiatedMtu, status) ->
@@ -849,8 +850,8 @@ internal class BleDeviceEngineImpl(
      * 앞 작업이 콜백을 받거나 타임아웃/연결 끊김으로 끝나야 다음 작업이 시작된다.
      * 타임아웃과 연결 끊김 감지([guardOperation])는 큐에서 기다리는 시간이 아니라 작업이 실제로 시작된 시점부터 적용된다.
      */
-    private fun <T : Any> enqueue(operation: Single<T>): Single<T> = Single.create { emitter ->
-        operationQueue.accept(QueuedOperation(operation.guardOperation(), emitter))
+    private fun <T : Any> enqueue(name: String, operation: Single<T>): Single<T> = Single.create { emitter ->
+        operationQueue.accept(QueuedOperation(operation.guardOperation(name), emitter))
     }
 
     private inner class QueuedOperation<T : Any>(private val operation: Single<T>, private val emitter: SingleEmitter<T>) {
@@ -866,7 +867,7 @@ internal class BleDeviceEngineImpl(
                     .ignoreElement()
                     .onErrorResumeNext { error ->
                         // 타임아웃은 호출한 쪽에 바로 알리되, 보낸 요청이 아직 처리 중이면 큐는 GATT 가 풀릴 때까지 기다린다
-                        if (error is TimeoutException) waitForGattRelease() else Completable.complete()
+                        if (error is BleManager.OperationTimeoutException) waitForGattRelease() else Completable.complete()
                     }
             }
         }
@@ -890,12 +891,12 @@ internal class BleDeviceEngineImpl(
         return true
     }
 
-    /** GATT 요청을 보내고 콜백이 올 때까지 처리 중으로 표시한다. 요청이 거절되면(busy 등) [CommunicationFailedException]. */
-    private fun sendGattRequest(request: () -> Boolean) {
+    /** GATT 요청을 보내고 콜백이 올 때까지 처리 중으로 표시한다. 요청이 거절되면(busy 등) [BleManager.GattRequestRejectedException]. */
+    private fun sendGattRequest(operation: String, request: () -> Boolean) {
         gattRequestPendingRelay.accept(true)
         if (!request()) {
             gattRequestPendingRelay.accept(false)
-            throw CommunicationFailedException()
+            throw BleManager.GattRequestRejectedException(operation)
         }
     }
 
@@ -916,11 +917,11 @@ internal class BleDeviceEngineImpl(
             .doFinally { gattRequestPendingRelay.accept(false) }
     }
 
-    /** GATT 호출이 false 를 반환하면 잠시 후 다시 시도하고, 재시도 횟수를 넘기면 [CommunicationFailedException]으로 실패한다. */
+    /** GATT 호출이 거절되면 잠시 후 다시 시도하고, 재시도 횟수를 넘기면 [BleManager.GattRequestRejectedException]으로 실패한다. */
     private fun <T : Any> Single<T>.retryOnCommunicationFailure(): Single<T> = retryWhen { errors ->
         var retryCount = 0
         errors.flatMap { throwable ->
-            if (throwable is CommunicationFailedException && retryCount++ < MAX_RETRY_COUNT) {
+            if (throwable is BleManager.GattRequestRejectedException && retryCount++ < MAX_RETRY_COUNT) {
                 Flowable.timer(RETRY_DELAY_MILLIS, TimeUnit.MILLISECONDS)
             } else {
                 Flowable.error(throwable)
@@ -930,18 +931,23 @@ internal class BleDeviceEngineImpl(
 
     /**
      * GATT 콜백을 기다리는 작업이 영원히 끝나지 않는 것을 막는다.
-     * 작업 도중 연결이 끊기면 [BleManager.DisconnectedException], [BleDevice.operationTimeoutMillis]를 넘기면 [TimeoutException]으로 종료한다.
+     * 작업 도중 연결이 끊기면 [BleManager.DisconnectedException](끊긴 사유 포함), [BleDevice.operationTimeoutMillis]를 넘기면
+     * [BleManager.OperationTimeoutException]으로 종료한다.
      * 이미 연결이 끊긴 상태라면 GATT 호출 없이 바로 실패하도록 연결 끊김 감지를 먼저 구독한다.
      */
-    private fun <T : Any> Single<T>.guardOperation(): Single<T> {
+    private fun <T : Any> Single<T>.guardOperation(operation: String): Single<T> {
         val disconnectedSingle = stateRelay
             .filter { it !is State.CONNECTED }
             .firstOrError()
-            .flatMap { Single.error<T>(BleManager.DisconnectedException()) }
+            .flatMap { Single.error<T>(it.disconnectedError()) }
+        val timeoutMillis = bleDevice.operationTimeoutMillis
         return disconnectedSingle
             .ambWith(this)
-            .timeout(bleDevice.operationTimeoutMillis, TimeUnit.MILLISECONDS)
+            .timeout(timeoutMillis, TimeUnit.MILLISECONDS, Single.error(BleManager.OperationTimeoutException(operation, timeoutMillis)))
     }
+
+    /** 연결되지 않은 상태 때문에 끝나는 작업/notification 의 에러. 끊긴 사유가 있으면 그것을 쓴다. (DISCONNECTING 은 이 앱이 끊는 중) */
+    private fun State.disconnectedError(): Throwable = (this as? State.DISCONNECTED)?.cause ?: BleManager.DisconnectedException()
 
     /** 블루투스가 꺼지면 연결 콜백이 오지 않을 수 있으므로, 어떤 상태든 기다리지 않고 바로 정리한다. */
     internal fun onBluetoothDisabled() {
@@ -954,7 +960,7 @@ internal class BleDeviceEngineImpl(
                 is State.DISCONNECTING -> state.gatt
                 is State.CONNECTING -> {
                     // 기다리던 connectCompletable 은 연결 타임아웃 전에 바로 실패한다
-                    cancelConnecting(state.gatt, BleManager.ConnectFailedException("bluetooth is disabled"))
+                    cancelConnecting(state.gatt, BleManager.BluetoothDisabledException())
                     null
                 }
                 is State.SPP_CONNECTING, is State.SPP_CONNECTED -> {
@@ -964,7 +970,8 @@ internal class BleDeviceEngineImpl(
                 else -> null
             }?.also { gatt ->
                 gatt.close()
-                setState(State.DISCONNECTED())
+                // 진행 중이던 작업과 notification 은 BluetoothDisabledException 으로 끝난다
+                setState(State.DISCONNECTED(BleManager.BluetoothDisabledException()))
             }
         }
         if (closed != null) {
@@ -986,6 +993,11 @@ internal class BleDeviceEngineImpl(
         private const val DISCONNECT_TIMEOUT_MILLIS = 5_000L
         // BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE 와 동일
         private val DISABLE_NOTIFICATION_VALUE = byteArrayOf(0x00, 0x00)
+
+        // OperationTimeoutException 등에 쓰는 작업 이름 (나머지는 Type 의 이름을 쓴다)
+        private const val OPERATION_CONNECT = "CONNECT"
+        private const val OPERATION_REQUEST_MTU = "REQUEST_MTU"
+        private const val OPERATION_GET_CHARACTERISTICS = "GET_CHARACTERISTICS"
     }
 }
 

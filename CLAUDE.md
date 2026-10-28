@@ -41,14 +41,17 @@ Public API / engine split: user-facing classes delegate everything to `internal`
 
 ### BleDeviceEngineImpl internals
 - Connection state lives in a `BehaviorRelay<State>`; `State.CONNECTED` carries the `BluetoothGatt`. `CONNECTED` is only emitted after `onServicesDiscovered`, not on the raw GATT connect.
-- `BluetoothGattCallback` results are pushed into `replyRelay` (read/write characteristic & descriptor replies, tagged by `Type` + UUID) and `notificationRelay`. Each operation subscribes to the relay, issues the GATT call, then filters for its matching reply. There is no explicit operation queue; a `false` return from the GATT call raises `CommunicationFailedException`, which is retried (5×, 500 ms) — that's how concurrent-operation collisions are absorbed.
+- `BluetoothGattCallback` results are pushed into `replyRelay` (read/write characteristic & descriptor replies, tagged by `Type` + UUID) and `notificationRelay`. GATT operations go through a per-device queue (`enqueue`), so only one is in flight; each is guarded by a disconnect check and `operationTimeoutMillis`. A GATT call that is rejected (returns false / non-SUCCESS) raises `BleManager.GattRequestRejectedException`, retried 5× at 500 ms.
 - `setupNotification` returns `Observable<Observable<ByteArray>>`: the outer emission means the CCCD descriptor write succeeded; disposing it disables the notification.
-- Services are cached in `serviceSingle` after the first lookup.
+- Services are read from the current `BluetoothGatt` on every lookup (no cache), so reconnects and `onServiceChanged` rediscovery are picked up.
 - SPP (RFCOMM) uses the same state relay (`SPP_CONNECTING`/`SPP_CONNECTED`) and requires the device to be GATT-disconnected.
 - Bluetooth-off is detected by a broadcast receiver in `BleManagerEngineImpl`, which calls `onBluetoothDisabled()` on every cached device engine.
 
 ### Virtual devices
 `virtual/VirtualDevice` + `VirtualDeviceEngine` let you simulate a peripheral without hardware. Pass `Pair(VirtualDevice, BleDevice)` into the `BleManager` constructor; the virtual devices are merged into scan results, `getDevice`, and bonded/connected lists. See `app/.../VirtualBleDevice.kt` for an example.
+
+### Exceptions
+Every failure the library raises is a `BleException` (`BleException.kt`, abstract on purpose so new subtypes don't break callers' `when`). Concrete types live in `BleManager` (`DisconnectedException(status)` carrying the disconnect reason from `onConnectionStateChange`, `BluetoothDisabledException`, `OperationTimeoutException(operation)`, `GattOperationFailedException(operation, status)`, `CharacteristicNotFoundException`, `PermissionDeniedException`, ...) plus `exception/SystemServiceException` for scan prerequisites. Engine `State.DISCONNECTED(cause)` carries the error that in-flight operations/notifications should fail with. Caller mistakes (bad arguments) stay as standard `IllegalArgumentException`; SPP socket I/O stays `IOException`.
 
 ### Callback threading
 Public results (`BleDevice` / `BleManager.getConnectionStateObservable()` Observables, Singles, Completables) are handed off with `deliverToCallback()` (`CallbackScheduler.kt`, `Schedulers.io()`, `delayError` for streams), so user code never runs on the GATT binder thread or inside the engine's state lock. Library-internal code must subscribe to the raw streams instead (`BleDeviceEngine.getConnectionStateObservable()`, `BleDevice.connectionStateObservableInternal()`), otherwise every cached device would pin an io thread. Scan results stay on the main thread (Android default). Tests control delivery via `CallbackScheduler.override`.

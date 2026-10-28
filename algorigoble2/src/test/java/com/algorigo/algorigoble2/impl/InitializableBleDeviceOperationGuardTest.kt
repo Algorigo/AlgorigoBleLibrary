@@ -12,7 +12,6 @@ import org.junit.Rule
 import org.junit.Test
 import java.util.UUID
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
 
 /**
  * initializeCompletable 안의 GATT 작업이 응답을 받지 못해도 connectCompletable 이 끝나는지 확인한다.
@@ -50,7 +49,7 @@ class InitializableBleDeviceOperationGuardTest {
 
         rxRule.testScheduler.advanceTimeBy(BleDevice.DEFAULT_OPERATION_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
 
-        observer.assertError(TimeoutException::class.java)
+        observer.assertError(BleManager.OperationTimeoutException::class.java)
         verify { fixture.gatt.disconnect() }
     }
 

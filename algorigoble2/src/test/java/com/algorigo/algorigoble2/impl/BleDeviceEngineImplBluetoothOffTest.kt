@@ -49,7 +49,7 @@ class BleDeviceEngineImplBluetoothOffTest {
         fixture.engine.onBluetoothDisabled()
 
         // 연결 타임아웃(10초)까지 기다리지 않는다
-        connect.assertError(BleManager.ConnectFailedException::class.java)
+        connect.assertError(BleManager.BluetoothDisabledException::class.java)
         assertEquals(BleDevice.ConnectionState.DISCONNECTED, device.connectionState)
         verify(exactly = 1) { fixture.gatt.close() }
         assertEquals(1, onDisconnectedCount)

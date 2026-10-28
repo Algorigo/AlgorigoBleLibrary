@@ -5,6 +5,7 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
+import com.algorigo.algorigoble2.BleManager
 import com.algorigo.algorigoble2.BleScanFilter
 import com.algorigo.algorigoble2.BleScanSettings
 import com.algorigo.algorigoble2.exception.SystemServiceException
@@ -50,7 +51,7 @@ internal class BleScanner private constructor(private val bluetoothAdapter: Blue
 
         override fun onScanFailed(errorCode: Int) {
             super.onScanFailed(errorCode)
-            scanSubject.onError(IllegalStateException("onScanFailed:$errorCode"))
+            scanSubject.onError(BleManager.ScanFailedException(errorCode))
         }
 
         private fun isOk(result: ScanResult): Boolean {

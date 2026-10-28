@@ -114,7 +114,7 @@ class BleDeviceEngineImplNotificationSharingTest {
         val first = subscribe(BleDevice.NotificationType.NOTIFICATION)
         replyDescriptorWrite()
 
-        subscribe(BleDevice.NotificationType.INDICATION).assertError(IllegalStateException::class.java)
+        subscribe(BleDevice.NotificationType.INDICATION).assertError(BleManager.NotificationTypeConflictException::class.java)
 
         notify(4)
         first.assertValue { it.contentEquals(byteArrayOf(4)) }

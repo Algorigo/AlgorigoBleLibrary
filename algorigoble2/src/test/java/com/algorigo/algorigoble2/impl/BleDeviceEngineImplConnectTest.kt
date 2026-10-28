@@ -8,7 +8,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
 
 /**
  * connect 실패/취소 후 기기가 CONNECTING 상태에 갇히지 않는지 확인한다.
@@ -32,7 +31,7 @@ class BleDeviceEngineImplConnectTest {
         fixture.stubConnectGatt(null)
 
         device.connectCompletable().test()
-            .assertError(BleManager.ConnectFailedException::class.java)
+            .assertError(BleManager.BluetoothDisabledException::class.java)
 
         assertEquals(BleDevice.ConnectionState.DISCONNECTED, device.connectionState)
     }
@@ -41,7 +40,7 @@ class BleDeviceEngineImplConnectTest {
     fun connectCompletable_canConnectAgain_afterConnectGattReturnedNull() {
         fixture.stubConnectGatt(null, fixture.gatt)
         device.connectCompletable().test()
-            .assertError(BleManager.ConnectFailedException::class.java)
+            .assertError(BleManager.BluetoothDisabledException::class.java)
 
         val observer = device.connectCompletable().test()
         fixture.simulateConnected()
@@ -57,7 +56,7 @@ class BleDeviceEngineImplConnectTest {
 
         rxRule.testScheduler.advanceTimeBy(5_000L, TimeUnit.MILLISECONDS)
 
-        observer.assertError(TimeoutException::class.java)
+        observer.assertError(BleManager.OperationTimeoutException::class.java)
         verify(exactly = 1) { fixture.gatt.disconnect() }
         verify(exactly = 1) { fixture.gatt.close() }
         assertEquals(BleDevice.ConnectionState.DISCONNECTED, device.connectionState)

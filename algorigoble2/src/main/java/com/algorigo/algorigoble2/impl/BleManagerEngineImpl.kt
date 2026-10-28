@@ -239,13 +239,8 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
                 .broadCastReceiverObservable(context, IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED))
                 .map { intent -> intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1) }
                 .map { state ->
-                    when (state) {
-                        BluetoothAdapter.STATE_ON -> true
-                        BluetoothAdapter.STATE_TURNING_OFF,
-                        BluetoothAdapter.STATE_TURNING_ON,
-                        BluetoothAdapter.STATE_OFF -> false
-                        else -> throw IllegalStateException("Unexpected bluetooth state: $state")
-                    }
+                    // STATE_ON 이 아니면(꺼지는 중, 켜지는 중, BLE 전용 상태 등) 스캔할 수 없다
+                    state == BluetoothAdapter.STATE_ON
                 })
     }
 
