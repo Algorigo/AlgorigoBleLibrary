@@ -873,7 +873,16 @@
     - 확인: 단독 실행 5번(`--rerun-tasks`) 모두 통과, `./gradlew clean build` 통과(단위 테스트 300건).
 - [x] **[구조]** `ExampleInstrumentedTest`가 항상 실패합니다. 패키지명을 `com.algorigo.algorigoble2.test`로 기대하지만, 실제 namespace는 `com.algorigo.rx.algorigoble2`입니다. 이 때문에 `connectedDebugAndroidTest` 전체 실행이 실패하므로, 수정하거나 삭제해야 합니다(`algorigoble2/src/androidTest/.../ExampleInstrumentedTest.kt`).
   - ✅ 해결 (`feature/test_coverage`): P2 "테스트 부재" 항목에서 라이브러리의 `ExampleInstrumentedTest`와 `ExampleUnitTest`를 지웠습니다. Fold5와 M446K에서 `:algorigoble2:connectedDebugAndroidTest`가 통과합니다.
-- [ ] **[구조]** (실기기) 라이브러리 로그가 2~3번씩 중복 출력되는 경우가 있습니다. 예를 들어 `doOnError` 한 번에 같은 줄이 2~3번 나옵니다. 원인은 확인하지 못했습니다. 샘플 앱의 `BluetoothService`가 `AndroidHandler`를 추가하는 방식과 logger의 handler 전파 구조를 확인해야 합니다.
+- [x] **[구조]** (실기기) 라이브러리 로그가 2~3번씩 중복 출력되는 경우가 있습니다. 예를 들어 `doOnError` 한 번에 같은 줄이 2~3번 나옵니다. 원인은 확인하지 못했습니다. 샘플 앱의 `BluetoothService`가 `AndroidHandler`를 추가하는 방식과 logger의 handler 전파 구조를 확인해야 합니다.
+  - ✅ 해결 (`feature/duplicate_logs`)
+    - 원인(실기기에서 확인): 라이브러리는 handler를 붙이지 않습니다. 중복은 앱 설정과 Android의 기본 설정이 겹쳐서 생깁니다.
+      - Android는 java.util.logging root logger에 `com.android.internal.logging.AndroidHandler`를 붙여 둡니다. 앱이 `BleManager.getLogger()`에 algorigo-logger의 `AndroidHandler`를 붙이면, 기록이 root로도 전파되어 Android 기본 handler가 한 번 더 남깁니다. 이 handler는 `Log.isLoggable`로 거르므로 NOTICE/WARNING/ERROR만 두 번 나오고 DEBUG/INFO는 한 번입니다.
+      - 앱이 handler를 여러 번 붙이면 붙인 수만큼 더 반복됩니다. 샘플 앱 `BluetoothService.onCreate()`는 조건 없이 붙였습니다.
+    - 샘플 앱은 handler가 없을 때만 붙이고 `LogManager.removeRootAndroidHandler()`(algorigo-logger가 이 용도로 제공)를 부르도록 고쳤습니다. 라이브러리 쪽에서 `useParentHandlers = false`로 막는 방법은 쓰지 않았습니다. handler를 붙이지 않은 앱도 지금은 root 기본 handler 덕분에 경고/에러를 logcat에서 볼 수 있는데, 막으면 그것까지 사라지기 때문입니다.
+    - `BleManager.getLogger()` KDoc과 CLAUDE.md에 logcat 설정 방법(핸들러 한 번만 붙이기, root 기본 handler 지우기)을 적었습니다.
+    - 실기기 확인(Fold5):
+      - 프로브로 레벨별 출력 횟수를 셌습니다. handler 1개일 때 debug/info 1번·notice/warning/error 2번, handler 2개일 때 각각 2번/3번, `removeRootAndroidHandler()` 후에는 모두 1번이었습니다. root handler 목록에서 `com.android.internal.logging.AndroidHandler`를 확인했습니다.
+      - 샘플 앱에서 없는 MAC(`AABBCCDDEE02`)으로 연결해 연결 timeout을 냈습니다. 수정 전에는 `doOnError` 줄과 예외 줄이 각각 2번, 수정 후에는 1번이었고, debug 로그(`connectGatt call`)는 그대로 남았습니다. (샘플 앱에서 서비스를 다시 만들어 3번이 되는 경우는 셸에서 서비스를 재생성하지 못해 프로브로만 확인했습니다)
 
 ### 장기 기능
 
