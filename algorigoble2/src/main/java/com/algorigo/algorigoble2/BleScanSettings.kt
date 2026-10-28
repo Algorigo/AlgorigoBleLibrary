@@ -11,7 +11,9 @@ class BleScanSettings private constructor(
     val callbackType: CallbackType,
     val matchMode: MatchMode,
     val legacy: Boolean,
-    val phy: Int) {
+    val phy: Int,
+    /** 이 시간 동안 다시 보이지 않은 기기를 스캔 목록에서 뺀다. 0 이면 빼지 않는다. */
+    val deviceLostTimeoutMillis: Long) {
 
     enum class ScanMode(val value: Int) {
         OPPORTUNISTIC(ScanSettings.SCAN_MODE_OPPORTUNISTIC),
@@ -46,6 +48,7 @@ class BleScanSettings private constructor(
         private var matchMode = MatchMode.AGGRESSIVE
         private var mLegacy = true
         private var mPhy = ScanSettings.PHY_LE_ALL_SUPPORTED
+        private var deviceLostTimeoutMillis = 0L
 
         @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
         fun setScanMode(scanMode: ScanMode): Builder {
@@ -90,6 +93,17 @@ class BleScanSettings private constructor(
             return this
         }
 
+        /**
+         * 마지막으로 보인 뒤 [timeoutMillis] 동안 다시 보이지 않은 기기를 스캔 목록에서 뺀다. 기본값 0 은 빼지 않는다.
+         * 기기의 광고 주기와 스캔 모드(LOW_POWER 는 듬성듬성 스캔한다), reportDelay 보다 충분히 길게 준다.
+         * 목록에서 빠진 뒤에 다시 보이면 목록 끝에 다시 추가된다. (CallbackType 의 MATCH_LOST 와 함께 쓸 수 있다)
+         */
+        fun setDeviceLostTimeout(timeoutMillis: Long): Builder {
+            require(timeoutMillis >= 0) { "deviceLostTimeout must be >= 0" }
+            deviceLostTimeoutMillis = timeoutMillis
+            return this
+        }
+
         fun build(): BleScanSettings {
             return BleScanSettings(
                 scanMode,
@@ -98,7 +112,8 @@ class BleScanSettings private constructor(
                 callbackType,
                 matchMode,
                 mLegacy,
-                mPhy
+                mPhy,
+                deviceLostTimeoutMillis,
             )
         }
     }
