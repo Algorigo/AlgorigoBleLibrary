@@ -390,7 +390,16 @@
       - 수정 전: 8건 모두 OK로 끝났지만 **GATT client가 8개 등록**됐고, `disconnect()` 뒤에도 **7개가 close되지 않고 남았습니다**(프로세스가 끝나야 사라짐).
       - 수정 후: OK 1건, `IllegalStateException` 7건. GATT client는 1개만 등록됐고 `disconnect()` 뒤 0개가 됐습니다. 이어서 재연결 → Device Name read → disconnect도 정상이었고 client는 다시 0개가 됐습니다.
     - SPP 경로는 단위 테스트로만 확인했습니다(실기기 SPP 미검증).
-- [ ] **[버그] `BleDevice.equals()`만 override하고 `hashCode()`는 override하지 않음** — `BleDevice.kt:90`. `HashSet`/`HashMap`/`distinct()`에서 같은 기기가 서로 다른 기기로 취급됩니다. 또 `initEngine()` 전에 `equals/toString`을 호출하면 `UninitializedPropertyAccessException`이 납니다.
+- [x] **[버그] `BleDevice.equals()`만 override하고 `hashCode()`는 override하지 않음** — `BleDevice.kt:90`. `HashSet`/`HashMap`/`distinct()`에서 같은 기기가 서로 다른 기기로 취급됩니다. 또 `initEngine()` 전에 `equals/toString`을 호출하면 `UninitializedPropertyAccessException`이 납니다.
+  - ✅ 해결 (`feature/ble_device_hashcode`)
+    - `hashCode()`를 `equals()`와 같은 기준(`deviceId`)으로 override했습니다. 하위 클래스와 `BleDevice`도 `deviceId`가 같으면 같은 기기입니다(기존 `equals` 기준 유지).
+    - `initEngine()` 전에는 예외 없이 동작합니다. `equals`는 자기 자신과만 같고, `hashCode`는 identity hash, `toString`은 `BleDevice(engine not initialized)`를 돌려줍니다.
+    - ⚠️ engine이 붙기 전에 hash 기반 컬렉션에 넣으면, 붙은 뒤 hash가 바뀌어 찾을 수 없습니다. 라이브러리가 돌려주는 기기는 항상 engine이 붙어 있으므로 일반적인 사용에서는 해당하지 않습니다.
+    - MAC 대소문자는 구분합니다(기존과 같음). 가상 기기 MAC 정규화는 아래 `getDevice()` 항목에서 다룹니다.
+    - 테스트: `BleDeviceEqualityTest`(5건). 수정 전 코드에서는 3건이 실패했습니다(같은 기기의 hashCode가 다름 2건, engine 초기화 전 `UninitializedPropertyAccessException`). 나머지 2건은 다른 기기 구분과 `toString` 형식을 확인하는 보호 테스트입니다.
+    - 실기기 확인(Fold5 → M446K nRF Connect 광고). `BleManager`를 두 개 만들어(샘플 앱 `BluetoothService`도 두 개를 만듦) 같은 기기의 `BleDevice`를 각각 얻었습니다(서로 다른 인스턴스).
+      - 수정 전: `equals=true`인데 hash가 달라(`225699326`/`182485343`) `hashSetOf` 크기 **2**, `distinct()` **2**, `hashMap[두 번째]`가 **null**. 초기화 전 기기의 `toString`/`equals`는 `UninitializedPropertyAccessException`.
+      - 수정 후: hash가 같고 `hashSetOf` 크기 1, `distinct()` 1, `hashMap[두 번째]`로 첫 번째 값을 찾음. 초기화 전 기기는 `BleDevice(engine not initialized)` / `false`.
 - [x] **[버그] `getConnectedDevices()`가 실제 연결 상태와 맞지 않음** — `impl/BleManagerEngineImpl.kt:120-122`. `bluetoothManager.getConnectedDevices(GATT)`는 시스템 전체(다른 앱, OS가 맺은 연결 포함)를 반환합니다. 그래서 `connected == false`인 `BleDevice`가 목록에 포함됩니다. 라이브러리 engine의 상태를 기준으로 필터링해야 합니다.
   - ✅ 해결 (`feature/connected_devices_from_engine_state`)
     - `getConnectedDevices()`는 이 라이브러리가 관리하는 기기(`deviceMap`) 중 `connected`(engine이 GATT CONNECTED)이거나 `SPP_CONNECTED`인 기기만 돌려줍니다. 시스템 목록을 쓰지 않으므로, 다른 앱이 연결한 기기 때문에 `BleDevice`를 새로 만들거나 delegate를 호출하지도 않습니다. `getConnectedDevice(mac)`도 이 목록을 사용합니다.

@@ -108,12 +108,29 @@ open class BleDevice {
 
     fun setMtuCompletable(mtu: Int = 517) = requestMtuSingle(mtu).ignoreElement()
 
+    // engine 은 생성 후 initEngine() 으로 붙는다. 그 전에 equals/hashCode/toString 이 불려도 예외가 나지 않게 한다
+    private val deviceIdOrNull: String?
+        get() = if (::engine.isInitialized) engine.deviceId else null
+
     override fun toString(): String {
+        if (!::engine.isInitialized) {
+            return "${javaClass.simpleName}(engine not initialized)"
+        }
         return "${javaClass.simpleName} $deviceName($deviceId)"
     }
 
+    /** 같은 기기(deviceId)이면 같다. engine 이 붙기 전에는 자기 자신과만 같다. */
     override fun equals(other: Any?): Boolean {
-        return other is BleDevice && this.deviceId == other.deviceId
+        if (this === other) return true
+        if (other !is BleDevice) return false
+        val id = deviceIdOrNull ?: return false
+        return id == other.deviceIdOrNull
+    }
+
+    // equals 와 같은 기준이어야 HashSet/HashMap/distinct() 에서 같은 기기가 하나로 취급된다.
+    // engine 이 붙기 전에 hash 기반 컬렉션에 넣으면 붙은 뒤 hash 가 바뀌므로 그 전에 넣지 않아야 한다
+    override fun hashCode(): Int {
+        return deviceIdOrNull?.hashCode() ?: System.identityHashCode(this)
     }
 
     companion object {
