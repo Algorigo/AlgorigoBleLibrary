@@ -556,7 +556,19 @@
       - 초기화가 끝나지 않음: 수정 전에는 15초 뒤에도 **INITIALIZING**으로 기다렸습니다. 수정 후에는 연결 후 3초 만에(전체 3.47초) `TimeoutException`과 함께 연결을 끊었습니다.
       - 초기화 실패(Device Name read 후 에러): 수정 전에는 엔진 로그에 `disconnect`와 `disconnect ignored, state is DISCONNECTING`이 함께 남았습니다(2회 호출). 수정 후에는 `disconnect` 1회.
       - INITIALIZING에서 connect 구독 해제: 수정 전 2초 뒤에도 **INITIALIZING**(GATT 연결 유지) → 수정 후 DISCONNECTED.
-- [ ] **[버그] BroadcastReceiver를 `finalize()`에서 해제함** — `impl/BleManagerEngineImpl.kt:69-77`. `finalize()`는 호출 시점이 보장되지 않습니다. `BleManager`를 여러 개 만들면 receiver와 deviceMap도 각각 생기므로, 같은 기기에 대한 객체가 중복됩니다. 싱글턴으로 강제하거나 `close()` API를 제공해야 합니다.
+- [x] **[버그] BroadcastReceiver를 `finalize()`에서 해제함** — `impl/BleManagerEngineImpl.kt:69-77`. `finalize()`는 호출 시점이 보장되지 않습니다. `BleManager`를 여러 개 만들면 receiver와 deviceMap도 각각 생기므로, 같은 기기에 대한 객체가 중복됩니다. 싱글턴으로 강제하거나 `close()` API를 제공해야 합니다.
+  - ✅ 해결 (`feature/close_ble_manager`)
+    - 실제로는 호출 시점보다 더 큰 문제가 있었습니다. 등록된 receiver(inner class)를 Context가 계속 참조하고 receiver가 엔진을 참조하므로, 엔진이 GC되지 않아 **`finalize()`가 호출될 수 없었습니다**. 버린 `BleManager`의 receiver와 기기 캐시가 프로세스가 끝날 때까지 남았습니다.
+    - `BleManager`가 `Closeable`을 구현합니다. `close()`는 블루투스 상태 receiver를 해제하고, 이 매니저가 연결한 기기(가상 기기 포함)를 끊습니다. 여러 번 불러도 됩니다.
+    - `close()`를 부르지 않고 버린 경우도 정리됩니다. receiver가 엔진을 약하게 참조하므로 엔진은 GC되고, receiver는 다음 블루투스 상태 broadcast를 받을 때 스스로 등록을 해제합니다. `finalize()`는 제거했습니다.
+    - 싱글턴은 강제하지 않았습니다(샘플 앱도 `BleManager`를 두 개 씀). `BleManager`마다 기기 캐시가 따로 있다는 점은 그대로입니다.
+    - ⚠️ 동작 변경: `close()`는 그 매니저로 연결한 기기를 끊습니다.
+    - 테스트: `BleManagerEngineImplCloseTest`(3건). 수정 전 코드에서 확인할 수 있는 "close 없이 버린 엔진이 GC되는지" 테스트가 실패했습니다(receiver가 엔진을 붙잡음). 나머지 2건은 새 `close()`의 receiver 해제(1회)와 연결 해제 테스트입니다.
+    - 실기기 확인(Fold5, 테스트 프로세스에서 `BleManager` 5개를 만들고 버린 뒤 GC, 호스트에서 `dumpsys activity broadcasts`로 그 프로세스의 `ACTION_STATE_CHANGED` receiver 수 확인):
+      - 수정 전: GC 후 **5개**, 블루투스를 껐다 켜고 다시 GC해도 **5개**.
+      - 수정 후 `close()` 없이: GC 후 5개 → 블루투스를 껐다 켠 뒤 **0개**(receiver가 스스로 해제).
+      - 수정 후 `close()` 호출: 바로 **0개**.
+      - 회귀: 살아 있는 매니저로 M446K에 연결한 상태에서 블루투스를 끄면 기존처럼 CONNECTED → DISCONNECTED로 정리됐습니다.
 - [ ] **[버그] `getDevice()`가 가상 기기보다 실제 엔진을 먼저 조회함 (실기기)** — `BleManager.kt:88-91`, `impl/BleManagerEngineImpl.kt:125-140`
   - `BleManager.getDeviceInner()`는 `engine.getDevice()`를 먼저 호출하고, 결과가 없을 때만 `virtualDevices`를 봅니다.
   - 샘플 앱의 가상 MAC(`12:34:56:78:90:ab`)은 소문자라서 `getRemoteDevice()`가 `IllegalArgumentException`을 던집니다. 그래서 가상 기기를 조회할 때마다 에러 로그와 스택트레이스가 남습니다(실기기 확인).
