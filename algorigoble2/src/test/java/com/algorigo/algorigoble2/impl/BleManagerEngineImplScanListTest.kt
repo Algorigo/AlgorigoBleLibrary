@@ -27,6 +27,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import java.util.concurrent.TimeUnit
 
 /**
  * 스캔 콜백의 CALLBACK_TYPE_MATCH_LOST 를 처리하지 않아, 사라진 기기도 발견된 기기로 목록에 남던 문제(P2) 테스트.
@@ -136,6 +137,65 @@ class BleManagerEngineImplScanListTest {
 
         assertEquals(listOf(A, B), observer.lastAddresses())
         assertEquals(-40, observer.values().last().first().second.rssi)
+    }
+
+    private fun scanWithLostTimeout(timeoutMillis: Long) = engine.scanObservable(
+        BleScanSettings.Builder().setDeviceLostTimeout(timeoutMillis).build()
+    ).test()
+
+    private fun advance(millis: Long) = rxRule.testScheduler.advanceTimeBy(millis, TimeUnit.MILLISECONDS)
+
+    @Test
+    fun deviceNotSeenForLostTimeout_isRemoved() {
+        val observer = scanWithLostTimeout(3_000)
+        callbackSlot.captured.onScanResult(ScanSettings.CALLBACK_TYPE_ALL_MATCHES, result(A))
+        advance(2_000)
+        callbackSlot.captured.onScanResult(ScanSettings.CALLBACK_TYPE_ALL_MATCHES, result(B))
+
+        advance(999)
+        assertEquals(listOf(A, B), observer.lastAddresses())
+        advance(1)
+        assertEquals(listOf(B), observer.lastAddresses())
+
+        // 계속 보이는 기기는 남는다
+        advance(1_000)
+        callbackSlot.captured.onScanResult(ScanSettings.CALLBACK_TYPE_ALL_MATCHES, result(B))
+        advance(2_000)
+        assertEquals(listOf(B), observer.lastAddresses())
+        advance(1_000)
+        assertEquals(listOf<String>(), observer.lastAddresses())
+
+        // 다시 보이면 목록에 다시 추가된다
+        callbackSlot.captured.onScanResult(ScanSettings.CALLBACK_TYPE_ALL_MATCHES, result(A))
+        assertEquals(listOf(A), observer.lastAddresses())
+        observer.assertNoErrors()
+    }
+
+    @Test
+    fun withoutLostTimeout_devicesStay() {
+        val observer = scanWithLostTimeout(0)
+        callbackSlot.captured.onScanResult(ScanSettings.CALLBACK_TYPE_ALL_MATCHES, result(A))
+        val emitted = observer.values().size
+
+        advance(10 * 60_000)
+
+        assertEquals(emitted, observer.values().size)
+        assertEquals(listOf(A), observer.lastAddresses())
+    }
+
+    @Test
+    fun lostTimeout_doesNotEmit_whenNothingIsRemoved() {
+        val observer = scanWithLostTimeout(5_000)
+        callbackSlot.captured.onScanResult(ScanSettings.CALLBACK_TYPE_ALL_MATCHES, result(A))
+        val emitted = observer.values().size
+
+        repeat(4) {
+            advance(1_000)
+            callbackSlot.captured.onScanResult(ScanSettings.CALLBACK_TYPE_ALL_MATCHES, result(A))
+        }
+
+        // 같은 기기의 결과마다 목록(ScanInfo 갱신)은 나오지만, 시간 확인만으로는 나오지 않는다
+        assertEquals(emitted + 4, observer.values().size)
     }
 
     companion object {

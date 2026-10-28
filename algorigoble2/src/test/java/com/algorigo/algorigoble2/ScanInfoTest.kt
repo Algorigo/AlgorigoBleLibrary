@@ -2,11 +2,14 @@ package com.algorigo.algorigoble2
 
 import android.bluetooth.le.ScanRecord
 import android.bluetooth.le.ScanResult
+import android.os.Build
+import android.os.ParcelUuid
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.util.UUID
 
 /**
  * API 32 이하에서 ScanInfo.advertisingDataMap 이 항상 비어 있던 문제(P2) 테스트.
@@ -66,5 +69,61 @@ class ScanInfoTest {
         assertArrayEquals(bytes(), parseAdvertisingData(bytes(0x01, 0x09))[0x09])
         assertEquals(mapOf<Int, ByteArray>(), parseAdvertisingData(null))
         assertEquals(mapOf<Int, ByteArray>(), parseAdvertisingData(bytes()))
+    }
+
+    private val heartRate = UUID.fromString("0000180d-0000-1000-8000-00805f9b34fb")
+    private val battery = UUID.fromString("0000180f-0000-1000-8000-00805f9b34fb")
+
+    private fun parcelUuid(uuid: UUID) = mockk<ParcelUuid>().also { every { it.uuid } returns uuid }
+
+    private fun scanResult(txPowerLevel: Int = Int.MIN_VALUE, resultTxPower: Int = ScanResult.TX_POWER_NOT_PRESENT): ScanResult {
+        val scanRecord = mockk<ScanRecord>(relaxed = true)
+        every { scanRecord.bytes } returns record
+        every { scanRecord.serviceUuids } returns listOf(parcelUuid(heartRate), parcelUuid(battery))
+        every { scanRecord.serviceData } returns mapOf(parcelUuid(battery) to bytes(0x64))
+        every { scanRecord.txPowerLevel } returns txPowerLevel
+        return mockk<ScanResult>(relaxed = true).also {
+            every { it.scanRecord } returns scanRecord
+            every { it.rssi } returns -60
+            every { it.txPower } returns resultTxPower
+            every { it.isConnectable } returns true
+            every { it.timestampNanos } returns 123_456_789L
+        }
+    }
+
+    @Test
+    fun scanInfo_hasServiceUuidsServiceDataAndTimestamp() {
+        val info = ScanInfo(scanResult(), Build.VERSION_CODES.O)
+
+        assertEquals(listOf(heartRate, battery), info.serviceUuids)
+        assertEquals(setOf(battery), info.serviceData!!.keys)
+        assertArrayEquals(bytes(0x64), info.serviceData!![battery])
+        assertEquals(123_456_789L, info.timestampNanos)
+        assertEquals(-60, info.rssi)
+    }
+
+    // 광고의 TX Power Level 이 먼저이고, 없으면 확장 광고의 TX power(API 26+), 둘 다 없으면 null
+    @Test
+    fun txPower_prefersAdvertisedLevel_thenResultTxPower() {
+        assertEquals(-8, ScanInfo(scanResult(txPowerLevel = -8, resultTxPower = 4), Build.VERSION_CODES.O).txPower)
+        assertEquals(4, ScanInfo(scanResult(resultTxPower = 4), Build.VERSION_CODES.O).txPower)
+        assertEquals(null, ScanInfo(scanResult(resultTxPower = 4), Build.VERSION_CODES.N).txPower)
+        assertEquals(null, ScanInfo(scanResult(), Build.VERSION_CODES.O).txPower)
+    }
+
+    @Test
+    fun isConnectable_isKnownOnlyOnApi26AndAbove() {
+        assertEquals(true, ScanInfo(scanResult(), Build.VERSION_CODES.O).isConnectable)
+        assertEquals(null, ScanInfo(scanResult(), Build.VERSION_CODES.N).isConnectable)
+    }
+
+    // 기존 생성자(rssi 만, 또는 rssi/광고/manufacturer data)로 만든 ScanInfo 의 새 항목은 null 이다
+    @Test
+    fun existingConstructors_stillWork() {
+        val info = ScanInfo(-50)
+        assertEquals(-50, info.rssi)
+        assertEquals(null, info.serviceUuids)
+        assertEquals(null, info.isConnectable)
+        assertEquals(null, ScanInfo(-50, mapOf(), null).timestampNanos)
     }
 }

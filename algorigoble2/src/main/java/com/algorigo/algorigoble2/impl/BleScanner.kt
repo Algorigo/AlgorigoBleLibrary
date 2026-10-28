@@ -12,7 +12,10 @@ import com.algorigo.algorigoble2.exception.SystemServiceException
 import com.algorigo.algorigoble2.logging.Ble
 import com.algorigo.logger.L
 import io.reactivex.rxjava3.core.Observable
+import io.reactivex.rxjava3.schedulers.Schedulers
 import io.reactivex.rxjava3.subjects.PublishSubject
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Created by jaehongyoo on 2018. 2. 14..
@@ -63,11 +66,17 @@ internal class BleScanner private constructor(private val bluetoothAdapter: Blue
 
     private val scanSubject = PublishSubject.create<ScanEvent>()
 
-    private fun startScanObservable(scanSettings: BleScanSettings, vararg scanFilters: BleScanFilter): Observable<ScanEvent> {
+    private fun startScanObservable(reservation: ScanStartLimiter.Reservation, scanSettings: BleScanSettings, vararg scanFilters: BleScanFilter): Observable<ScanEvent> {
         val scanCallback = BleScanCallback(scanFilters)
         return scanSubject
             .doOnSubscribe {
-                startScan(scanCallback, scanSettings, *scanFilters)
+                try {
+                    startScan(scanCallback, scanSettings, *scanFilters)
+                } catch (exception: Exception) {
+                    // 시작하지 못한 스캔은 시작 횟수 제한에 세지 않는다
+                    ScanStartLimiter.cancel(reservation)
+                    throw exception
+                }
             }
             .doFinally {
                 stopScan(scanCallback)
@@ -98,9 +107,29 @@ internal class BleScanner private constructor(private val bluetoothAdapter: Blue
     }
 
     companion object {
+        /** 스캔한다. 30초 안에 시작한 스캔이 이미 5번이면 Android 가 무시하지 않도록 시작을 미룬다. ([ScanStartLimiter]) */
         internal fun scanObservable(bluetoothAdapter: BluetoothAdapter, bleScanSettings: BleScanSettings, vararg bleScanFilters: BleScanFilter): Observable<ScanEvent> {
-            return BleScanner(bluetoothAdapter)
-                .startScanObservable(bleScanSettings, *bleScanFilters)
+            return Observable.defer {
+                val scheduler = Schedulers.computation()
+                val reservation = ScanStartLimiter.reserve(scheduler.now(TimeUnit.MILLISECONDS))
+                val scan = BleScanner(bluetoothAdapter).startScanObservable(reservation, bleScanSettings, *bleScanFilters)
+                if (reservation.delayMillis == 0L) {
+                    scan
+                } else {
+                    L.warning(Ble.Engine.Default, "startScan is delayed ${reservation.delayMillis}ms : Android ignores more than ${ScanStartLimiter.MAX_STARTS} scan starts in ${ScanStartLimiter.WINDOW_MILLIS / 1000} seconds")
+                    val started = AtomicBoolean(false)
+                    Observable.timer(reservation.delayMillis, TimeUnit.MILLISECONDS, scheduler)
+                        .flatMap {
+                            started.set(true)
+                            scan
+                        }
+                        .doOnDispose {
+                            if (!started.get()) {
+                                ScanStartLimiter.cancel(reservation)
+                            }
+                        }
+                }
+            }
         }
     }
 }

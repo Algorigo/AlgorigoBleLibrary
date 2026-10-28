@@ -20,12 +20,14 @@ import com.algorigo.algorigoble2.rx_util.RxBroadcastReceiver
 import com.algorigo.algorigoble2.virtual.VirtualDevice
 import com.algorigo.algorigoble2.virtual.VirtualDeviceEngine
 import com.algorigo.logger.L
+import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
 import io.reactivex.rxjava3.core.Maybe
 import io.reactivex.rxjava3.core.Observable
 import java.lang.ref.ReferenceQueue
 import java.lang.ref.WeakReference
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 import java.util.logging.Logger
 
 @SuppressLint("MissingPermission")
@@ -131,7 +133,7 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
             scanAvailableObservable
                 .switchMap {
                     BleScanner.scanObservable(bluetoothAdapter, scanSettings, *scanFilters)
-                        .collectScanList()
+                        .collectScanList(scanSettings.deviceLostTimeoutMillis)
                         .startWithItem(listOf())
                 }
         }
@@ -139,14 +141,41 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
 
     /**
      * 발견된 기기를 처음 발견된 순서대로 모아 목록으로 내보낸다. 같은 기기는 최신 [ScanInfo]로 바꾼다.
-     * 기기가 사라졌다는 결과(CALLBACK_TYPE_MATCH_LOST)이면 목록에서 뺀다. 목록이 바뀌지 않으면 내보내지 않는다.
+     * 기기가 사라졌다는 결과(CALLBACK_TYPE_MATCH_LOST)이거나 [deviceLostTimeoutMillis](0 이면 사용 안 함) 동안 다시 보이지 않으면 목록에서 뺀다.
+     * 목록이 바뀌지 않으면 내보내지 않는다.
      */
-    private fun Observable<BleScanner.ScanEvent>.collectScanList(): Observable<List<Pair<BleDevice, ScanInfo>>> = Observable.defer {
+    private fun Observable<BleScanner.ScanEvent>.collectScanList(deviceLostTimeoutMillis: Long): Observable<List<Pair<BleDevice, ScanInfo>>> = Observable.defer {
         // 구독마다 새 목록을 쓴다. 키는 BleDevice.deviceId 와 같은 MAC 주소
         val devices = LinkedHashMap<String, Pair<BleDevice, ScanInfo>>()
-        concatMapMaybe { event ->
+        val lastSeenMillis = HashMap<String, Long>()
+        // 스캔 결과처럼 main thread 에서 시간을 재고 목록을 내보낸다
+        val scheduler = AndroidSchedulers.mainThread()
+        val results = map { Optional.of(it) }
+        val events = if (deviceLostTimeoutMillis > 0) {
+            // 시간이 지나 사라진 기기를 확인하는 신호(빈 값)를 섞는다
+            val checkPeriodMillis = minOf(deviceLostTimeoutMillis, DEVICE_LOST_CHECK_PERIOD_MILLIS)
+            results.mergeWith(Observable.interval(checkPeriodMillis, TimeUnit.MILLISECONDS, scheduler).map { Optional.empty() })
+        } else {
+            results
+        }
+        events.concatMapMaybe { optionalEvent ->
+            val now = scheduler.now(TimeUnit.MILLISECONDS)
+            val event = optionalEvent.orElse(null)
+            if (event == null) {
+                val lost = lastSeenMillis.filterValues { now - it >= deviceLostTimeoutMillis }.keys
+                if (lost.isEmpty()) {
+                    return@concatMapMaybe Maybe.empty()
+                }
+                lost.forEach {
+                    devices.remove(it)
+                    lastSeenMillis.remove(it)
+                }
+                L.debug(Ble.Engine.Default, "scan device lost timeout : $lost")
+                return@concatMapMaybe Maybe.just(devices.values.toList())
+            }
             val address = event.result.device.address
             if (event.lost) {
+                lastSeenMillis.remove(address)
                 // 사라진 기기를 위해 BleDevice 를 새로 만들지 않는다
                 if (devices.remove(address) == null) {
                     return@concatMapMaybe Maybe.empty()
@@ -155,6 +184,7 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
                 val device = getBleDevice(event.result.device, event.result.scanRecord)
                     ?: return@concatMapMaybe Maybe.empty()
                 devices[address] = Pair(device, ScanInfo(event.result))
+                lastSeenMillis[address] = now
             }
             Maybe.just(devices.values.toList())
         }
@@ -288,6 +318,9 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
     }
 
     companion object {
+        // 시간이 지나 사라진 기기를 확인하는 최대 간격
+        private const val DEVICE_LOST_CHECK_PERIOD_MILLIS = 1_000L
+
         private fun unregister(context: Context, receiver: BroadcastReceiver) {
             try {
                 context.unregisterReceiver(receiver)
