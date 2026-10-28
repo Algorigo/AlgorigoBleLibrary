@@ -109,7 +109,7 @@ internal class BleDeviceEngineImpl(
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     // 끊긴 사유(status)를 진행 중이던 작업과 notification 의 에러로 전달한다
                     setState(State.DISCONNECTED(BleManager.DisconnectedException(status)))
-                    bleDevice.onDisconnected()
+                    bleDevice.notifyDisconnected()
                     gatt?.close()
                 }
             }
@@ -133,7 +133,7 @@ internal class BleDeviceEngineImpl(
                         L.warning(Ble.Device.Default, "$logLabel : service rediscovery failed : $status")
                     } else {
                         // 첫 서비스 탐색 실패: 서비스 없이 CONNECTED 로 만들지 않고 연결을 정리한다
-                        cancelConnecting(it, BleManager.GattOperationFailedException("DISCOVER_SERVICES", status))
+                        cancelConnecting(it, BleManager.GattOperationFailedException(BleDeviceEngine.OPERATION_DISCOVER_SERVICES, status))
                     }
                     return
                 }
@@ -435,14 +435,14 @@ internal class BleDeviceEngineImpl(
             .distinctUntilChanged()
     }
 
-    override fun connectCompletable(timeoutMillis: Long): Completable = Completable.defer {
+    override fun connectCompletable(timeoutMillis: Long, autoConnect: Boolean): Completable = Completable.defer {
         // 권한이 없으면 상태를 바꾸기 전에 실패시킨다
         BlePermissions.checkConnect(context, sdkInt)
         val gatt = startConnecting {
-            L.debug(Ble.Device.Default, "$logLabel : connectGatt call")
+            L.debug(Ble.Device.Default, "$logLabel : connectGatt call (autoConnect $autoConnect)")
             // 블루투스가 꺼져 있으면 connectGatt 가 null 을 반환한다. 상태를 CONNECTING 으로 바꾸기 전에 실패시킨다.
             // transport 를 지정하지 않으면(AUTO) 듀얼모드 기기에서 BR/EDR 로 GATT 연결을 시도해 status 133 으로 실패할 수 있다
-            val newGatt = bluetoothDevice.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+            val newGatt = bluetoothDevice.connectGatt(context, autoConnect, gattCallback, BluetoothDevice.TRANSPORT_LE)
                 ?: throw BleManager.BluetoothDisabledException()
             State.CONNECTING(newGatt)
         }.gatt
@@ -503,7 +503,7 @@ internal class BleDeviceEngineImpl(
             gatt.close()
             setState(State.DISCONNECTED(cause))
         }
-        bleDevice.onDisconnected()
+        bleDevice.notifyDisconnected()
     }
 
     private fun checkConnectionState(connectionState: BleDevice.ConnectionState): Completable {
@@ -536,7 +536,7 @@ internal class BleDeviceEngineImpl(
                             }
                         }
                         if (closed) {
-                            bleDevice.onDisconnected()
+                            bleDevice.notifyDisconnected()
                         }
                     }
                 }
@@ -979,7 +979,7 @@ internal class BleDeviceEngineImpl(
             }
         }
         if (closed != null) {
-            bleDevice.onDisconnected()
+            bleDevice.notifyDisconnected()
         }
     }
 

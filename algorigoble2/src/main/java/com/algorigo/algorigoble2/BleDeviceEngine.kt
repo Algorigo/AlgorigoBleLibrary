@@ -20,7 +20,8 @@ internal abstract class BleDeviceEngine() {
     fun isConnected(): Boolean = getConnectionStateObservable().firstOrError().map { it == BleDevice.ConnectionState.CONNECTED }.blockingGet()
     abstract fun getConnectionStateObservable(): Observable<BleDevice.ConnectionState>
 
-    abstract fun connectCompletable(timeoutMillis: Long): Completable
+    /** [autoConnect]는 BluetoothDevice.connectGatt 의 autoConnect 이다. */
+    abstract fun connectCompletable(timeoutMillis: Long, autoConnect: Boolean = false): Completable
 
     abstract fun disconnect()
 
@@ -38,4 +39,8 @@ internal abstract class BleDeviceEngine() {
     abstract fun readRssiSingle(): Single<Int>
 
     abstract fun requestConnectionPriorityCompletable(priority: BleDevice.ConnectionPriority): Completable
+
+    companion object {
+        const val OPERATION_DISCOVER_SERVICES = "DISCOVER_SERVICES"
+    }
 }
