@@ -232,7 +232,7 @@ internal class BleDeviceEngineImpl(
 
         private fun handleCharacteristicChanged(gatt: BluetoothGatt?, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
             L.debug(Ble.Device.Default, "$logLabel : onCharacteristicChanged:${characteristic.uuid}:${value.toHexString()}")
-            notificationRelay.accept(Pair(characteristic.uuid, value))
+            notificationRelay.accept(Pair(characteristic, value))
         }
 
         override fun onDescriptorRead(
@@ -320,10 +320,11 @@ internal class BleDeviceEngineImpl(
         }
     private val discoveringServicesRelay = BehaviorRelay.createDefault(false)
     private val replyRelay = PublishRelay.create<ReplyData>()
-    private val notificationRelay = PublishRelay.create<Pair<UUID, ByteArray>>()
+    // 어느 서비스의 characteristic 인지 구분할 수 있도록 characteristic 을 함께 전달한다
+    private val notificationRelay = PublishRelay.create<Pair<BluetoothGattCharacteristic, ByteArray>>()
     private val mtuRelay = PublishRelay.create<Pair<Int, Int>>()
     private val operationQueue = PublishRelay.create<QueuedOperation<*>>().toSerialized()
-    private val notificationSubscriptions = mutableMapOf<UUID, SharedNotification>()
+    private val notificationSubscriptions = mutableMapOf<NotificationKey, SharedNotification>()
     // GATT 요청을 보냈고 아직 콜백을 받지 못한 상태(Android BluetoothGatt 가 busy 인 상태)
     private val gattRequestPendingRelay = BehaviorRelay.createDefault(false)
 
@@ -546,10 +547,10 @@ internal class BleDeviceEngineImpl(
             .guardOperation()
     }
 
-    override fun readCharacteristicSingle(characteristicUuid: UUID): Single<ByteArray> {
+    override fun readCharacteristicSingle(serviceUuid: UUID?, characteristicUuid: UUID): Single<ByteArray> {
         return enqueue(getGattSingle()
             .flatMap { gatt ->
-                getCharacteristic(characteristicUuid)
+                getCharacteristic(serviceUuid, characteristicUuid)
                     .doOnSuccess {
                         if (it.properties and BluetoothGattCharacteristic.PROPERTY_READ == 0) {
                             throw IllegalCharacteristicProperty(it.properties, "READ_CHARACTERISTIC")
@@ -569,10 +570,10 @@ internal class BleDeviceEngineImpl(
             })
     }
 
-    override fun writeCharacteristicSingle(characteristicUuid: UUID, byteArray: ByteArray, writeType: BleDevice.WriteType): Single<ByteArray> {
+    override fun writeCharacteristicSingle(serviceUuid: UUID?, characteristicUuid: UUID, byteArray: ByteArray, writeType: BleDevice.WriteType): Single<ByteArray> {
         return enqueue(getGattSingle()
             .flatMap { gatt ->
-                getCharacteristic(characteristicUuid)
+                getCharacteristic(serviceUuid, characteristicUuid)
                     .flatMap { characteristic ->
                         val gattWriteType = resolveWriteType(characteristic.properties, writeType)
                         if (gattWriteType == null) {
@@ -622,15 +623,18 @@ internal class BleDeviceEngineImpl(
      * 같은 characteristic 의 notification 구독은 하나의 설정을 공유한다.
      * 첫 구독자가 CCCD 를 켜고, 마지막 구독자가 해제할 때 CCCD 를 끈다. (나중에 구독한 쪽은 설정 완료 결과를 바로 받는다)
      * 구독 중인 characteristic 에 다른 [BleDevice.NotificationType]을 요청하면 기존 구독이 끊기지 않도록 [IllegalStateException]으로 실패한다.
+     * 같은 characteristic 인지는 서비스까지 보고 판단한다. (여러 서비스에 같은 UUID 의 characteristic 이 있을 수 있다)
      */
-    override fun setupNotification(type: BleDevice.NotificationType, characteristicUuid: UUID): Observable<Observable<ByteArray>> {
+    override fun setupNotification(type: BleDevice.NotificationType, serviceUuid: UUID?, characteristicUuid: UUID): Observable<Observable<ByteArray>> {
         return Observable.defer {
+            // 서비스를 지정하지 않은 구독도 지정한 구독과 같은 characteristic 이면 설정을 공유하도록, 현재 연결의 서비스 목록으로 서비스를 정한다
+            val key = NotificationKey(serviceUuid ?: findServiceUuidOf(characteristicUuid), characteristicUuid)
             val subscription = synchronized(notificationSubscriptions) {
-                val existing = notificationSubscriptions[characteristicUuid]
+                val existing = notificationSubscriptions[key]
                 when {
                     existing == null || existing.subscriberCount == 0 ->
-                        SharedNotification(type, createNotificationObservable(type, characteristicUuid).replay(1).refCount())
-                            .also { notificationSubscriptions[characteristicUuid] = it }
+                        SharedNotification(type, createNotificationObservable(type, serviceUuid, characteristicUuid).replay(1).refCount())
+                            .also { notificationSubscriptions[key] = it }
                     existing.type == type -> existing
                     else -> return@defer Observable.error<Observable<ByteArray>>(
                         IllegalStateException("$characteristicUuid notification is already set up as ${existing.type}")
@@ -647,23 +651,34 @@ internal class BleDeviceEngineImpl(
         var subscriberCount = 0
     }
 
-    private fun createNotificationObservable(type: BleDevice.NotificationType, characteristicUuid: UUID): Observable<Observable<ByteArray>> = Observable.defer {
+    // serviceUuid 가 null 이면 연결되지 않아 서비스를 알 수 없는 경우다. (이때 구독은 DisconnectedException 으로 끝난다)
+    private data class NotificationKey(val serviceUuid: UUID?, val characteristicUuid: UUID)
+
+    /** 현재 연결에서 [characteristicUuid]를 가진 첫 서비스의 UUID. 연결되지 않았거나 찾지 못하면 null. */
+    private fun findServiceUuidOf(characteristicUuid: UUID): UUID? {
+        val gatt = (stateRelay.value as? State.CONNECTED)?.gatt ?: return null
+        return gatt.services.firstOrNull { it.getCharacteristic(characteristicUuid) != null }?.uuid
+    }
+
+    private fun createNotificationObservable(type: BleDevice.NotificationType, serviceUuid: UUID?, characteristicUuid: UUID): Observable<Observable<ByteArray>> = Observable.defer {
         // refCount 로 다시 구독될 수 있으므로 구독마다 새로 만든다
         var characteristic: BluetoothGattCharacteristic? = null
         gattObservable
             .flatMap { gatt ->
-                getCharacteristic(characteristicUuid)
+                getCharacteristic(serviceUuid, characteristicUuid)
                     .flatMap {
                         characteristic = it
                         L.debug(Ble.Device.Default, "$logLabel : setCharacteristicNotification : $characteristicUuid : true")
                         gatt.setCharacteristicNotification(it, true)
-                        writeDescriptor(gatt, it, type.byteArray)
+                        writeDescriptor(gatt, it, type.byteArray).map { _ -> it }
                     }
                     .toObservable()
                     .concatWith(Observable.never())
-                    .map {
+                    .map { enabled ->
+                        // 다른 서비스의 같은 UUID characteristic 에서 온 notification 은 전달하지 않는다
+                        val serviceOfEnabled = enabled.service?.uuid
                         notificationRelay
-                            .filter { it.first == characteristicUuid }
+                            .filter { it.first.uuid == characteristicUuid && it.first.service?.uuid == serviceOfEnabled }
                             .map { it.second }
                     }
                     .doFinally {
@@ -691,17 +706,21 @@ internal class BleDeviceEngineImpl(
             .map { it.services }
     }
 
-    private fun getCharacteristic(characteristicUuid: UUID): Single<BluetoothGattCharacteristic> {
+    /** [serviceUuid]가 null 이면 모든 서비스에서 처음 찾은 characteristic. 찾지 못하면 [BleManager.CharacteristicNotFoundException]. */
+    private fun getCharacteristic(serviceUuid: UUID?, characteristicUuid: UUID): Single<BluetoothGattCharacteristic> {
         return getServices()
             .flatMap { services ->
                 return@flatMap Single.fromCallable {
                     for (service in services) {
+                        if (serviceUuid != null && service.uuid != serviceUuid) {
+                            continue
+                        }
                         val characteristic = service.getCharacteristic(characteristicUuid)
                         if (characteristic != null) {
                             return@fromCallable characteristic
                         }
                     }
-                    throw IllegalStateException()
+                    throw BleManager.CharacteristicNotFoundException(serviceUuid, characteristicUuid)
                 }
             }
             .subscribeOn(Schedulers.io())

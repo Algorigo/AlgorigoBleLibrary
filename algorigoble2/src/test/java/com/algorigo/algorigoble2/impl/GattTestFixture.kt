@@ -102,11 +102,21 @@ internal class GattTestFixture(val bleDevice: BleDevice = BleDevice(), sdkInt: I
         callback.onConnectionStateChange(targetGatt, BluetoothGatt.GATT_SUCCESS, BluetoothProfile.STATE_DISCONNECTED)
     }
 
-    /** 서버 DB 에 characteristic 을 추가한다. 다음 서비스 탐색부터 gatt.services 에 나타난다. */
-    fun addCharacteristic(uuid: UUID, properties: Int, targetGatt: BluetoothGatt = gatt): BluetoothGattCharacteristic {
+    /**
+     * 서버 DB 에 characteristic 을 추가한다. 다음 서비스 탐색부터 gatt.services 에 나타난다.
+     * 호출마다 [serviceUuid]의 서비스를 하나 새로 만든다. (기본값은 호출마다 다른 서비스 UUID)
+     */
+    fun addCharacteristic(
+        uuid: UUID,
+        properties: Int,
+        targetGatt: BluetoothGatt = gatt,
+        serviceUuid: UUID = UUID.randomUUID(),
+    ): BluetoothGattCharacteristic {
         val characteristic = mockk<BluetoothGattCharacteristic>(relaxed = true)
         val descriptor = mockk<BluetoothGattDescriptor>(relaxed = true)
         val service = mockk<BluetoothGattService>(relaxed = true)
+        every { service.uuid } returns serviceUuid
+        every { characteristic.service } returns service
         every { characteristic.uuid } returns uuid
         every { characteristic.properties } returns properties
         every { characteristic.getDescriptor(CCCD_UUID) } returns descriptor

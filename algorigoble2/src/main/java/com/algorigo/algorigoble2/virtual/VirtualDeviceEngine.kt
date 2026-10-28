@@ -49,16 +49,17 @@ internal class VirtualDeviceEngine(private val virtualDevice: VirtualDevice) : B
         return virtualDevice.getCharacteristicsSingle()
     }
 
-    override fun readCharacteristicSingle(characteristicUuid: UUID): Single<ByteArray> {
+    // 가상 기기는 서비스를 구분하지 않는다
+    override fun readCharacteristicSingle(serviceUuid: UUID?, characteristicUuid: UUID): Single<ByteArray> {
         return virtualDevice.readCharacteristicSingleExternal(characteristicUuid)
     }
 
     // 가상 기기는 쓰기 타입을 구분하지 않는다
-    override fun writeCharacteristicSingle(characteristicUuid: UUID, byteArray: ByteArray, writeType: BleDevice.WriteType): Single<ByteArray> {
+    override fun writeCharacteristicSingle(serviceUuid: UUID?, characteristicUuid: UUID, byteArray: ByteArray, writeType: BleDevice.WriteType): Single<ByteArray> {
         return virtualDevice.writeCharacteristicSingleExternal(characteristicUuid, byteArray)
     }
 
-    override fun setupNotification(type: BleDevice.NotificationType, characteristicUuid: UUID): Observable<Observable<ByteArray>> {
+    override fun setupNotification(type: BleDevice.NotificationType, serviceUuid: UUID?, characteristicUuid: UUID): Observable<Observable<ByteArray>> {
         return virtualDevice.setupNotification(type, characteristicUuid)
             .map {
                 it

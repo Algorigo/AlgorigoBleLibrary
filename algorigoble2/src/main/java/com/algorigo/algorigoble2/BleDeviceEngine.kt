@@ -26,9 +26,10 @@ internal abstract class BleDeviceEngine() {
 
     abstract fun getCharacteristicsSingle(): Single<List<BleCharacterisic>>
 
-    abstract fun readCharacteristicSingle(characteristicUuid: UUID): Single<ByteArray>
-    abstract fun writeCharacteristicSingle(characteristicUuid: UUID, byteArray: ByteArray, writeType: BleDevice.WriteType): Single<ByteArray>
-    abstract fun setupNotification(type: BleDevice.NotificationType, characteristicUuid: UUID): Observable<Observable<ByteArray>>
+    // serviceUuid 가 null 이면 모든 서비스에서 처음 찾은 characteristic 을 쓴다
+    abstract fun readCharacteristicSingle(serviceUuid: UUID?, characteristicUuid: UUID): Single<ByteArray>
+    abstract fun writeCharacteristicSingle(serviceUuid: UUID?, characteristicUuid: UUID, byteArray: ByteArray, writeType: BleDevice.WriteType): Single<ByteArray>
+    abstract fun setupNotification(type: BleDevice.NotificationType, serviceUuid: UUID?, characteristicUuid: UUID): Observable<Observable<ByteArray>>
 
     abstract fun connectSppSocket(uuid: UUID? = null): Observable<BleSppSocket>
 
