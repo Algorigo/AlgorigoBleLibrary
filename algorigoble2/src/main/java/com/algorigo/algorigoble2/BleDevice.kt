@@ -315,6 +315,25 @@ open class BleDevice {
     fun writeCharacteristicSingle(serviceUuid: UUID, characteristicUuid: UUID, byteArray: ByteArray, writeType: WriteType = WriteType.DEFAULT) =
         engine.writeCharacteristicSingle(serviceUuid, characteristicUuid, byteArray, writeType).deliverToCallback()
 
+    // descriptor 도 characteristic 과 같이 서비스를 지정하지 않으면 처음 찾은 characteristic 의 것을 쓴다.
+    // characteristic 이나 descriptor 를 찾지 못하면 BleManager.CharacteristicNotFoundException / DescriptorNotFoundException 으로 실패한다
+
+    fun readDescriptorSingle(characteristicUuid: UUID, descriptorUuid: UUID): Single<ByteArray> =
+        engine.readDescriptorSingle(null, characteristicUuid, descriptorUuid).deliverToCallback()
+
+    fun readDescriptorSingle(serviceUuid: UUID, characteristicUuid: UUID, descriptorUuid: UUID): Single<ByteArray> =
+        engine.readDescriptorSingle(serviceUuid, characteristicUuid, descriptorUuid).deliverToCallback()
+
+    /**
+     * descriptor 에 쓰고 쓴 값을 돌려준다. 실패 status 로 끝나면 [BleManager.GattOperationFailedException].
+     * CCCD(0x2902)는 쓸 수 없다([IllegalArgumentException]). notification/indication 은 [setupNotification]으로 켜고 끈다.
+     */
+    fun writeDescriptorSingle(characteristicUuid: UUID, descriptorUuid: UUID, byteArray: ByteArray): Single<ByteArray> =
+        engine.writeDescriptorSingle(null, characteristicUuid, descriptorUuid, byteArray).deliverToCallback()
+
+    fun writeDescriptorSingle(serviceUuid: UUID, characteristicUuid: UUID, descriptorUuid: UUID, byteArray: ByteArray): Single<ByteArray> =
+        engine.writeDescriptorSingle(serviceUuid, characteristicUuid, descriptorUuid, byteArray).deliverToCallback()
+
     fun setupNotification(type: NotificationType, characteristicUuid: UUID) =
         deliverNotification(engine.setupNotification(type, null, characteristicUuid))
 

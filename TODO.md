@@ -724,7 +724,20 @@
       - Fold5 블루투스 끄기/켜기: 꺼지면 DISCONNECTED → 1초 후 재연결 시도가 `BluetoothDisabledException`으로 멈춤(`reconnect stopped until bluetooth is enabled`) → 블루투스를 켜면 1초 후 재연결 → CONNECTED, read 정상.
       - `autoConnect = true`: M446K(nRF)는 본딩하지 않은 상태에서 주기적으로 바뀌는 주소(RPA)로 광고하므로, Android가 백그라운드 연결 목록에 넣지 못하고(`Unable to add RPA ... to background connection`) 83~102ms 만에 status 135(0x87, GATT_ILLEGAL_PARAMETER)로 실패했습니다. 다시 해도 같으므로 재시도하지 않도록 했고(`connectRetryCount = 3`에서도 connectGatt 1회), autoConnect KDoc에 적었습니다. 본딩한 기기나 고정 주소 기기에서의 autoConnect 연결은 이 장비로 확인하지 못했습니다(두 폰을 본딩하지 않음).
       - 위에 적힌 "끊긴 직후 재연결 실패"는 이번에는 재현되지 않았습니다(같은 프로세스에서 끊김 직후 0ms/1000ms 뒤 재연결 50회, 별도 프로세스로 연달아 7회 모두 성공). 같은 증상(`DisconnectedException`)은 `connectRetryCount`로 다시 시도됩니다(단위 테스트로 확인).
-- [ ] **[기능] 일반 descriptor read/write API** — 현재는 CCCD 쓰기만 내부에서 사용합니다. `Type.READ_DESCRIPTOR`는 정의되어 있지만 쓰이지 않습니다.
+- [x] **[기능] 일반 descriptor read/write API** — 현재는 CCCD 쓰기만 내부에서 사용합니다. `Type.READ_DESCRIPTOR`는 정의되어 있지만 쓰이지 않습니다.
+  - ✅ 해결 (`feature/descriptor_api`)
+    - `BleDevice.readDescriptorSingle(characteristicUuid, descriptorUuid)`와 `writeDescriptorSingle(characteristicUuid, descriptorUuid, byteArray)`를 추가했습니다. characteristic API처럼 서비스 UUID를 받는 overload도 있습니다. 쓰기는 쓴 값을 돌려줍니다.
+    - read/write와 같은 작업 큐에서 처리하고, 연결 끊김·타임아웃·거절 재시도 규칙도 같습니다. 실패 status는 `GattOperationFailedException("READ_DESCRIPTOR"/"WRITE_DESCRIPTOR", status)`, 찾지 못하면 `CharacteristicNotFoundException`/`DescriptorNotFoundException`입니다. API 33+에서는 값을 인자로 받는 콜백/쓰기 API를 씁니다.
+    - 응답을 characteristic UUID와 descriptor UUID로 함께 구분합니다(`ReplyData.descriptorUuid`). 이전에는 descriptor 응답을 characteristic UUID로만 구분했습니다.
+    - CCCD(0x2902)는 `setupNotification()`이 notification 상태와 함께 관리하므로 직접 쓰면 `IllegalArgumentException`입니다(호출 실수). 읽기는 됩니다.
+    - 내부 CCCD 쓰기와 일반 descriptor 쓰기가 같은 요청 코드(`requestWriteDescriptor`)를 씁니다.
+    - 가상 기기: `VirtualDevice`에 `readDescriptorSingle`/`writeDescriptorSingle`(open)을 추가했습니다. 기본은 descriptor가 없다(`DescriptorNotFoundException`)이고 하위 클래스에서 override 합니다. 기존 하위 클래스는 수정할 필요가 없습니다.
+    - 테스트: `DescriptorTest`(11건: 값 읽기(API 32 이하/33+), 다른 descriptor 응답 무시, 쓰기(API 32 이하/33+), 실패 status, CCCD는 읽기만, 없는 descriptor/characteristic, 서비스 지정, 처리 중인 작업 대기, 연결 전 요청), `VirtualDeviceDescriptorTest`(3건). `GattTestFixture`에 `addDescriptor`를 추가했습니다.
+    - 실기기 확인(Fold5 → M446K nRF 서버의 aaa1 characteristic: descriptor 2902, aab0, 2901, 2904):
+      - 2901(user description) 읽기 `Important value`, 2904(presentation format) 읽기 `06000127010001`, aab0(custom) 읽기 `01233456789a` → 쓰기 `0a0b0c` → 다시 읽기 `0a0b0c`.
+      - 2901 쓰기: nRF 서버가 쓰기를 허용하지 않아 `GattOperationFailedException(WRITE_DESCRIPTOR, status 3)`.
+      - CCCD 읽기: notification 전 `0000` → `setupNotification` 중 `0100` → dispose 후 `0000`. CCCD 직접 쓰기는 `IllegalArgumentException`(GATT 호출 없음).
+      - 없는 descriptor: `DescriptorNotFoundException`. characteristic read 2건과 descriptor read 3건을 동시에 요청해도 모두 성공(287ms, 거절 없음).
 - [ ] **[기능] 블루투스 어댑터 상태와 권한 상태 공개 API** — 내부의 `scanAvailableObservable`을 `BleManager`에서 공개하고, BT 활성화 요청과 필요한 권한 목록을 제공하는 helper를 추가합니다.
 - [ ] **[기능] 스캔 개선**
   - 일정 시간 보이지 않는 기기를 목록에서 제거(device lost timeout)합니다.

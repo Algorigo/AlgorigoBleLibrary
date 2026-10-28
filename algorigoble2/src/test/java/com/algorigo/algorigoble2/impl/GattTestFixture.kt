@@ -67,6 +67,7 @@ internal class GattTestFixture(val bleDevice: BleDevice = BleDevice(), sdkInt: I
         every { newGatt.readCharacteristic(any()) } returns true
         every { newGatt.writeCharacteristic(any()) } returns true
         every { newGatt.writeDescriptor(any()) } returns true
+        every { newGatt.readDescriptor(any()) } returns true
         every { newGatt.writeCharacteristic(any(), any(), any()) } returns BluetoothStatusCodes.SUCCESS
         every { newGatt.writeDescriptor(any(), any()) } returns BluetoothStatusCodes.SUCCESS
         return newGatt
@@ -120,13 +121,24 @@ internal class GattTestFixture(val bleDevice: BleDevice = BleDevice(), sdkInt: I
         every { characteristic.service } returns service
         every { characteristic.uuid } returns uuid
         every { characteristic.properties } returns properties
+        every { characteristic.getDescriptor(any()) } returns null
         every { characteristic.getDescriptor(CCCD_UUID) } returns descriptor
+        every { descriptor.uuid } returns CCCD_UUID
         every { descriptor.characteristic } returns characteristic
         every { service.getCharacteristic(any()) } returns null
         every { service.getCharacteristic(uuid) } returns characteristic
         every { service.characteristics } returns listOf(characteristic)
         gattStates.getValue(targetGatt).serverServices.add(service)
         return characteristic
+    }
+
+    /** [characteristic]에 descriptor 를 추가한다. (CCCD 는 [addCharacteristic]이 이미 추가한다) */
+    fun addDescriptor(characteristic: BluetoothGattCharacteristic, uuid: UUID): BluetoothGattDescriptor {
+        val descriptor = mockk<BluetoothGattDescriptor>(relaxed = true)
+        every { descriptor.uuid } returns uuid
+        every { descriptor.characteristic } returns characteristic
+        every { characteristic.getDescriptor(uuid) } returns descriptor
+        return descriptor
     }
 
     companion object {
