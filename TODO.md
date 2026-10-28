@@ -514,7 +514,17 @@
   - `inputStream.read()`의 반환 길이를 확인하지 않습니다. 그래서 일부만 읽혔을 때 뒤쪽이 0으로 채워진 배열이 반환됩니다.
   - 인자 검증의 `size < -2`는 `size < -1`의 오타입니다.
   - 생성자 안에서 블로킹 `connect()`를 호출하고, 연결하기 전에 `cancelDiscovery()`를 호출하지 않습니다.
-- [ ] **[버그] VirtualDevice 동작이 실기기와 다름** — `virtual/VirtualDeviceEngine.kt:44`, `virtual/VirtualDevice.kt:77`. `disconnect()`가 `bleDevice.onDisconnected()`를 호출하지 않습니다. 그래서 가상 `InitializableBleDevice`는 재연결 시 초기화하기 전부터 CONNECTED로 보고합니다. `notifyByteArray()`는 notification마다 새 `Thread`를 생성하므로 **순서가 보장되지 않습니다**.
+- [x] **[버그] VirtualDevice 동작이 실기기와 다름** — `virtual/VirtualDeviceEngine.kt:44`, `virtual/VirtualDevice.kt:77`. `disconnect()`가 `bleDevice.onDisconnected()`를 호출하지 않습니다. 그래서 가상 `InitializableBleDevice`는 재연결 시 초기화하기 전부터 CONNECTED로 보고합니다. `notifyByteArray()`는 notification마다 새 `Thread`를 생성하므로 **순서가 보장되지 않습니다**.
+  - ✅ 해결 (`feature/virtual_device_fidelity`)
+    - `disconnect()`가 실제로 연결을 끊을 때(DISCONNECTED가 아닐 때) `bleDevice.onDisconnected()`를 호출합니다. 이미 끊긴 상태에서 다시 불러도 호출하지 않습니다.
+    - `notifyByteArray()`는 기기마다 하나인 worker(`Schedulers.io().createWorker()`)로 전달합니다. 호출한 스레드와 분리해서 전달하는 것은 같고, **보낸 순서대로** 전달합니다.
+    - 함께 수정: 연결 중(100ms)에 `disconnect()`가 불리면, 이전에는 타이머가 끝난 뒤 CONNECTED가 됐습니다. 이제 실기기 엔진처럼 연결하지 않고 `DisconnectedException`으로 끝납니다. 연결 구독을 해제하면 CONNECTING에 머물지 않고 DISCONNECTED로 돌아갑니다.
+    - 테스트: `VirtualDeviceEngineFidelityTest`(4건) + `VirtualDeviceNotificationOrderTest`(1건, 실제 스레드로 1000개 전달). 수정 전 코드에서는 5건 모두 실패했습니다.
+    - 실기기 확인(Fold5, 라이브러리 테스트 APK에서 `BleManager`에 가상 기기 3개 등록):
+      - notification 3000개를 연속으로 보냄: 수정 전 **순서가 뒤바뀐 쌍 103개** → 수정 후 0개(3000개 모두 수신).
+      - 초기화에 1초 걸리는 `InitializableBleDevice` 연결 → 해제 → 재연결: 수정 전에는 재연결 300ms 뒤 상태가 **CONNECTED**(상태 순서 `… DISCONNECTED, CONNECTING, CONNECTED`). 수정 후에는 INITIALIZING이고 순서는 `… DISCONNECTED, CONNECTING, INITIALIZING, CONNECTED`(첫 연결과 같음).
+      - 연결 중 `disconnect()`: 수정 전 500ms 뒤 **CONNECTED**, connect 정상 완료 → 수정 후 DISCONNECTED, connect는 에러.
+      - 참고: 처음에 가상 기기 주소를 숫자로만 된 유효한 MAC(`12:34:56:78:90:01`)으로 등록했더니 `getDevice()`가 가상 기기 대신 실제 기기를 돌려줘서 연결이 10초 타임아웃으로 실패했습니다. 아래 `getDevice()` 조회 순서 항목의 실제 사례입니다.
 - [x] **[버그] 작업이 타임아웃된 뒤에도 BluetoothGatt가 busy로 남아 다음 작업이 연달아 실패함 (실기기)** — `impl/BleDeviceEngineImpl.kt`(`enqueue`/`guardOperation`)
   - ✅ 해결 (`feature/wait_gatt_release_after_timeout`)
     - GATT 요청을 보낸 뒤 콜백을 받기 전까지 "요청 처리 중"(`gattRequestPendingRelay`)으로 표시합니다. 표시는 `sendGattRequest()`에서 켜고, read/write/descriptor/MTU 콜백에서 끕니다.
