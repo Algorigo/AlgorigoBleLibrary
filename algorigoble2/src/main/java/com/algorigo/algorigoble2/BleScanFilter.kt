@@ -56,7 +56,8 @@ class BleScanFilter private constructor(
 
         @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
         fun setServiceUuid(serviceUuid: ParcelUuid?, uuidMask: ParcelUuid?): Builder {
-            require(!(this.uuidMask != null && this.serviceUuid == null)) { "uuid is null while uuidMask is not null!" }
+            // 이전 값이 아니라 이번에 받은 인자를 검사한다. (uuid 없이 mask 만 있으면 스캔 시작 시 필터가 조용히 빠진다)
+            require(!(uuidMask != null && serviceUuid == null)) { "uuid is null while uuidMask is not null!" }
             this.serviceUuid = serviceUuid
             this.uuidMask = uuidMask
             return this
@@ -100,12 +101,9 @@ class BleScanFilter private constructor(
             serviceDataUuid: ParcelUuid,
             serviceData: ByteArray, serviceDataMask: ByteArray
         ): Builder {
-            if (this.serviceDataMask != null) {
-                requireNotNull(this.serviceData) { "serviceData is null while serviceDataMask is not null" }
-                // Since the mServiceDataMask is a bit mask for mServiceData, the lengths of the two
-                // byte array need to be the same.
-                require(this.serviceData!!.size == this.serviceDataMask!!.size) { "size mismatch for service data and service data mask" }
-            }
+            // mask 는 data 의 bit mask 이므로 길이가 같아야 한다. 이전 값이 아니라 이번에 받은 인자를 검사한다.
+            // (검사를 통과하면 스캔을 시작할 때 Android ScanFilter.Builder 에서 IllegalArgumentException 이 난다)
+            require(serviceData.size == serviceDataMask.size) { "size mismatch for service data and service data mask" }
             this.serviceDataUuid = serviceDataUuid
             this.serviceData = serviceData
             this.serviceDataMask = serviceDataMask
@@ -131,12 +129,9 @@ class BleScanFilter private constructor(
             manufacturerDataMask: ByteArray
         ): Builder {
             require(!(manufacturerData != null && manufacturerId < 0)) { "invalid manufacture id" }
-            if (this.manufacturerDataMask != null) {
-                requireNotNull(this.manufacturerData) { "manufacturerData is null while manufacturerDataMask is not null" }
-                // Since the mManufacturerDataMask is a bit mask for mManufacturerData, the lengths
-                // of the two byte array need to be the same.
-                require(this.manufacturerData!!.size == this.manufacturerDataMask!!.size) { "size mismatch for manufacturerData and manufacturerDataMask" }
-            }
+            // mask 는 data 의 bit mask 이므로 data 가 있어야 하고 길이가 같아야 한다. 이전 값이 아니라 이번에 받은 인자를 검사한다.
+            requireNotNull(manufacturerData) { "manufacturerData is null while manufacturerDataMask is not null" }
+            require(manufacturerData.size == manufacturerDataMask.size) { "size mismatch for manufacturerData and manufacturerDataMask" }
             this.manufacturerId = manufacturerId
             this.manufacturerData = manufacturerData
             this.manufacturerDataMask = manufacturerDataMask
