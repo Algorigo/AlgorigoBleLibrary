@@ -793,9 +793,21 @@
     - Kotlin 소스 호환: 샘플 앱을 옛 이름 그대로 두고 컴파일하면 `import`, 상속(`object : BleCharacterisic()`), `override fun getCharacteristicsSingle(): Single<List<BleCharacterisic>>` 모두 deprecated 경고만 나고 컴파일됐습니다. typealias는 같은 타입이라 override 반환 타입도 그대로 맞습니다. (새 이름으로 옮긴 뒤에는 경고 없음)
     - ⚠️ 바이너리/Java 호환 아님: JVM 클래스 이름이 바뀌므로 사용하는 앱은 다시 컴파일해야 하고, typealias는 Java에서 보이지 않으므로 Java 코드는 새 이름으로 바꿔야 합니다.
     - 확인: 라이브러리 빌드, 샘플 앱 컴파일, 단위 테스트 통과. (이름 변경이라 실기기 확인은 하지 않았습니다)
-- [ ] **[구조]** 죽은 코드 제거:
+- [x] **[구조]** 죽은 코드 제거:
   - 코드: `BleManager.Engine` enum(RX_ANDROID_BLE 흔적), `BleScanFilter.isOk`의 LOLLIPOP 분기, `@RequiresApi(LOLLIPOP/M)`, `BleManagerEngineImpl`의 pre-N 분기(minSdk 24), 미사용 `ConnectionStateData`, `Ble.*.Rx`/`Provisioning` Tag, 미사용 `TAG`/`LOG_TAG`
   - 빌드: 미사용 `gson`/`rxkotlin`/`rxandroid` 의존성(현재 POM에 runtime 의존성으로 배포됨), 미사용 `jreleaser` 플러그인, CI의 android-29 system image 설치
+  - ✅ 해결 (`feature/remove_dead_code`)
+    - 코드:
+      - `BleManager.Engine`: 엔진을 고르는 `when` 분기와 주석 처리된 RxAndroidBle 코드를 지우고, 기본 생성자에서 `engine` 인자를 뺐습니다. 이 인자를 넘기던 호출이 깨지지 않도록 `Engine` enum과 `(context, delegate, engine, virtualDevices)` 생성자는 `@Deprecated`로 남겼습니다(`ReplaceWith` 제공). 다음 major 버전에서 지울 수 있습니다.
+      - 지움: `BleManager.ConnectionStateData`(⚠️ 공개 클래스였지만 라이브러리 어디서도 쓰지 않음), `Ble.Engine.Rx`/`Ble.Device.Rx`/`Ble.Device.Provisioning` 태그(상위 태그가 `internal`이라 외부에서 쓸 수 없었음), 미사용 `TAG`/`LOG_TAG` 4개.
+      - minSdk 24에서 항상 참인 분기를 지웠습니다: `BleScanFilter.isOk`의 LOLLIPOP 미만 이름/주소 필터(이름/주소는 `startScan`의 ScanFilter가 거르므로 rssi 조건만 남음), `BleScanOptionsConverter`의 M 분기, Builder와 변환기의 `@RequiresApi(LOLLIPOP/M)`. (`@RequiresApi(O/Q)`는 minSdk보다 높아서 그대로 둠)
+      - `BleManagerEngineImpl`의 pre-N 분기는 이전 작업에서 이미 없어져 있었습니다.
+    - 빌드:
+      - `gson`, `rxkotlin` 의존성을 지웠습니다. 생성한 POM의 runtime 의존성에서 두 개가 빠졌습니다(kotlin-reflect, rxandroid, rxrelay만 남음). `rxandroid`는 P2 스캔 개선에서 사라진 기기 timeout이 `AndroidSchedulers`를 쓰게 되어 남겼습니다.
+      - 설정 블록 없이 적용만 되어 있던 `jreleaser` 플러그인(buildscript classpath 포함)을 지웠습니다. 배포는 CI가 `build/staging-deploy`를 zip으로 올리므로 영향이 없습니다.
+      - CI(`.circleci/config.yml`)에서 쓰지 않는 android-29 system image 설치 단계를 지웠습니다(에뮬레이터를 띄우지 않음).
+    - CLAUDE.md의 `Engine` 설명을 고쳤습니다.
+    - 테스트: `BleManagerVirtualLookupTest`에 deprecated 생성자로 만든 `BleManager`가 같은 동작(가상 기기 조회)을 하는지 1건을 추가했습니다. `./gradlew build`(lint 포함) 통과, 샘플 앱 컴파일 통과, Fold5에서 `connectedDebugAndroidTest` 9건 통과(스캔 설정/필터 변환 포함).
 - [ ] **[구조]** `BleDevice.connect()`가 Disposable을 버립니다(fire-and-forget). 제거하거나 Disposable을 반환해야 합니다.
 - [ ] **[구조]** bond 상태를 1초 간격 polling으로 확인합니다. `ACTION_BOND_STATE_CHANGED` broadcast로 바꾸고 타임아웃을 추가합니다. `removeBond`는 리플렉션으로 숨겨진 API를 호출하므로 향후 막힐 수 있습니다.
 - [ ] **[구조]** 라이브러리 manifest에 `uses-feature bluetooth_le required="true"`가 있어서 사용하는 앱에 설치 제한이 강제됩니다. 또 `neverForLocation` 플래그 때문에 비콘 스캔 결과가 필터링됩니다. `required="false"`로 바꾸거나, 앱에서 `tools:replace/remove`로 덮어쓰는 방법을 문서화합니다.
