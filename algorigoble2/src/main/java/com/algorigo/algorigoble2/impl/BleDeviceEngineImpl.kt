@@ -1065,10 +1065,11 @@ internal class BleDeviceEngineImpl(
     }
 }
 
-fun ByteArray.toHexString(): String {
+// 로그용. Kotlin 표준 라이브러리의 toHexString 과 이름이 같으므로 공개하지 않는다
+internal fun ByteArray.toHexString(): String {
     return joinToString(separator = "") { String.format("%02x", it) }
 }
 
-fun BluetoothDevice.deleteBond(): Boolean {
+internal fun BluetoothDevice.deleteBond(): Boolean {
     return javaClass.getMethod("removeBond").invoke(this) as Boolean
 }

@@ -784,7 +784,10 @@
   - ✅ 해결 (`feature/remove_rx_enumerated`): 라이브러리와 샘플 앱 어디에서도 쓰지 않는 함수라서, 패키지를 붙이고 고치는 대신 파일을 지웠습니다. package 선언이 없는 파일은 이것 하나였습니다.
     - ⚠️ 공개 API 제거: 사용하는 앱이 `enumerated()`를 쓰고 있었다면 컴파일되지 않습니다. (BLE와 관계없는 범용 Rx 확장이라 `zipWith(Observable.range(...))` 등으로 대체할 수 있습니다)
     - 확인: release AAR의 `classes.jar`에서 루트 패키지 클래스가 `RxEnumeratedKt`, `RxEnumeratedKt$enumerated$1` 2개에서 0개가 됐습니다. 라이브러리 빌드, 샘플 앱 컴파일, 단위 테스트 통과. (동작 코드가 아니라 실기기 확인은 하지 않았습니다)
-- [ ] **[구조]** 공개 top-level 확장 함수인 `ByteArray.toHexString()`(Kotlin stdlib의 `toHexString`과 이름이 같음)과 `BluetoothDevice.deleteBond()`(`impl/BleDeviceEngineImpl.kt:546-552`)를 `internal`로 바꿉니다. `impl/BleCharacteristicImpl`도 public이므로 `internal`로 바꿉니다.
+- [x] **[구조]** 공개 top-level 확장 함수인 `ByteArray.toHexString()`(Kotlin stdlib의 `toHexString`과 이름이 같음)과 `BluetoothDevice.deleteBond()`(`impl/BleDeviceEngineImpl.kt:546-552`)를 `internal`로 바꿉니다. `impl/BleCharacteristicImpl`도 public이므로 `internal`로 바꿉니다.
+  - ✅ 해결 (`feature/internal_helpers`): 세 가지를 `internal`로 바꿨습니다. 같은 이유로 엔진만 쓰는 `extension.Context.locationManager`와 `rx_util.RxBroadcastReceiver`도 `internal`로 바꿨습니다. `rx_util.collectListLastSortedIndex`는 범용 유틸로 공개해 둔 것이라(P2에서 버그를 고침) 그대로 두었습니다.
+    - ⚠️ 공개 API 축소: 사용하는 앱이 이 함수들을 import 해서 쓰고 있었다면 컴파일되지 않습니다. `characteristic`은 `BleCharacterisic` 타입으로 받으므로 `BleCharacteristicImpl`을 직접 쓸 일은 없습니다.
+    - 확인: 샘플 앱 모듈에 다섯 가지를 쓰는 임시 파일을 넣고 컴파일하면 모두 `Cannot access ...: it is internal`로 실패했습니다(확인 후 지움). 이때 `byteArrayOf(1).toHexString()`은 라이브러리 함수 대신 표준 라이브러리의 실험 API(`@ExperimentalStdlibApi`)로 해석되어, 두 함수가 이름으로 충돌하던 것을 확인했습니다. 라이브러리 빌드, 단위 테스트 통과. (동작 변화가 없어 실기기 확인은 하지 않았습니다)
 - [ ] **[구조]** `BleCharacterisic` 오타: 올바른 이름의 타입을 추가하고 기존 이름은 `@Deprecated typealias`로 남겨서 호환성을 유지합니다.
 - [ ] **[구조]** 죽은 코드 제거:
   - 코드: `BleManager.Engine` enum(RX_ANDROID_BLE 흔적), `BleScanFilter.isOk`의 LOLLIPOP 분기, `@RequiresApi(LOLLIPOP/M)`, `BleManagerEngineImpl`의 pre-N 분기(minSdk 24), 미사용 `ConnectionStateData`, `Ble.*.Rx`/`Provisioning` Tag, 미사용 `TAG`/`LOG_TAG`
