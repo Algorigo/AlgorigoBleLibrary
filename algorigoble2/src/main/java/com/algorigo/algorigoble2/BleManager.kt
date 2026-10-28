@@ -10,6 +10,7 @@ import com.algorigo.algorigoble2.virtual.VirtualDevice
 import com.algorigo.logger.L
 import com.algorigo.logger.LogManager
 import io.reactivex.rxjava3.core.Observable
+import java.io.Closeable
 import java.util.UUID
 import java.util.logging.Logger
 
@@ -18,7 +19,7 @@ class BleManager(
     private val delegate: BleDeviceDelegate = defaultBleDeviceDelegate,
     engine: Engine = Engine.ALGORIGO_BLE,
     virtualDevices: Array<Pair<VirtualDevice, BleDevice>> = arrayOf()
-) {
+) : Closeable {
 
     class BondFailedException : Exception()
     class DisconnectedException : Exception()
@@ -133,6 +134,18 @@ class BleManager(
             }
     }
     fun getConnectionStateObservable() = engine.getConnectionStateObservable()
+
+    /**
+     * 블루투스 상태를 감지하려고 등록한 receiver 를 해제하고, 이 BleManager 가 연결한 기기(가상 기기 포함)를 끊는다.
+     * BleManager 를 더 이상 쓰지 않을 때 부른다. 여러 번 불러도 된다.
+     * (부르지 않고 버린 BleManager 도 GC 되며, 그 receiver 는 다음 블루투스 상태 broadcast 때 해제된다)
+     */
+    override fun close() {
+        engine.close()
+        virtualDevices.values
+            .filter { it.connectionState != BleDevice.ConnectionState.DISCONNECTED }
+            .forEach { it.disconnect() }
+    }
 
     companion object {
         private val defaultBleDeviceDelegate = object : BleDeviceDelegate() {

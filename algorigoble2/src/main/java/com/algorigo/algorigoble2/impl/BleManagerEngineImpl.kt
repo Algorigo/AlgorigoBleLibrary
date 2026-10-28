@@ -65,22 +65,33 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
         // 위치 provider 변경(API 30 이하)처럼 상태가 그대로인 broadcast 로 같은 값이 다시 나와도 스캔을 다시 시작하지 않는다
         .distinctUntilChanged()
 
-    private val bluetoothReceiver = object : BroadcastReceiver() {
+    /**
+     * 블루투스가 꺼지면 이 엔진의 기기들을 정리한다.
+     * 등록된 receiver 는 앱(Context)이 계속 참조하므로, 엔진을 약하게 참조해서 close() 를 부르지 않고 버린 엔진도 GC 되게 한다.
+     * 엔진이 GC 된 뒤에 broadcast 를 받으면 스스로 등록을 해제한다.
+     */
+    private class BluetoothStateReceiver(engine: BleManagerEngineImpl) : BroadcastReceiver() {
+        private val engineReference = WeakReference(engine)
+
         override fun onReceive(context: Context?, intent: Intent?) {
-            when (intent?.action) {
-                BluetoothAdapter.ACTION_STATE_CHANGED -> {
-                    when (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1)) {
-                        BluetoothAdapter.STATE_OFF -> {
-                            getDevices()
-                                .forEach {
-                                    (it.engine as? BleDeviceEngineImpl)?.onBluetoothDisabled()
-                                }
-                        }
+            val engine = engineReference.get()
+            if (engine == null) {
+                context?.applicationContext?.let { unregister(it, this) }
+                return
+            }
+            if (intent?.action == BluetoothAdapter.ACTION_STATE_CHANGED &&
+                intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1) == BluetoothAdapter.STATE_OFF) {
+                engine.getDevices()
+                    .forEach {
+                        (it.engine as? BleDeviceEngineImpl)?.onBluetoothDisabled()
                     }
-                }
             }
         }
     }
+
+    private val bluetoothReceiver = BluetoothStateReceiver(this)
+    @Volatile
+    private var closed = false
 
     init {
         context.registerReceiver(
@@ -89,8 +100,18 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
         )
     }
 
-    protected fun finalize() {
-        context.unregisterReceiver(bluetoothReceiver)
+    override fun close() {
+        synchronized(this) {
+            if (closed) {
+                return
+            }
+            closed = true
+        }
+        unregister(context, bluetoothReceiver)
+        // 블루투스 꺼짐을 더 이상 감지하지 않으므로, 이 엔진이 연결한 기기는 끊는다
+        getDevices()
+            .filter { it.connectionState != BleDevice.ConnectionState.DISCONNECTED }
+            .forEach { it.disconnect() }
     }
 
     override fun scanObservable(
@@ -257,6 +278,16 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
                 onChanged(it)
                 connectionStateRelay.accept(Pair(device, it))
             }, {})
+    }
+
+    companion object {
+        private fun unregister(context: Context, receiver: BroadcastReceiver) {
+            try {
+                context.unregisterReceiver(receiver)
+            } catch (exception: IllegalArgumentException) {
+                // 이미 해제된 receiver
+            }
+        }
     }
 
     /** GC 된 기기의 항목을 map 에서 지운다. (deviceMap 잠금 안에서 호출) */
