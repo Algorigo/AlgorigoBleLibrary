@@ -49,21 +49,22 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
     private val deviceMap: MutableMap<BluetoothDevice, DeviceEntry> = ConcurrentHashMap()
     private val releasedDevices = ReferenceQueue<BleDevice>()
 
-    private val scanAvailableObservable = scanAvailableObservable(context)
-        .doOnNext { (isLocationEnabled, isBluetoothEnabled) ->
-            if (!isLocationEnabled && isBluetoothEnabled) {
+    // 위치 provider 변경(API 30 이하)처럼 상태가 그대로인 broadcast 로 같은 값이 다시 나와도 다시 내보내지 않는다
+    private val scanAvailabilityObservable = scanAvailabilityObservable(context)
+        .distinctUntilChanged()
+
+    // 스캔에 쓴다. 스캔할 수 없는 상태가 되면 그 이유로 에러를 낸다
+    private val scanAvailableObservable = scanAvailabilityObservable
+        .doOnNext { availability ->
+            if (!availability.locationEnabled && availability.bluetoothEnabled) {
                 throw SystemServiceException.LocationUnavailableException("System location is unavailable")
-            } else if (isLocationEnabled && !isBluetoothEnabled) {
+            } else if (availability.locationEnabled && !availability.bluetoothEnabled) {
                 throw SystemServiceException.BluetoothUnavailableException("System bluetooth is unavailable")
-            } else if (!isLocationEnabled && !isBluetoothEnabled) {
+            } else if (!availability.locationEnabled && !availability.bluetoothEnabled) {
                 throw SystemServiceException.AllUnavailableException("All system services(bluetooth, location) are unavailable")
             }
         }
-        .map {
-            it.first && it.second
-        }
-        // 위치 provider 변경(API 30 이하)처럼 상태가 그대로인 broadcast 로 같은 값이 다시 나와도 스캔을 다시 시작하지 않는다
-        .distinctUntilChanged()
+        .map { it.available }
 
     /**
      * 블루투스가 꺼지면 이 엔진의 기기들을 정리한다.
@@ -249,15 +250,20 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
                 })
     }
 
-    private fun scanAvailableObservable(context: Context): Observable<Pair<Boolean, Boolean>> {
+    private fun scanAvailabilityObservable(context: Context): Observable<ScanAvailability> {
         return Observable
             .combineLatest(
                 locationEnabledObservable(context),
                 bluetoothEnabledObservable(context)
             ) { isLocationEnabled, isBluetoothEnabled ->
-                isLocationEnabled to isBluetoothEnabled
+                ScanAvailability(bluetoothEnabled = isBluetoothEnabled, locationEnabled = isLocationEnabled)
             }
     }
+
+    override val isBluetoothEnabled: Boolean
+        get() = bluetoothAdapter.isEnabled
+
+    override fun getScanAvailabilityObservable(): Observable<ScanAvailability> = scanAvailabilityObservable
 
     override fun initVirtualDevice(virtualDevice: VirtualDevice, bleDevice: BleDevice): BleDevice {
         return bleDevice.also { device ->

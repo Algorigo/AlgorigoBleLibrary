@@ -1,10 +1,15 @@
 package com.algorigo.algorigoble2
 
+import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.le.ScanRecord
 import android.content.Context
+import android.content.Intent
+import android.os.Build
+import android.provider.Settings
 import android.util.Log
 import com.algorigo.algorigoble2.impl.BleManagerEngineImpl
+import com.algorigo.algorigoble2.impl.BlePermissions
 import com.algorigo.algorigoble2.logging.Ble
 import com.algorigo.algorigoble2.virtual.VirtualDevice
 import com.algorigo.logger.L
@@ -161,6 +166,17 @@ class BleManager(
     /** 이 BleManager 가 관리하는 기기들의 상태 변화. [BleDevice]와 같이 callback 스레드(io)에서 전달된다. */
     fun getConnectionStateObservable() = engine.getConnectionStateObservable().deliverToCallback()
 
+    /** 블루투스가 켜져 있는지. 켜지는 중이나 꺼지는 중이면 false 다. 꺼져 있으면 [createEnableBluetoothIntent]로 켜 달라고 요청할 수 있다. */
+    val isBluetoothEnabled: Boolean
+        get() = engine.isBluetoothEnabled
+
+    /**
+     * 스캔에 필요한 시스템 서비스(블루투스, API 30 이하에서는 위치) 상태. 구독하면 현재 상태를 먼저 내보내고, 바뀔 때마다 내보낸다.
+     * 에러로 끝나지 않는다. ([scanObservable]은 스캔할 수 없는 상태가 되면 [com.algorigo.algorigoble2.exception.SystemServiceException]으로 끝난다)
+     * callback 스레드(io)에서 전달된다.
+     */
+    fun getScanAvailabilityObservable(): Observable<ScanAvailability> = engine.getScanAvailabilityObservable().deliverToCallback()
+
     /**
      * 블루투스 상태를 감지하려고 등록한 receiver 를 해제하고, 이 BleManager 가 연결한 기기(가상 기기 포함)를 끊는다.
      * BleManager 를 더 이상 쓰지 않을 때 부른다. 여러 번 불러도 된다.
@@ -183,5 +199,34 @@ class BleManager(
         fun getLogger(): Logger {
             return LogManager.getLogger(Ble)
         }
+
+        /**
+         * 이 기기(Android 버전)에서 스캔과 연결에 필요한 런타임 권한. 앱에서 요청할 때 쓴다.
+         * (API 31+ BLUETOOTH_SCAN, BLUETOOTH_CONNECT / API 29~30 ACCESS_FINE_LOCATION / 그 이하 ACCESS_COARSE_LOCATION)
+         * 권한이 없으면 해당 작업이 [PermissionDeniedException]으로 실패한다.
+         */
+        @JvmStatic
+        fun getRequiredPermissions(): List<String> = requiredPermissions(Build.VERSION.SDK_INT)
+
+        internal fun requiredPermissions(sdkInt: Int): List<String> =
+            BlePermissions.requiredScanPermissions(sdkInt) + BlePermissions.requiredConnectPermissions(sdkInt)
+
+        /** [getRequiredPermissions] 중 아직 허용되지 않은 권한. 비어 있으면 스캔과 연결에 필요한 권한이 모두 있다. */
+        @JvmStatic
+        fun getMissingPermissions(context: Context): List<String> = missingPermissions(context, Build.VERSION.SDK_INT)
+
+        internal fun missingPermissions(context: Context, sdkInt: Int): List<String> =
+            BlePermissions.missingScanPermissions(context, sdkInt) + BlePermissions.missingConnectPermissions(context, sdkInt)
+
+        /**
+         * 사용자에게 블루투스를 켜 달라고 묻는 화면의 Intent. ActivityResultLauncher(StartActivityForResult) 등으로 연다.
+         * API 31 이상에서는 BLUETOOTH_CONNECT 권한이 있어야 열 수 있다. (앱이 블루투스를 직접 켜는 BluetoothAdapter.enable() 은 API 33 부터 막혀 있다)
+         */
+        @JvmStatic
+        fun createEnableBluetoothIntent(): Intent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+
+        /** 위치 설정 화면의 Intent. API 30 이하에서 위치가 꺼져 있으면([ScanAvailability.locationEnabled]가 false) 스캔할 수 없다. */
+        @JvmStatic
+        fun createLocationSettingsIntent(): Intent = Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
     }
 }
