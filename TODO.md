@@ -642,7 +642,20 @@
       - 상대 기기 블루투스 꺼짐(스택 로그 `onConnectionStateChange 19 -> 0`): notification 에러가 `DisconnectedException`(status 없음, 메시지 null) → `DisconnectedException: Disconnected (status 19, 0x13)`, `status=19`
       - 수정 전에는 위 예외가 모두 공통 타입이 없었고, 수정 후에는 모두 `BleException`이었습니다.
 - [ ] **[구조] 테스트 부재** — 예제 테스트만 있습니다. 순수 로직(`BleScanFilter`, `ScanInfo` 파싱, `BleScanOptionsConverter`, `collectListLastSortedIndex`) 단위 테스트, mock `BluetoothGatt`로 engine 상태 전이 테스트(Robolectric/MockK), `VirtualDevice` 기반 통합 테스트를 추가해야 합니다. 이를 위해 `BleDeviceEngineImpl`의 GATT 의존성을 주입 가능하게 만들어야 합니다.
-- [ ] **[구조] BLE와 Classic(SPP) 책임 분리** — `BleSppSocket`은 BLE가 아니라 RFCOMM인데 같은 상태 머신(`stateRelay`)을 공유합니다. 별도 클래스나 모듈로 분리하는 것을 검토합니다.
+- [x] **[구조] BLE와 Classic(SPP) 책임 분리** — `BleSppSocket`은 BLE가 아니라 RFCOMM인데 같은 상태 머신(`stateRelay`)을 공유합니다. 별도 클래스나 모듈로 분리하는 것을 검토합니다.
+  - ✅ 해결 (`feature/separate_spp_connection`)
+    - SPP 연결과 그 상태를 `impl/SppConnection`으로 분리했습니다. 소켓 생성·연결·정리, UUID 선택, 기기 검색 중지를 이 클래스가 맡고, 자체 상태(DISCONNECTED/CONNECTING/CONNECTED)를 가집니다.
+    - 엔진의 GATT 상태(`State`)에서 `SPP_CONNECTING`/`SPP_CONNECTED`를 뺐습니다. GATT 관련 코드(연결 대기, 작업 큐, 연결 해제 등)는 이제 GATT 상태만 봅니다.
+    - 기기의 공개 연결 상태는 엔진이 두 상태를 합쳐 만듭니다(GATT가 DISCONNECTED일 때만 SPP 상태를 보여 줌). 공개 API와 동작은 이전과 같습니다.
+    - 검토 결과로 바꾸지 않은 것:
+      - 같은 기기의 GATT와 SPP를 동시에 쓰지 않는 규칙은 유지했습니다. 공개 연결 상태가 하나라서 둘이 동시에 연결되면 표현할 수 없고, 바꾸려면 공개 상태 API를 바꿔야 합니다. 두 상태 전환은 같은 잠금(`stateLock`) 안에서 확인해서, 동시에 연결을 시도해도 하나만 시작됩니다.
+      - 모듈 분리는 하지 않았습니다. SPP는 `BleDevice.connectSppSocket()` 하나로 노출되는 작은 기능이라, 배포 산출물을 나눌 만큼의 이점이 없습니다.
+    - 테스트: `SppConnectionTest`(4건: 분리된 클래스의 자체 상태, 배타 확인 실패 시 소켓을 만들지 않음, 공개 상태 순서 `DISCONNECTED → SPP_CONNECTING → SPP_CONNECTED → DISCONNECTED`, SPP 연결 중 GATT 작업은 GATT를 건드리지 않고 실패). 동작이 같은지는 기존 SPP 테스트(동시 연결 배타, 연결 해제, 블루투스 꺼짐, 소켓 정리 등)가 수정 없이 모두 통과하는 것으로 확인했습니다.
+    - 실기기 확인(Fold5 → M446K. 같은 프로브를 분리 전/후 코드로 실행, 결과 동일):
+      - SPP 연결 시도(M446K Classic 주소, SPP 서버 없음): 연결 중 상태 SPP_CONNECTING(`connected=false`, 연결 기기 목록에 없음) → SDP 후 `IOException` → 상태 순서 `DISCONNECTED, SPP_CONNECTING, DISCONNECTED`.
+      - SPP 연결 중 GATT connect: `InvalidConnectionStateException: Connection state is SPP_CONNECTING not DISCONNECTED`.
+      - GATT 연결 중 SPP connect: `InvalidConnectionStateException: Connection state is CONNECTED not DISCONNECTED`, GATT 연결과 read는 그대로 정상.
+      - GATT 회귀(MTU, read, 응답 있는/없는 write, CCCD) 정상.
 
 ### 빠진 BLE 기능
 
