@@ -185,19 +185,9 @@ class MainActivity : RequestPermissionActivity() {
             macAddressEditText.text.toString().also { str ->
                 connectDisposable = Rx2ServiceBindingFactory.bind<BluetoothService.BluetoothBinder>(this, Intent(this, BluetoothService::class.java))
                     .map { binder ->
-                        val macAddress =
-                            when {
-                                Regex("[0-9A-Fa-f]{12}").matches(str) -> {
-                                    str.split(2).joinToString(":")
-                                }
-                                Regex("[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}").matches(str) -> {
-                                    str
-                                }
-                                else -> {
-                                    throw IllegalArgumentException("mac address pattern wrong")
-                                }
-                            }
-                        binder.getService().bleManager.getDevice(macAddress)!!
+                        // 라이브러리가 대소문자와 구분자 형식을 맞춘다. 형식이 맞지 않으면 null
+                        binder.getService().bleManager.getDevice(str)
+                            ?: throw IllegalArgumentException("mac address pattern wrong")
                     }
                     .firstOrError()
                     .flatMapCompletable { it.connectCompletable() }
@@ -315,14 +305,5 @@ class MainActivity : RequestPermissionActivity() {
 
     companion object {
         private val TAG = MainActivity::class.java.simpleName
-    }
-}
-
-fun String.split(size: Int): Array<String> {
-    if (this.count() % size != 0) {
-        throw IllegalStateException()
-    }
-    return Array(this.count() / size) {
-        substring(it*2, it*2+2)
     }
 }
