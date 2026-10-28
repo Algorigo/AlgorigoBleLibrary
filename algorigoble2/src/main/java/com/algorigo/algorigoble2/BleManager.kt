@@ -39,6 +39,12 @@ class BleManager(
      */
     class CharacteristicNotFoundException(val serviceUuid: UUID?, val characteristicUuid: UUID) :
         IllegalStateException("Characteristic $characteristicUuid not found" + (serviceUuid?.let { " in service $it" } ?: ""))
+    /**
+     * characteristic 에 필요한 descriptor 가 없는 경우. 예를 들어 notification/indication 을 켜려는데 CCCD(0x2902)가 없을 때.
+     * 같은 종류인 [CharacteristicNotFoundException]과 같이 IllegalStateException 을 상속한다.
+     */
+    class DescriptorNotFoundException(val characteristicUuid: UUID, val descriptorUuid: UUID) :
+        IllegalStateException("Descriptor $descriptorUuid not found in characteristic $characteristicUuid")
 
     enum class Engine {
 //        RX_ANDROID_BLE,

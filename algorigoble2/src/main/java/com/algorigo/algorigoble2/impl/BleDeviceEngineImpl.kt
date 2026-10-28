@@ -667,6 +667,8 @@ internal class BleDeviceEngineImpl(
             .flatMap { gatt ->
                 getCharacteristic(serviceUuid, characteristicUuid)
                     .flatMap {
+                        // 켤 수 없는 characteristic 이면 setCharacteristicNotification 을 부르기 전에 실패한다 (정리할 것도 없게)
+                        notificationSetupError(it)?.let { error -> return@flatMap Single.error(error) }
                         characteristic = it
                         L.debug(Ble.Device.Default, "$logLabel : setCharacteristicNotification : $characteristicUuid : true")
                         gatt.setCharacteristicNotification(it, true)
@@ -726,11 +728,22 @@ internal class BleDeviceEngineImpl(
             .subscribeOn(Schedulers.io())
     }
 
+    /** notification/indication 을 켤 수 없으면 그 이유. (NOTIFY/INDICATE 속성이 없거나 CCCD 가 없음) */
+    private fun notificationSetupError(characteristic: BluetoothGattCharacteristic): Throwable? = when {
+        characteristic.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY == 0 &&
+                characteristic.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE == 0 ->
+            IllegalCharacteristicProperty(characteristic.properties, "WRITE_DESCRIPTOR")
+        // CCCD 가 없으면 원격 기기에 notification 을 켜 달라고 요청할 방법이 없다
+        characteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG_UUID) == null ->
+            BleManager.DescriptorNotFoundException(characteristic.uuid, CLIENT_CHARACTERISTIC_CONFIG_UUID)
+        else -> null
+    }
+
     private fun writeDescriptor(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, byteArray: ByteArray): Single<ByteArray> {
         return enqueue(Single.defer {
-            if (characteristic.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY == 0 &&
-                characteristic.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE == 0) {
-                Single.error(IllegalCharacteristicProperty(characteristic.properties, "WRITE_DESCRIPTOR"))
+            val error = notificationSetupError(characteristic)
+            if (error != null) {
+                Single.error(error)
             } else {
                 replyRelay
                     .doOnSubscribe {
