@@ -7,6 +7,7 @@ import com.jakewharton.rxrelay3.BehaviorRelay
 import com.jakewharton.rxrelay3.PublishRelay
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Single
+import io.reactivex.rxjava3.schedulers.Schedulers
 import java.util.*
 
 abstract class VirtualDevice(
@@ -73,10 +74,13 @@ abstract class VirtualDevice(
             }
         }
 
+    // notification 을 호출한 스레드와 분리해서 전달하되, 실기기처럼 보낸 순서대로 전달한다 (worker 는 작업을 순서대로 하나씩 실행한다)
+    private val notificationWorker = Schedulers.io().createWorker()
+
     protected fun notifyByteArray(characteristicUuid: UUID, byteArray: ByteArray) {
-        Thread {
+        notificationWorker.schedule {
             notificationRelay.accept(Pair(characteristicUuid, byteArray))
-        }.start()
+        }
     }
 
     abstract fun getCharacteristicsSingle(): Single<List<BleCharacterisic>>
