@@ -31,8 +31,13 @@ class BluetoothService : Service() {
         BleManager.getLogger()
             .apply {
                 level = Level.VERBOSE.level
-                addHandler(AndroidHandler())
+                // 서비스가 다시 만들어져도 handler 는 한 번만 붙인다 (붙인 수만큼 같은 로그가 반복된다)
+                if (handlers.none { it is AndroidHandler }) {
+                    addHandler(AndroidHandler())
+                }
             }
+        // Android 가 java.util.logging root logger 에 붙여 둔 기본 handler 가 NOTICE 이상의 로그를 한 번 더 남기지 않게 한다
+        LogManager.removeRootAndroidHandler()
         bleManager = BleManager(
             applicationContext,
             virtualDevices = arrayOf(

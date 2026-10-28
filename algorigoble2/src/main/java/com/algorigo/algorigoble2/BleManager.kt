@@ -217,6 +217,19 @@ class BleManager(
             }
         }
 
+        /**
+         * 이 라이브러리의 로그를 남기는 logger(java.util.logging). 레벨과 handler 를 앱에서 정한다.
+         *
+         * logcat 에 보려면 algorigo-logger 의 AndroidHandler 를 붙이고, Android 가 root logger 에 붙여 둔 기본 handler 를 지운다.
+         * 지우지 않으면 NOTICE 이상의 로그가 root 로 전파되어 두 번씩 남고, handler 를 여러 번 붙이면 붙인 수만큼 더 반복된다.
+         * ```
+         * BleManager.getLogger().apply {
+         *     level = Level.DEBUG.level
+         *     if (handlers.none { it is AndroidHandler }) addHandler(AndroidHandler())
+         * }
+         * LogManager.removeRootAndroidHandler()
+         * ```
+         */
         fun getLogger(): Logger {
             return LogManager.getLogger(Ble)
         }
