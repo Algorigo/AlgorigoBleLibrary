@@ -766,7 +766,13 @@
       - 스캔 시작/정지 6번 연속(각 스캔은 nRF 광고를 찾으면 정지): 수정 전에는 1~5번째는 0.3~0.9초에 찾았지만 6번째(시작 후 2.7초)는 40초 동안 결과가 없었고, logcat에 `registerAndStartScan(): ... is scanning too frequently`, `onScannerRegistered(status=6) ... App is scanning too frequently`가 남았습니다. 수정 후에는 6번째 시작이 28.6초 미뤄진 뒤 28.9초에 기기를 찾았고, `scanning too frequently` 로그는 없었습니다.
       - 사라진 기기 timeout(5초): nRF 광고를 끄자 약 5초 뒤 목록에서 빠졌고, 다시 켜자 바로 목록에 들어왔습니다(광고를 다시 시작해 주소가 바뀜). 목록은 main thread에서 전달됐습니다.
       - 주변 기기의 새 항목: 서비스 UUID(예: Nordic UART `6e400001-…`), 서비스 데이터(`0000fcf1-…`, `0000fe9f-…` 등), `txPower=12`(TX Power Level을 광고하는 기기), `isConnectable` true/false, `timestampNanos`(조회 시점의 `elapsedRealtimeNanos`보다 조금 이전 값)가 채워졌습니다.
-- [ ] **[기능] 서비스/characteristic 트리 조회** — 현재 `BleCharacterisic`은 uuid와 속성 플래그만 제공합니다. 소속 service, descriptor 목록, raw properties를 제공해야 합니다.
+- [x] **[기능] 서비스/characteristic 트리 조회** — 현재 `BleCharacterisic`은 uuid와 속성 플래그만 제공합니다. 소속 service, descriptor 목록, raw properties를 제공해야 합니다.
+  - ✅ 해결 (`feature/service_tree`)
+    - `BleDevice.getServicesSingle()`을 추가했습니다. `BleService(uuid, isPrimary, characteristics)` 목록을 돌려주며, 연결되지 않았으면 `DisconnectedException`입니다. 서비스는 캐시하지 않고 현재 연결의 서비스 목록에서 만듭니다(재연결/서비스 변경 후에는 다시 조회).
+    - `BleCharacterisic`에 `serviceUuid`, `properties`(`BluetoothGattCharacteristic.PROPERTY_*` 조합 그대로), `descriptorUuids`를 추가했습니다. 기본값이 있는 open 멤버라서 기존 가상 characteristic 하위 클래스는 수정할 필요가 없고, 그 경우 `properties`는 `isReadable`/`isWritable`/`isNotifyAvailable`로 만든 READ/WRITE/NOTIFY, `serviceUuid`는 null, `descriptorUuids`는 빈 목록입니다. raw properties로 WRITE와 WRITE NO RESPONSE, NOTIFY와 INDICATE를 구분할 수 있습니다. `getCharacteristicsSingle()`의 characteristic도 소속 서비스를 알려 주므로 같은 UUID가 여러 서비스에 있을 때 구분할 수 있습니다.
+    - 가상 기기: `VirtualDevice.getServicesSingle()`(open)의 기본 구현이 characteristic을 `serviceUuid`로 묶은 primary 서비스를 만듭니다. `serviceUuid`가 없는 characteristic은 `VirtualDevice.UNKNOWN_SERVICE_UUID`(0) 서비스로 묶입니다. 실기기처럼 연결된 동안에만 조회됩니다.
+    - 테스트: `ServiceTreeTest`(3건: 서비스별 characteristic·primary/secondary·raw properties·descriptor 목록, characteristic 목록의 소속 서비스, 연결 전 조회), `VirtualDeviceServiceTest`(3건: serviceUuid로 묶기, 기본 properties 등 기본값, 연결 전 조회). `GattTestFixture`가 `characteristic.descriptors`를 제공합니다.
+    - 실기기 확인(Fold5 → M446K): 연결 전 조회는 `DisconnectedException`. 연결 후 9개 서비스, 21개 characteristic이 서비스별로 나왔고, 속성과 descriptor가 `BluetoothGatt`에서 직접 읽은 값과 같았습니다(예: aaa1 `0x12`(READ|NOTIFY), descriptor 2902/aab0/2901/2904, aaa2 `0x2c`(WRITE_NO_RESPONSE|WRITE|INDICATE)).
 
 ---
 
