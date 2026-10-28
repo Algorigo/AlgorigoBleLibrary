@@ -14,7 +14,12 @@ import java.util.concurrent.TimeUnit
 
 class VirtualBleDevice : VirtualDevice("12:34:56:78:90:ab", "Virtual Device") {
 
+    @Volatile
     private var notifyDisposable: Disposable? = null
+
+    /** notification 을 구독 중인 곳이 있어서 값을 보내고 있는지 */
+    val notifying: Boolean
+        get() = notifyDisposable != null
 
     private var byteArray: ByteArray = byteArrayOf(0x00.toByte())
 

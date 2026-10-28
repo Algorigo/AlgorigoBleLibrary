@@ -24,6 +24,7 @@ class BluetoothService : Service() {
 
     lateinit var bleManager: BleManager
     lateinit var bleManager2: BleManager
+    val virtualBleDevice = VirtualBleDevice()
 
     override fun onCreate() {
         super.onCreate()
@@ -35,7 +36,7 @@ class BluetoothService : Service() {
         bleManager = BleManager(
             applicationContext,
             virtualDevices = arrayOf(
-                VirtualBleDevice() to BleDevice(),
+                virtualBleDevice to BleDevice(),
             )
         )
         bleManager2 = BleManager(

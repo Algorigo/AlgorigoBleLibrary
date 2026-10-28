@@ -12,6 +12,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.library.rx.Rx2ServiceBindingFactory
 import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
+import io.reactivex.rxjava3.disposables.CompositeDisposable
 import io.reactivex.rxjava3.disposables.Disposable
 import java.util.*
 
@@ -22,7 +23,10 @@ class DeviceActivity : AppCompatActivity(), CharacteristicAdapter.Callback {
     private lateinit var resultTextView: TextView
     private lateinit var characteristicRecyclerView: RecyclerView
 
-    private var notificationDisposables = mutableMapOf<UUID, Disposable>()
+    // main thread 에서만 바꾼다
+    private val notificationDisposables = mutableMapOf<UUID, Disposable>()
+    // 특성 조회, read, write. 화면이 닫히면 notification 구독과 함께 해제한다
+    private val disposables = CompositeDisposable()
     private val characteristicAdapter = CharacteristicAdapter(this)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -45,6 +49,14 @@ class DeviceActivity : AppCompatActivity(), CharacteristicAdapter.Callback {
             }, {
                 Log.e(TAG, "", it)
             })
+            .also { disposables.add(it) }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        disposables.dispose()
+        // 해제하면 doFinally 에서 map 에서 지우므로 복사본으로 돈다
+        notificationDisposables.values.toList().forEach { it.dispose() }
     }
 
     private fun initView() {
@@ -80,6 +92,7 @@ class DeviceActivity : AppCompatActivity(), CharacteristicAdapter.Callback {
             }, {
                 Log.e(TAG, "", it)
             })
+            .also { disposables.add(it) }
     }
 
     override fun onWriteCharacteristicBtn(uuid: UUID, byteArray: ByteArray) {
@@ -97,6 +110,7 @@ class DeviceActivity : AppCompatActivity(), CharacteristicAdapter.Callback {
             }, {
                 Log.e(TAG, "", it)
             })
+            .also { disposables.add(it) }
     }
 
     override fun onNotifyBtn(uuid: UUID) {
@@ -109,10 +123,11 @@ class DeviceActivity : AppCompatActivity(), CharacteristicAdapter.Callback {
                 .map { byteArray ->
                     "$uuid notify : 0x"+byteArray.joinToString(" ") { String.format("%02x", it) }
                 }
+                .observeOn(AndroidSchedulers.mainThread())
+                // observeOn 뒤에 두어 map 을 main thread 에서만 바꾼다
                 .doFinally {
                     notificationDisposables.remove(uuid)
                 }
-                .observeOn(AndroidSchedulers.mainThread())
                 .subscribe({
                     resultTextView.text = it
                 }, {
