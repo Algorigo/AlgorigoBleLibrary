@@ -7,7 +7,9 @@ import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothProfile
+import android.bluetooth.BluetoothStatusCodes
 import android.content.Context
+import android.os.Build
 import com.algorigo.algorigoble2.BleDevice
 import io.mockk.every
 import io.mockk.mockk
@@ -21,8 +23,10 @@ import java.util.UUID
  * mock gatt 는 실제 [BluetoothGatt]처럼 동작한다:
  * - [BluetoothGatt.getServices]는 마지막 서비스 탐색 시점의 목록을 반환한다.
  * - [BluetoothGatt.discoverServices]를 호출하면 목록이 비워지고, [simulateServicesDiscovered] 시점에 서버 DB 가 반영된다.
+ *
+ * [sdkInt]는 엔진이 값 기반 GATT API(API 33+)를 쓸지 정한다. 기본값은 단위 테스트의 Build.VERSION.SDK_INT(0)라서 기존 API 경로를 탄다.
  */
-internal class GattTestFixture(val bleDevice: BleDevice = BleDevice()) {
+internal class GattTestFixture(val bleDevice: BleDevice = BleDevice(), sdkInt: Int = Build.VERSION.SDK_INT) {
 
     private class FakeGattState {
         val serverServices = mutableListOf<BluetoothGattService>()
@@ -39,7 +43,7 @@ internal class GattTestFixture(val bleDevice: BleDevice = BleDevice()) {
     val callback: BluetoothGattCallback
         get() = callbackSlot.captured
 
-    val engine = BleDeviceEngineImpl(context, bluetoothDevice)
+    val engine = BleDeviceEngineImpl(context, bluetoothDevice, sdkInt)
 
     init {
         bleDevice.initEngine(engine)
@@ -63,6 +67,8 @@ internal class GattTestFixture(val bleDevice: BleDevice = BleDevice()) {
         every { newGatt.readCharacteristic(any()) } returns true
         every { newGatt.writeCharacteristic(any()) } returns true
         every { newGatt.writeDescriptor(any()) } returns true
+        every { newGatt.writeCharacteristic(any(), any(), any()) } returns BluetoothStatusCodes.SUCCESS
+        every { newGatt.writeDescriptor(any(), any()) } returns BluetoothStatusCodes.SUCCESS
         return newGatt
     }
 

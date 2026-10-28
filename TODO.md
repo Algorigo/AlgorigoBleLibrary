@@ -338,7 +338,18 @@
   - (실기기) 블루투스 스택 로그의 write 요청 → 완료 시간으로 비교했습니다.
     - WRITE 전용 `2a39`는 52ms가 걸렸습니다(Write Response 대기).
     - WRITE+WRITE NO RESPONSE를 가진 `aaa2`는 라이브러리가 응답형 분기로 처리했지만 0ms 만에 완료됐습니다. 즉 실제로는 **Write Command**로 전송됐습니다.
-- [ ] **[버그/구조] API 33에서 deprecated된 GATT API 사용** — `impl/BleDeviceEngineImpl.kt:97-154, 366, 377, 476`
+- [x] **[버그/구조] API 33에서 deprecated된 GATT API 사용** — `impl/BleDeviceEngineImpl.kt:97-154, 366, 377, 476`
+  - ✅ 해결 (`feature/value_based_gatt_api`)
+    - API 33 이상에서는 `writeCharacteristic(char, value, writeType)`, `writeDescriptor(desc, value)`로 값을 인자로 넘기고, 값을 인자로 받는 콜백(`onCharacteristicRead/Changed(…, value)`, `onDescriptorRead(…, value)`)에서 값을 받습니다. 공유된 `characteristic.value`/`descriptor.value`를 읽거나 쓰지 않습니다.
+    - 이중 전달 방지: 새 콜백에서 `super`를 호출하지 않고, deprecated 콜백은 API 33 이상에서 아무것도 하지 않습니다. (프레임워크가 기본 구현을 통해 deprecated 콜백을 부르더라도 무시됨)
+    - 쓰기 결과(`writeCharacteristicSingle`, CCCD 쓰기)는 콜백 시점의 `characteristic.value` 대신 **요청한 값**을 돌려줍니다. API 32 이하 경로도 같습니다. API 32 이하에서 쓰기 직전 `characteristic.value`를 설정하는 순간의 경쟁은 플랫폼 API 한계라 남아 있습니다.
+    - API 33 이상의 쓰기 호출은 `BluetoothStatusCodes`를 반환합니다. SUCCESS가 아니면(busy 201 등) 상태 코드를 로그로 남기고 기존과 같이 `CommunicationFailedException` 재시도로 처리합니다.
+    - 단위 테스트에서 두 경로를 확인할 수 있도록 `BleDeviceEngineImpl`에 `sdkInt`(기본값 `Build.VERSION.SDK_INT`)를 주입할 수 있게 했습니다. lint NewApi 검사는 `@ChecksSdkIntAtLeast`로 통과합니다.
+    - 테스트: `BleDeviceEngineImplValueGattApiTest`(7건). 수정 전 엔진에서는 6건이 실패했습니다(쓰기 결과가 notification 값으로 바뀜, API 33 쓰기/CCCD/busy 재시도 경로 없음, read/notification이 stale `characteristic.value`를 사용). 나머지 1건은 API 32 이하에서 기존 API를 계속 쓰는지 확인하는 보호 테스트입니다.
+    - 실기기 확인(Fold5 Android 17 → M446K nRF Connect GATT 서버). `aaa2`(INDICATE+WRITE)에 indication을 켜고 응답 있는 쓰기를 반복하는 동안, nRF 서버 화면에서 `aaa2` indication(빈 값)을 약 1초 간격으로 30번 보냈습니다.
+      - 수정 전: 45초 동안 쓰기 749회 중 **19회**가 요청한 값(`a500a7` 등) 대신 **빈 값**(그 사이 도착한 indication 값)을 반환했습니다.
+      - 수정 후: 100초 동안 쓰기 1661회, indication 30건 수신, 불일치 **0회**.
+      - 회귀 확인(2회 반복): MTU 요청(517), Device Name/`2a38` read, `aaa2` 기본·응답 없는 쓰기, `2a39`(WRITE 전용) 쓰기, `aaa1` notification CCCD 켜기/끄기 모두 정상이었습니다.
   - `characteristic.value = ...` 후 `writeCharacteristic(characteristic)`을 호출하는 방식은 공유된 mutable 필드를 사용합니다. 같은 characteristic으로 notification이 들어오면 쓰려던 값이 덮어써질 수 있습니다(race).
   - API 33 이상에서는 `writeCharacteristic(char, value, writeType)`, `writeDescriptor(desc, value)`와 값을 인자로 받는 새 콜백으로 분기합니다.
   - ⚠️ 새 콜백 오버로드는 기본 구현이 deprecated 콜백을 호출합니다. 그래서 새 오버로드에서 `super`를 호출하면서 relay에도 emit하면 **이벤트가 두 번 전달됩니다**. `stash@{0}`의 WIP 코드가 이 구조이므로 적용하기 전에 수정이 필요합니다.
