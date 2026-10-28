@@ -453,7 +453,21 @@
       - 길이가 다른 mask(data 5바이트, mask 2바이트): 수정 전에는 빌더를 통과하고 **스캔을 시작할 때** `IllegalArgumentException`. 수정 후에는 **빌더에서** 바로 같은 예외.
       - 잘못된 값 뒤에 올바른 값(`0102000000` / mask `FFFF000000`) 다시 설정: 수정 전에는 **올바른 호출이 실패**. 수정 후에는 통과하고 이 prefix mask로 M446K를 434ms 만에 찾았습니다.
       - 앞 2바이트가 다른 mask(`0103…`)는 수정 전후 모두 8초 동안 찾지 못했습니다(mask가 실제로 적용됨).
-- [ ] **[버그] 런타임 권한을 확인하지 않음** — 전역 `@SuppressLint("MissingPermission")`. API 31 이상에서 `BLUETOOTH_SCAN/CONNECT`가 없으면 `deviceName`, `bonded`, `toString()`, 로그 출력에서도 `SecurityException`이 납니다. 작업 전에 권한을 확인하고 명확한 예외(`PermissionDeniedException`)를 내야 합니다.
+- [x] **[버그] 런타임 권한을 확인하지 않음** — 전역 `@SuppressLint("MissingPermission")`. API 31 이상에서 `BLUETOOTH_SCAN/CONNECT`가 없으면 `deviceName`, `bonded`, `toString()`, 로그 출력에서도 `SecurityException`이 납니다. 작업 전에 권한을 확인하고 명확한 예외(`PermissionDeniedException`)를 내야 합니다.
+  - ✅ 해결 (`feature/runtime_permission_check`)
+    - `BleManager.PermissionDeniedException(permissions)`를 추가했습니다. `permissions`에 허용되지 않은 권한 이름이 들어 있습니다. 플랫폼 `SecurityException`을 처리하던 코드도 그대로 동작하도록 `SecurityException`을 상속합니다.
+    - 확인하는 곳(`impl/BlePermissions`)
+      - 스캔: API 31 이상 `BLUETOOTH_SCAN`, API 29~30 `ACCESS_FINE_LOCATION`, 그 이하 `ACCESS_COARSE_LOCATION` 또는 FINE. 스캔을 시작하기 전에 에러로 끝납니다.
+      - API 31 이상 `BLUETOOTH_CONNECT`: `connectCompletable`(상태를 바꾸기 전), `bondCompletable`/`unbondCompletable`, `connectSppSocket`, `getBondedDevices`, `deviceName`/`bonded` 프로퍼티.
+      - `BLUETOOTH`/`BLUETOOTH_ADMIN`은 API 30 이하에서 설치 시 부여되므로 확인하지 않습니다.
+    - 권한이 없어도 실패하지 않게 한 곳: `toString()`은 이름 자리에 `(permission denied)`를 표시하고, 라이브러리 로그는 이름을 `?`로 남깁니다. 기기 객체를 만드는 `getDevice(mac)`은 권한이 필요 없는데도 로그에서 이름을 읽다가 실패했으므로, 그 로그를 없앴습니다.
+    - ⚠️ 동작 변경: API 30 이하에서 위치 권한 없이 스캔하면, 이전에는 결과 없이 조용히 계속됐지만 이제 `PermissionDeniedException`으로 끝납니다. 예외 타입은 `SecurityException`에서 그 하위 타입으로 바뀝니다.
+    - 테스트: `PermissionCheckTest`(8건, 권한이 없을 때 플랫폼처럼 `SecurityException`을 던지도록 mock 구성). 수정 전 엔진에서는 6건이 실패했습니다(connect/bond/deviceName/bonded가 `SecurityException`, `toString`과 `getDevice`가 `SecurityException`, 위치 권한 없이 스캔 시작). 나머지 2건은 API별 권한 규칙과 API 30 이하에서 CONNECT 권한 없이 연결되는지 확인합니다.
+    - 실기기 확인(Fold5 Android 17, 테스트 APK에서 `pm revoke`로 권한 회수):
+      - `BLUETOOTH_SCAN` 없이 스캔: 수정 전 `SecurityException: Need android.permission.BLUETOOTH_SCAN permission for AttributionSource {…}` → 수정 후 `PermissionDeniedException: Permission denied: android.permission.BLUETOOTH_SCAN`.
+      - `BLUETOOTH_CONNECT` 없이(SCAN은 있음) 스캔으로 M446K를 찾은 뒤: 수정 전에는 `toString()`, `deviceName`, `bonded`, 다른 매니저의 `getDevice(mac)`, `getBondedDevices()`, `connectCompletable`, `bondCompletable` **모두** 플랫폼 `SecurityException`이었습니다. 수정 후에는 `toString()` = `BleDevice (permission denied)(5D:D3:…)`, `getDevice(mac)` 정상, 나머지는 `PermissionDeniedException(BLUETOOTH_CONNECT)`이고 연결 상태는 DISCONNECTED 그대로였습니다.
+      - 권한이 모두 있을 때 회귀(MTU, read, 응답 있는/없는 write, CCCD) 정상.
+      - 참고: CONNECT 권한 없이 캐시된 기기가 있는 상태에서 블루투스를 꺼도, 어댑터가 꺼지면 `BluetoothDevice.getName()`이 예외 대신 null을 돌려줘서 수정 전에도 크래시는 없었습니다.
 - [ ] **[버그] characteristic을 UUID로만 찾음** — `impl/BleDeviceEngineImpl.kt:451-465`. 여러 서비스에 같은 UUID가 있으면 첫 번째 것이 선택됩니다. 찾지 못하면 메시지 없는 `IllegalStateException()`이 납니다. serviceUuid를 받는 오버로드와 `CharacteristicNotFoundException`을 추가해야 합니다.
 - [ ] **[버그] CCCD descriptor가 없으면 NPE** — `impl/BleDeviceEngineImpl.kt:475`. 원인을 알기 어려운 에러가 나옵니다.
 - [x] **[버그] `onBluetoothDisabled()`가 CONNECTED 상태만 처리함** — `impl/BleDeviceEngineImpl.kt:528-537`. CONNECTING이나 SPP 상태인 기기는 정리되지 않습니다.

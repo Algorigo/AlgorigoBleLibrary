@@ -97,7 +97,7 @@ internal class BleDeviceEngineImpl(
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
             super.onConnectionStateChange(gatt, status, newState)
-            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onConnectionStateChange $status -> $newState")
+            L.debug(Ble.Device.Default, "$logLabel : onConnectionStateChange $status -> $newState")
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     // false 는 gatt 가 이미 해제됐거나 Bluetooth 서비스와 통신하지 못한 경우라 다시 시도해도 소용없다.
@@ -105,7 +105,7 @@ internal class BleDeviceEngineImpl(
                     if (gatt != null && !gatt.discoverServices()) {
                         synchronized(stateLock) {
                             if ((stateRelay.value as? State.CONNECTING)?.gatt === gatt) {
-                                L.warning(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : discoverServices failed")
+                                L.warning(Ble.Device.Default, "$logLabel : discoverServices failed")
                                 cancelConnecting(gatt, BleManager.ConnectFailedException("discoverServices returned false"))
                             }
                         }
@@ -122,7 +122,7 @@ internal class BleDeviceEngineImpl(
 
         override fun onServicesDiscovered(gatt: BluetoothGatt?, status: Int) {
             super.onServicesDiscovered(gatt, status)
-            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onServicesDiscovered $status")
+            L.debug(Ble.Device.Default, "$logLabel : onServicesDiscovered $status")
             discoveringServicesRelay.accept(false)
             // 상태 확인과 CONNECTED 전환 사이에 타임아웃/취소로 gatt 가 정리되지 않도록 잠금 안에서 처리한다
             gatt?.let { synchronized(stateLock) {
@@ -135,7 +135,7 @@ internal class BleDeviceEngineImpl(
                 if (status != BluetoothGatt.GATT_SUCCESS) {
                     if (alreadyConnected) {
                         // onServiceChanged 후 재탐색 실패: 연결은 유지한다. (서비스 목록이 비면 이후 작업은 characteristic 을 찾지 못해 실패한다)
-                        L.warning(Ble.Device.Default, "${it.device?.name}(${it.device?.address}) : service rediscovery failed : $status")
+                        L.warning(Ble.Device.Default, "$logLabel : service rediscovery failed : $status")
                     } else {
                         // 첫 서비스 탐색 실패: 서비스 없이 CONNECTED 로 만들지 않고 연결을 정리한다
                         cancelConnecting(it, BleManager.GattOperationFailedException("DISCOVER_SERVICES", status))
@@ -154,7 +154,7 @@ internal class BleDeviceEngineImpl(
 
         override fun onServiceChanged(gatt: BluetoothGatt) {
             super.onServiceChanged(gatt)
-            L.debug(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : onServiceChanged")
+            L.debug(Ble.Device.Default, "$logLabel : onServiceChanged")
             if ((stateRelay.value as? State.CONNECTED)?.gatt !== gatt) {
                 // 아직 첫 서비스 탐색 전이라면 그 탐색 결과에 변경 사항이 반영된다
                 return
@@ -162,7 +162,7 @@ internal class BleDeviceEngineImpl(
             // BluetoothGatt.getServices() 는 discoverServices() 를 다시 호출해야 갱신된다. 탐색이 끝날 때까지 작업은 기다린다.
             discoveringServicesRelay.accept(true)
             if (!gatt.discoverServices()) {
-                L.warning(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : discoverServices failed after onServiceChanged")
+                L.warning(Ble.Device.Default, "$logLabel : discoverServices failed after onServiceChanged")
                 discoveringServicesRelay.accept(false)
             }
         }
@@ -192,7 +192,7 @@ internal class BleDeviceEngineImpl(
         }
 
         private fun handleCharacteristicRead(gatt: BluetoothGatt?, characteristic: BluetoothGattCharacteristic, value: ByteArray, status: Int) {
-            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onCharacteristicRead:$status, ${characteristic.uuid}:${value.toHexString()}")
+            L.debug(Ble.Device.Default, "$logLabel : onCharacteristicRead:$status, ${characteristic.uuid}:${value.toHexString()}")
             gattRequestPendingRelay.accept(false)
             replyRelay.accept(ReplyData(Type.READ_CHARACTERISTIC, characteristic.uuid, value, status))
         }
@@ -204,7 +204,7 @@ internal class BleDeviceEngineImpl(
         ) {
             super.onCharacteristicWrite(gatt, characteristic, status)
             // characteristic.value 는 쓴 값이 아닐 수 있으므로(API 33+ 에서는 갱신되지 않고, 그 전에는 notification 이 덮어씀) 남기지 않는다
-            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onCharacteristicWrite:$status, ${characteristic?.uuid}")
+            L.debug(Ble.Device.Default, "$logLabel : onCharacteristicWrite:$status, ${characteristic?.uuid}")
             characteristic?.let {
                 gattRequestPendingRelay.accept(false)
                 replyRelay.accept(ReplyData(Type.WRITE_CHARACTERISTIC, it.uuid, byteArrayOf(), status))
@@ -231,7 +231,7 @@ internal class BleDeviceEngineImpl(
         }
 
         private fun handleCharacteristicChanged(gatt: BluetoothGatt?, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
-            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onCharacteristicChanged:${characteristic.uuid}:${value.toHexString()}")
+            L.debug(Ble.Device.Default, "$logLabel : onCharacteristicChanged:${characteristic.uuid}:${value.toHexString()}")
             notificationRelay.accept(Pair(characteristic.uuid, value))
         }
 
@@ -257,7 +257,7 @@ internal class BleDeviceEngineImpl(
         }
 
         private fun handleDescriptorRead(gatt: BluetoothGatt?, descriptor: BluetoothGattDescriptor, value: ByteArray, status: Int) {
-            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onDescriptorRead:${descriptor.characteristic?.uuid}:${value.toHexString()}")
+            L.debug(Ble.Device.Default, "$logLabel : onDescriptorRead:${descriptor.characteristic?.uuid}:${value.toHexString()}")
             gattRequestPendingRelay.accept(false)
             replyRelay.accept(ReplyData(Type.READ_DESCRIPTOR, descriptor.characteristic.uuid, value, status))
         }
@@ -268,7 +268,7 @@ internal class BleDeviceEngineImpl(
             status: Int
         ) {
             super.onDescriptorWrite(gatt, descriptor, status)
-            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onDescriptorWrite:$status, ${descriptor?.characteristic?.uuid}")
+            L.debug(Ble.Device.Default, "$logLabel : onDescriptorWrite:$status, ${descriptor?.characteristic?.uuid}")
             descriptor?.let {
                 gattRequestPendingRelay.accept(false)
                 replyRelay.accept(ReplyData(Type.WRITE_DESCRIPTOR, it.characteristic.uuid, byteArrayOf(), status))
@@ -277,27 +277,27 @@ internal class BleDeviceEngineImpl(
 
         override fun onPhyUpdate(gatt: BluetoothGatt?, txPhy: Int, rxPhy: Int, status: Int) {
             super.onPhyUpdate(gatt, txPhy, rxPhy, status)
-            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onPhyUpdate:$txPhy:$rxPhy:$status")
+            L.debug(Ble.Device.Default, "$logLabel : onPhyUpdate:$txPhy:$rxPhy:$status")
         }
 
         override fun onPhyRead(gatt: BluetoothGatt?, txPhy: Int, rxPhy: Int, status: Int) {
             super.onPhyRead(gatt, txPhy, rxPhy, status)
-            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onPhyRead:$txPhy:$rxPhy:$status")
+            L.debug(Ble.Device.Default, "$logLabel : onPhyRead:$txPhy:$rxPhy:$status")
         }
 
         override fun onReliableWriteCompleted(gatt: BluetoothGatt?, status: Int) {
             super.onReliableWriteCompleted(gatt, status)
-            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onReliableWriteCompleted:$status")
+            L.debug(Ble.Device.Default, "$logLabel : onReliableWriteCompleted:$status")
         }
 
         override fun onReadRemoteRssi(gatt: BluetoothGatt?, rssi: Int, status: Int) {
             super.onReadRemoteRssi(gatt, rssi, status)
-            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onReadRemoteRssi:$rssi, $status")
+            L.debug(Ble.Device.Default, "$logLabel : onReadRemoteRssi:$rssi, $status")
         }
 
         override fun onMtuChanged(gatt: BluetoothGatt?, mtu: Int, status: Int) {
             super.onMtuChanged(gatt, mtu, status)
-            L.debug(Ble.Device.Default, "${gatt?.device?.name}(${gatt?.device?.address}) : onMtuChanged:$mtu, $status")
+            L.debug(Ble.Device.Default, "$logLabel : onMtuChanged:$mtu, $status")
             gattRequestPendingRelay.accept(false)
             mtuRelay.accept(Pair(mtu, status))
         }
@@ -336,12 +336,30 @@ internal class BleDeviceEngineImpl(
     override val deviceId: String
         get() = bluetoothDevice.address
     override val deviceName: String?
-        get() = bluetoothDevice.name
+        get() {
+            BlePermissions.checkConnect(context, sdkInt)
+            return bluetoothDevice.name
+        }
     override val bonded: Boolean
-        get() = bluetoothDevice.bondState == BluetoothDevice.BOND_BONDED
+        get() {
+            BlePermissions.checkConnect(context, sdkInt)
+            return bluetoothDevice.bondState == BluetoothDevice.BOND_BONDED
+        }
+
+    // 로그용 "이름(주소)". 권한이 없어 이름을 읽을 수 없어도 로그 때문에 작업이 실패하지 않게 한다
+    private val logLabel: String
+        get() {
+            val name = try {
+                bluetoothDevice.name
+            } catch (e: SecurityException) {
+                "?"
+            }
+            return "$name(${bluetoothDevice.address})"
+        }
 
     override fun bondCompletable(): Completable {
         return Completable.defer {
+            BlePermissions.checkConnect(context, sdkInt)
             if (bluetoothDevice.bondState == BluetoothDevice.BOND_BONDED) {
                 Completable.complete()
             } else {
@@ -369,6 +387,7 @@ internal class BleDeviceEngineImpl(
 
     override fun unbondCompletable(): Completable {
         return Completable.defer {
+            BlePermissions.checkConnect(context, sdkInt)
             if (bluetoothDevice.bondState == BluetoothDevice.BOND_NONE) {
                 Completable.complete()
             } else {
@@ -399,8 +418,10 @@ internal class BleDeviceEngineImpl(
     }
 
     override fun connectCompletable(timeoutMillis: Long): Completable = Completable.defer {
+        // 권한이 없으면 상태를 바꾸기 전에 실패시킨다
+        BlePermissions.checkConnect(context, sdkInt)
         val gatt = startConnecting {
-            L.debug(Ble.Device.Default, "${bluetoothDevice.name}(${bluetoothDevice.address}) : connectGatt call")
+            L.debug(Ble.Device.Default, "$logLabel : connectGatt call")
             // 블루투스가 꺼져 있으면 connectGatt 가 null 을 반환한다. 상태를 CONNECTING 으로 바꾸기 전에 실패시킨다.
             // transport 를 지정하지 않으면(AUTO) 듀얼모드 기기에서 BR/EDR 로 GATT 연결을 시도해 status 133 으로 실패할 수 있다
             val newGatt = bluetoothDevice.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
@@ -419,7 +440,7 @@ internal class BleDeviceEngineImpl(
             .ignoreElement()
             .timeout(timeoutMillis, TimeUnit.MILLISECONDS)
             .doOnError {
-                L.error(Ble.Device.Default, "${bluetoothDevice.name}(${bluetoothDevice.address}) : doOnError", it)
+                L.error(Ble.Device.Default, "$logLabel : doOnError", it)
                 if (it is TimeoutException) {
                     cancelConnecting(gatt)
                 }
@@ -452,7 +473,7 @@ internal class BleDeviceEngineImpl(
 
     /** 진행 중인 연결을 정리한다. [cause]가 있으면 기다리던 connectCompletable 이 그 에러로 실패한다. (상태는 이미 DISCONNECTED 인 채로 전달된다) */
     private fun cancelConnecting(gatt: BluetoothGatt, cause: Throwable? = null) {
-        L.debug(Ble.Device.Default, "${bluetoothDevice.name}(${bluetoothDevice.address}) : cancel connecting")
+        L.debug(Ble.Device.Default, "$logLabel : cancel connecting")
         synchronized(stateLock) {
             gatt.disconnect()
             gatt.close()
@@ -474,7 +495,7 @@ internal class BleDeviceEngineImpl(
         synchronized(stateLock) {
             when (val state = stateRelay.value) {
                 is State.CONNECTED -> {
-                    L.debug(Ble.Device.Default, "${bluetoothDevice.name}(${bluetoothDevice.address}) : disconnect")
+                    L.debug(Ble.Device.Default, "$logLabel : disconnect")
                     // DISCONNECTING 이 되면 진행 중인 작업과 notification 은 바로 DisconnectedException 으로 끝난다
                     setState(State.DISCONNECTING(state.gatt))
                     state.gatt.disconnect()
@@ -484,7 +505,7 @@ internal class BleDeviceEngineImpl(
                             val current = stateRelay.value
                             (current is State.DISCONNECTING && current.gatt === state.gatt).also { stillDisconnecting ->
                                 if (stillDisconnecting) {
-                                    L.warning(Ble.Device.Default, "${bluetoothDevice.name}(${bluetoothDevice.address}) : disconnect callback did not arrive, closing gatt")
+                                    L.warning(Ble.Device.Default, "$logLabel : disconnect callback did not arrive, closing gatt")
                                     state.gatt.close()
                                     setState(State.DISCONNECTED())
                                 }
@@ -509,7 +530,7 @@ internal class BleDeviceEngineImpl(
                     state.socket.close()
                     setState(State.DISCONNECTED())
                 }
-                else -> L.debug(Ble.Device.Default, "${bluetoothDevice.name}(${bluetoothDevice.address}) : disconnect ignored, state is ${state?.connectionState}")
+                else -> L.debug(Ble.Device.Default, "$logLabel : disconnect ignored, state is ${state?.connectionState}")
             }
         }
     }
@@ -537,7 +558,7 @@ internal class BleDeviceEngineImpl(
                     .flatMap { characteristic ->
                         replyRelay
                             .mergeWith(Completable.fromCallable {
-                                L.debug(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : readCharacteristic : $characteristicUuid")
+                                L.debug(Ble.Device.Default, "$logLabel : readCharacteristic : $characteristicUuid")
                                 sendGattRequest { gatt.readCharacteristic(characteristic) }
                             })
                             .filter { it.uuid == characteristicUuid && it.type == Type.READ_CHARACTERISTIC }
@@ -560,7 +581,7 @@ internal class BleDeviceEngineImpl(
                             // write-no-response 도 onCharacteristicWrite 가 와야 BluetoothGatt 가 다음 작업을 받으므로 응답을 기다린다
                             replyRelay
                                 .mergeWith(Completable.fromCallable {
-                                    L.debug(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : writeCharacteristic : $characteristicUuid : ${byteArray.toHexString()} : $writeType")
+                                    L.debug(Ble.Device.Default, "$logLabel : writeCharacteristic : $characteristicUuid : ${byteArray.toHexString()} : $writeType")
                                     sendGattRequest {
                                         if (usesValueGattApi()) {
                                             // 값과 쓰기 타입을 인자로 넘기므로, 같은 characteristic 으로 들어온 notification 이 쓰려던 값을 덮어쓰지 못한다
@@ -634,7 +655,7 @@ internal class BleDeviceEngineImpl(
                 getCharacteristic(characteristicUuid)
                     .flatMap {
                         characteristic = it
-                        L.debug(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : setCharacteristicNotification : $characteristicUuid : true")
+                        L.debug(Ble.Device.Default, "$logLabel : setCharacteristicNotification : $characteristicUuid : true")
                         gatt.setCharacteristicNotification(it, true)
                         writeDescriptor(gatt, it, type.byteArray)
                     }
@@ -647,7 +668,7 @@ internal class BleDeviceEngineImpl(
                     }
                     .doFinally {
                         characteristic?.let { gattCharacteristic ->
-                            L.debug(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : setCharacteristicNotification : $characteristicUuid : false")
+                            L.debug(Ble.Device.Default, "$logLabel : setCharacteristicNotification : $characteristicUuid : false")
                             gatt.setCharacteristicNotification(gattCharacteristic, false)
                             writeDescriptor(gatt, gattCharacteristic, DISABLE_NOTIFICATION_VALUE).subscribe({
                                 L.debug(Ble, "DISABLE_NOTIFICATION_VALUE:${it.contentToString()}")
@@ -695,7 +716,7 @@ internal class BleDeviceEngineImpl(
                 replyRelay
                     .doOnSubscribe {
                         val descriptor = characteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG_UUID)
-                        L.debug(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : writeDescriptor : ${characteristic.uuid} : ${byteArray.toHexString()}")
+                        L.debug(Ble.Device.Default, "$logLabel : writeDescriptor : ${characteristic.uuid} : ${byteArray.toHexString()}")
                         sendGattRequest {
                             if (usesValueGattApi()) {
                                 gatt.writeDescriptor(descriptor, byteArray).isGattRequestAccepted("writeDescriptor")
@@ -717,6 +738,7 @@ internal class BleDeviceEngineImpl(
         var connecting: State.SPP_CONNECTING? = null
         var socket: BleSppSocket? = null
         Observable.create<BleSppSocket> { emitter ->
+            BlePermissions.checkConnect(context, sdkInt)
             val aUuid = uuid ?: bluetoothDevice.uuids.first().uuid
             // 연결 중에 disconnect() 가 불리면 소켓을 닫아 connect() 를 중단할 수 있도록 상태에 소켓을 담는다
             val state = startConnecting { State.SPP_CONNECTING(bluetoothDevice.createRfcommSocketToServiceRecord(aUuid)) }
@@ -749,7 +771,7 @@ internal class BleDeviceEngineImpl(
             .flatMap { gatt ->
                 mtuRelay
                     .mergeWith(Completable.fromCallable {
-                        L.debug(Ble.Device.Default, "${gatt.device?.name}(${gatt.device?.address}) : requestMtu : $mtu")
+                        L.debug(Ble.Device.Default, "$logLabel : requestMtu : $mtu")
                         sendGattRequest { gatt.requestMtu(mtu) }
                     })
                     .firstOrError()
@@ -803,7 +825,7 @@ internal class BleDeviceEngineImpl(
     private fun Int.isGattRequestAccepted(operation: String): Boolean {
         if (this != BluetoothStatusCodes.SUCCESS) {
             // ERROR_GATT_WRITE_REQUEST_BUSY(201) 는 이전 요청이 아직 처리 중이라는 뜻이며, 다른 거절과 같이 재시도한다
-            L.warning(Ble.Device.Default, "${bluetoothDevice.name}(${bluetoothDevice.address}) : $operation rejected : $this")
+            L.warning(Ble.Device.Default, "$logLabel : $operation rejected : $this")
             return false
         }
         return true
@@ -829,7 +851,7 @@ internal class BleDeviceEngineImpl(
             .timeout(GATT_RELEASE_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS, Completable.complete())
             .doOnSubscribe {
                 if (gattRequestPendingRelay.value == true) {
-                    L.warning(Ble.Device.Default, "${bluetoothDevice.name}(${bluetoothDevice.address}) : operation timed out, waiting for GATT release before next operation")
+                    L.warning(Ble.Device.Default, "$logLabel : operation timed out, waiting for GATT release before next operation")
                 }
             }
             .doFinally { gattRequestPendingRelay.accept(false) }
@@ -866,7 +888,7 @@ internal class BleDeviceEngineImpl(
     internal fun onBluetoothDisabled() {
         val closed = synchronized(stateLock) {
             val state = stateRelay.value
-            L.debug(Ble.Device.Default, "${bluetoothDevice.name}(${bluetoothDevice.address}) : bluetooth disabled, state is ${state?.connectionState}")
+            L.debug(Ble.Device.Default, "$logLabel : bluetooth disabled, state is ${state?.connectionState}")
             when (state) {
                 is State.CONNECTED -> state.gatt
                 // disconnect() 의 fallback 타이머를 기다리지 않는다. (타이머는 상태가 바뀌었으므로 아무것도 하지 않는다)

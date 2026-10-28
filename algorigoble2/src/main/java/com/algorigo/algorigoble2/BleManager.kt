@@ -26,6 +26,12 @@ class BleManager(
     /** GATT 콜백이 실패 status 를 돌려준 경우. [status]는 BluetoothGatt.GATT_* 값이다. (예: 0x05 인증 부족, 0x0F 암호화 부족) */
     class GattOperationFailedException(val operation: String, val status: Int) :
         Exception("$operation failed with GATT status $status (0x${Integer.toHexString(status)})")
+    /**
+     * 작업에 필요한 런타임 권한이 없는 경우. [permissions]는 허용되지 않은 권한 이름이다. (예: android.permission.BLUETOOTH_CONNECT)
+     * 플랫폼이 던지던 SecurityException 을 처리하던 코드도 그대로 동작하도록 SecurityException 을 상속한다.
+     */
+    class PermissionDeniedException(val permissions: List<String>) :
+        SecurityException("Permission denied: ${permissions.joinToString()}")
 
     enum class Engine {
 //        RX_ANDROID_BLE,
