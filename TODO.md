@@ -468,7 +468,15 @@
       - `BLUETOOTH_CONNECT` 없이(SCAN은 있음) 스캔으로 M446K를 찾은 뒤: 수정 전에는 `toString()`, `deviceName`, `bonded`, 다른 매니저의 `getDevice(mac)`, `getBondedDevices()`, `connectCompletable`, `bondCompletable` **모두** 플랫폼 `SecurityException`이었습니다. 수정 후에는 `toString()` = `BleDevice (permission denied)(5D:D3:…)`, `getDevice(mac)` 정상, 나머지는 `PermissionDeniedException(BLUETOOTH_CONNECT)`이고 연결 상태는 DISCONNECTED 그대로였습니다.
       - 권한이 모두 있을 때 회귀(MTU, read, 응답 있는/없는 write, CCCD) 정상.
       - 참고: CONNECT 권한 없이 캐시된 기기가 있는 상태에서 블루투스를 꺼도, 어댑터가 꺼지면 `BluetoothDevice.getName()`이 예외 대신 null을 돌려줘서 수정 전에도 크래시는 없었습니다.
-- [ ] **[버그] characteristic을 UUID로만 찾음** — `impl/BleDeviceEngineImpl.kt:451-465`. 여러 서비스에 같은 UUID가 있으면 첫 번째 것이 선택됩니다. 찾지 못하면 메시지 없는 `IllegalStateException()`이 납니다. serviceUuid를 받는 오버로드와 `CharacteristicNotFoundException`을 추가해야 합니다.
+- [x] **[버그] characteristic을 UUID로만 찾음** — `impl/BleDeviceEngineImpl.kt:451-465`. 여러 서비스에 같은 UUID가 있으면 첫 번째 것이 선택됩니다. 찾지 못하면 메시지 없는 `IllegalStateException()`이 납니다. serviceUuid를 받는 오버로드와 `CharacteristicNotFoundException`을 추가해야 합니다.
+  - ✅ 해결 (`feature/characteristic_by_service`)
+    - `BleDevice`에 서비스를 지정하는 오버로드를 추가했습니다: `readCharacteristicSingle(serviceUuid, characteristicUuid)`, `writeCharacteristicSingle(serviceUuid, characteristicUuid, bytes, writeType = DEFAULT)`(`@JvmOverloads`), `setupNotification(type, serviceUuid, characteristicUuid)`. 기존 함수는 그대로이며 처음 찾은 characteristic을 씁니다. (engine 추상 메서드는 `serviceUuid: UUID?`를 받도록 바꿈. 가상 기기는 서비스를 구분하지 않음)
+    - 찾지 못하면 `BleManager.CharacteristicNotFoundException(serviceUuid, characteristicUuid)`로 실패합니다. 메시지에 UUID(와 서비스)가 들어가고, 기존 `IllegalStateException`을 잡던 코드와 호환되도록 `IllegalStateException`을 상속합니다.
+    - notification: 같은 characteristic인지 **서비스까지** 보고 설정을 공유합니다. 서비스를 지정하지 않은 구독은 현재 연결에서 처음 찾은 서비스로 정하므로, 같은 characteristic을 서비스 지정/미지정으로 구독해도 CCCD 설정을 공유합니다. 수신한 notification은 설정한 characteristic의 서비스와 같을 때만 전달합니다(다른 서비스의 같은 UUID notification은 전달하지 않음).
+    - 테스트: `BleDeviceEngineImplServiceLookupTest`(7건). 수정 전 API로 확인할 수 있는 2건 중 "찾지 못하면 UUID가 담긴 메시지" 테스트가 실패했습니다(메시지 null). "서비스 미지정 시 첫 번째 것" 테스트는 기존 동작 보호용입니다. 나머지 5건은 새 오버로드와 notification 구분 테스트입니다.
+    - 실기기 확인(Fold5 → M446K nRF Connect). nRF GATT 서버에 서비스 `0000bbb0-…-aabbccddeeff`를 추가하고, 그 안에 Heart Rate 서비스와 같은 UUID의 `2a38`(Read+Notify, 값 `05`)을 넣었습니다. (Heart Rate의 `2a38`은 Read 전용, 값 `01`)
+      - 수정 전: `2a38` characteristic 2개 중 항상 Heart Rate 것만 선택돼 read는 `01`, notification 설정은 `IllegalCharacteristicProperty`(notify 속성 없음)로 실패했습니다. 두 번째 서비스의 `2a38`에는 접근할 방법이 없었습니다. 없는 UUID read는 `IllegalStateException: null`.
+      - 수정 후: 기존 API는 그대로(`01`, notification 실패). `read(HR, 2a38)` = `01`, `read(bbb0, 2a38)` = `05`, `setupNotification(bbb0, 2a38)` 성공(CCCD 쓰기 status 0). `read(bbb0, aaa1)`은 `CharacteristicNotFoundException: Characteristic 0000aaa1-… not found in service 0000bbb0-…`, 없는 UUID는 `Characteristic 0000ffff-… not found`.
 - [ ] **[버그] CCCD descriptor가 없으면 NPE** — `impl/BleDeviceEngineImpl.kt:475`. 원인을 알기 어려운 에러가 나옵니다.
 - [x] **[버그] `onBluetoothDisabled()`가 CONNECTED 상태만 처리함** — `impl/BleDeviceEngineImpl.kt:528-537`. CONNECTING이나 SPP 상태인 기기는 정리되지 않습니다.
   - ✅ 해결 (`feature/bluetooth_off_all_states`)

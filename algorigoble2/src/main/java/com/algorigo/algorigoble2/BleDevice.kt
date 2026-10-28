@@ -90,15 +90,28 @@ open class BleDevice {
 
     fun getCharacteristicsSingle() = engine.getCharacteristicsSingle()
 
+    // characteristic 을 UUID 로만 찾으면 여러 서비스에 같은 UUID 가 있을 때 처음 찾은 것을 쓴다. 서비스를 지정하려면 serviceUuid 를 받는 함수를 쓴다.
+    // 찾지 못하면 BleManager.CharacteristicNotFoundException 으로 실패한다
+
     fun readCharacteristicSingle(characteristicUuid: UUID) =
-        engine.readCharacteristicSingle(characteristicUuid)
+        engine.readCharacteristicSingle(null, characteristicUuid)
+
+    fun readCharacteristicSingle(serviceUuid: UUID, characteristicUuid: UUID) =
+        engine.readCharacteristicSingle(serviceUuid, characteristicUuid)
 
     @JvmOverloads
     fun writeCharacteristicSingle(characteristicUuid: UUID, byteArray: ByteArray, writeType: WriteType = WriteType.DEFAULT) =
-        engine.writeCharacteristicSingle(characteristicUuid, byteArray, writeType)
+        engine.writeCharacteristicSingle(null, characteristicUuid, byteArray, writeType)
+
+    @JvmOverloads
+    fun writeCharacteristicSingle(serviceUuid: UUID, characteristicUuid: UUID, byteArray: ByteArray, writeType: WriteType = WriteType.DEFAULT) =
+        engine.writeCharacteristicSingle(serviceUuid, characteristicUuid, byteArray, writeType)
 
     fun setupNotification(type: NotificationType, characteristicUuid: UUID) =
-        engine.setupNotification(type, characteristicUuid)
+        engine.setupNotification(type, null, characteristicUuid)
+
+    fun setupNotification(type: NotificationType, serviceUuid: UUID, characteristicUuid: UUID) =
+        engine.setupNotification(type, serviceUuid, characteristicUuid)
 
     fun connectSppSocket(uuid: UUID? = null) = engine.connectSppSocket(uuid)
 

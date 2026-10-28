@@ -10,6 +10,7 @@ import com.algorigo.algorigoble2.virtual.VirtualDevice
 import com.algorigo.logger.L
 import com.algorigo.logger.LogManager
 import io.reactivex.rxjava3.core.Observable
+import java.util.UUID
 import java.util.logging.Logger
 
 class BleManager(
@@ -32,6 +33,12 @@ class BleManager(
      */
     class PermissionDeniedException(val permissions: List<String>) :
         SecurityException("Permission denied: ${permissions.joinToString()}")
+    /**
+     * 연결된 기기에서 characteristic 을 찾지 못한 경우. [serviceUuid]가 null 이면 모든 서비스에서 찾았다.
+     * 이전에 던지던 IllegalStateException 을 처리하던 코드도 그대로 동작하도록 IllegalStateException 을 상속한다.
+     */
+    class CharacteristicNotFoundException(val serviceUuid: UUID?, val characteristicUuid: UUID) :
+        IllegalStateException("Characteristic $characteristicUuid not found" + (serviceUuid?.let { " in service $it" } ?: ""))
 
     enum class Engine {
 //        RX_ANDROID_BLE,
