@@ -780,7 +780,10 @@
 
 ### 정리
 
-- [ ] **[구조]** `rx_util/RxEnumerated.kt`에 package 선언이 없어서 `Observable.enumerated()`가 루트 패키지로 공개됩니다. 또 `index`가 구독 간에 공유됩니다.
+- [x] **[구조]** `rx_util/RxEnumerated.kt`에 package 선언이 없어서 `Observable.enumerated()`가 루트 패키지로 공개됩니다. 또 `index`가 구독 간에 공유됩니다.
+  - ✅ 해결 (`feature/remove_rx_enumerated`): 라이브러리와 샘플 앱 어디에서도 쓰지 않는 함수라서, 패키지를 붙이고 고치는 대신 파일을 지웠습니다. package 선언이 없는 파일은 이것 하나였습니다.
+    - ⚠️ 공개 API 제거: 사용하는 앱이 `enumerated()`를 쓰고 있었다면 컴파일되지 않습니다. (BLE와 관계없는 범용 Rx 확장이라 `zipWith(Observable.range(...))` 등으로 대체할 수 있습니다)
+    - 확인: release AAR의 `classes.jar`에서 루트 패키지 클래스가 `RxEnumeratedKt`, `RxEnumeratedKt$enumerated$1` 2개에서 0개가 됐습니다. 라이브러리 빌드, 샘플 앱 컴파일, 단위 테스트 통과. (동작 코드가 아니라 실기기 확인은 하지 않았습니다)
 - [ ] **[구조]** 공개 top-level 확장 함수인 `ByteArray.toHexString()`(Kotlin stdlib의 `toHexString`과 이름이 같음)과 `BluetoothDevice.deleteBond()`(`impl/BleDeviceEngineImpl.kt:546-552`)를 `internal`로 바꿉니다. `impl/BleCharacteristicImpl`도 public이므로 `internal`로 바꿉니다.
 - [ ] **[구조]** `BleCharacterisic` 오타: 올바른 이름의 타입을 추가하고 기존 이름은 `@Deprecated typealias`로 남겨서 호환성을 유지합니다.
 - [ ] **[구조]** 죽은 코드 제거:
