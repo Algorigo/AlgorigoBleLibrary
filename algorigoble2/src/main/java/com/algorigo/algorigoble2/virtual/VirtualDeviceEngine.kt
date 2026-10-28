@@ -4,6 +4,7 @@ import com.algorigo.algorigoble2.BleCharacterisic
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleDeviceEngine
 import com.algorigo.algorigoble2.BleManager
+import com.algorigo.algorigoble2.BleService
 import com.algorigo.algorigoble2.BleSppSocket
 import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Observable
@@ -73,6 +74,15 @@ internal class VirtualDeviceEngine(private val virtualDevice: VirtualDevice) : B
 
     override fun getCharacteristicsSingle(): Single<List<BleCharacterisic>> {
         return virtualDevice.getCharacteristicsSingle()
+    }
+
+    // 실기기처럼 연결된 동안에만 서비스를 알 수 있다
+    override fun getServicesSingle(): Single<List<BleService>> {
+        return virtualDevice.connectionStateRelay
+            .firstOrError()
+            .flatMap {
+                if (it == BleDevice.ConnectionState.CONNECTED) virtualDevice.getServicesSingle() else Single.error(BleManager.DisconnectedException())
+            }
     }
 
     // 가상 기기는 서비스를 구분하지 않는다

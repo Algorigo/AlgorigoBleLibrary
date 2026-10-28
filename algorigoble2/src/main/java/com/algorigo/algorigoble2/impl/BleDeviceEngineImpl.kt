@@ -18,6 +18,7 @@ import com.algorigo.algorigoble2.BleCharacterisic
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleDeviceEngine
 import com.algorigo.algorigoble2.BleManager
+import com.algorigo.algorigoble2.BleService
 import com.algorigo.algorigoble2.BleSppSocket
 import com.algorigo.algorigoble2.logging.Ble
 import com.algorigo.logger.L
@@ -567,6 +568,20 @@ internal class BleDeviceEngineImpl(
             .guardOperation(OPERATION_GET_CHARACTERISTICS)
     }
 
+    override fun getServicesSingle(): Single<List<BleService>> {
+        return getServices()
+            .map { services ->
+                services.map { service ->
+                    BleService(
+                        service.uuid,
+                        service.type == BluetoothGattService.SERVICE_TYPE_PRIMARY,
+                        service.characteristics.map { BleCharacteristicImpl(it) },
+                    )
+                }
+            }
+            .guardOperation(OPERATION_GET_SERVICES)
+    }
+
     override fun readCharacteristicSingle(serviceUuid: UUID?, characteristicUuid: UUID): Single<ByteArray> {
         return enqueue(Type.READ_CHARACTERISTIC.name, getGattSingle()
             .flatMap { gatt ->
@@ -1046,6 +1061,7 @@ internal class BleDeviceEngineImpl(
         private const val OPERATION_REQUEST_CONNECTION_PRIORITY = "REQUEST_CONNECTION_PRIORITY"
         private const val OPERATION_READ_RSSI = "READ_RSSI"
         private const val OPERATION_GET_CHARACTERISTICS = "GET_CHARACTERISTICS"
+        private const val OPERATION_GET_SERVICES = "GET_SERVICES"
     }
 }
 
