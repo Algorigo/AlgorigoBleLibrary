@@ -595,7 +595,21 @@
 
 ### 구조 개선
 
-- [ ] **[구조] 콜백 스레드 정책 정리** — GATT 콜백, notification, 상태 변경이 모두 바인더 스레드에서 사용자 코드로 바로 전달됩니다. 사용자가 무거운 처리를 하면 해당 기기의 모든 GATT 콜백이 지연됩니다. 전용 scheduler로 `observeOn`하거나, 스레드 정책을 문서화해야 합니다.
+- [x] **[구조] 콜백 스레드 정책 정리** — GATT 콜백, notification, 상태 변경이 모두 바인더 스레드에서 사용자 코드로 바로 전달됩니다. 사용자가 무거운 처리를 하면 해당 기기의 모든 GATT 콜백이 지연됩니다. 전용 scheduler로 `observeOn`하거나, 스레드 정책을 문서화해야 합니다.
+  - ✅ 해결 (`feature/callback_thread_policy`)
+    - 공개 API의 결과를 `Schedulers.io()`로 넘겨 전달합니다(`CallbackScheduler.kt`의 `deliverToCallback()`). 대상: `BleDevice`의 연결 상태 스트림, `connectCompletable`, read/write/MTU/특성 조회 결과, notification(설정 완료와 값 모두), bond/unbond, SPP 소켓, `BleManager.getConnectionStateObservable()`.
+      - 구독마다 하나의 스레드에서 순서대로 전달됩니다. 값 스트림은 `delayError`라서, 연결이 끊기기 직전에 받은 notification을 에러보다 먼저 모두 전달합니다.
+      - 사용자 코드가 바인더 스레드나 엔진의 상태 잠금 안에서 실행되지 않으므로, 오래 걸리는 처리를 해도 그 기기의 다음 GATT 작업과 다른 스레드의 상태 변경(`disconnect()` 등)이 기다리지 않습니다. (앞의 "stateRelay 직렬화" 항목의 ⚠️ "관찰자가 오래 걸리면 상태 전환이 기다린다"는 제약도 사라짐)
+    - 라이브러리 내부(연결 대기, 작업 큐, `BleManager`의 기기 캐시 등)는 기존처럼 바로 전달되는 내부 스트림(`connectionStateObservableInternal()`, 엔진 스트림)을 씁니다. 캐시된 기기마다 io 스레드를 붙잡지 않기 위해서입니다. `connectionState` 프로퍼티도 내부 스트림에서 바로 읽습니다.
+    - 스캔 결과는 바꾸지 않았습니다. Android가 main thread에서 전달하므로, 바꾸면 스캔 결과로 바로 UI를 갱신하는 앱이 깨집니다.
+    - 스레드 정책은 `BleDevice` KDoc과 CLAUDE.md에 적었습니다.
+    - ⚠️ 동작 변경: 결과가 바인더 스레드/호출 스레드 대신 `RxCachedThreadScheduler-*`에서 옵니다. UI를 바꾸려면 기존처럼 `observeOn(mainThread)`가 필요합니다. 서로 다른 구독 사이의 순서(예: 마지막 notification과 DISCONNECTED 상태)는 보장하지 않습니다. `InitializableBleDevice` 하위 클래스도 이제 `getConnectionStateObservable()`을 override할 수 있습니다(INITIALIZING 처리는 내부 스트림으로 옮김).
+    - 테스트: `CallbackThreadTest`(4건, callback scheduler를 `TestScheduler`로 바꿔 전달 시점을 확인). 수정 전 코드에서는 4건 모두 실패했습니다(read 결과·상태·notification·연결 완료가 콜백/`disconnect()` 안에서 바로 실행됨). 기존 테스트는 io가 trampoline이라 그대로 통과합니다.
+    - 실기기 확인(Fold5 → M446K):
+      - 콜백 스레드: 수정 전 연결 완료/read/notification 설정이 `binder:5754_3`, DISCONNECTING은 `disconnect()`를 부른 테스트 스레드 → 수정 후 모두 `RxCachedThreadScheduler-1/2`.
+      - read 결과를 1초 동안 처리하는 구독자 바로 뒤에 요청한 read(3회): 수정 전 **1109~1190ms** → 수정 후 108~137ms.
+      - CONNECTED를 1.5초 동안 처리하는 상태 관찰자가 있을 때 다른 스레드의 `disconnect()`: 수정 전 **1511ms** 대기 → 수정 후 7ms.
+      - 회귀(MTU, read, 응답 있는/없는 write, CCCD) 정상.
 - [ ] **[구조] 예외 계층 정리** — 현재 `IllegalStateException`, `RuntimeException("Error")`, `NoSuchElementException`, `BleManager.DisconnectedException` 등이 섞여 있습니다. `sealed class BleException`(Disconnected(status), GattError(status), Timeout, CharacteristicNotFound, PermissionDenied, BondFailed(reason), BluetoothDisabled)로 통일하고 **연결 끊김 사유(HCI status)**를 노출합니다.
 - [ ] **[구조] 테스트 부재** — 예제 테스트만 있습니다. 순수 로직(`BleScanFilter`, `ScanInfo` 파싱, `BleScanOptionsConverter`, `collectListLastSortedIndex`) 단위 테스트, mock `BluetoothGatt`로 engine 상태 전이 테스트(Robolectric/MockK), `VirtualDevice` 기반 통합 테스트를 추가해야 합니다. 이를 위해 `BleDeviceEngineImpl`의 GATT 의존성을 주입 가능하게 만들어야 합니다.
 - [ ] **[구조] BLE와 Classic(SPP) 책임 분리** — `BleSppSocket`은 BLE가 아니라 RFCOMM인데 같은 상태 머신(`stateRelay`)을 공유합니다. 별도 클래스나 모듈로 분리하는 것을 검토합니다.

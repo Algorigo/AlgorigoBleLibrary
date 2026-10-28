@@ -138,7 +138,8 @@ class BleManager(
                 }
             }
     }
-    fun getConnectionStateObservable() = engine.getConnectionStateObservable()
+    /** 이 BleManager 가 관리하는 기기들의 상태 변화. [BleDevice]와 같이 callback 스레드(io)에서 전달된다. */
+    fun getConnectionStateObservable() = engine.getConnectionStateObservable().deliverToCallback()
 
     /**
      * 블루투스 상태를 감지하려고 등록한 receiver 를 해제하고, 이 BleManager 가 연결한 기기(가상 기기 포함)를 끊는다.

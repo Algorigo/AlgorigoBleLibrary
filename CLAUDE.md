@@ -50,5 +50,8 @@ Public API / engine split: user-facing classes delegate everything to `internal`
 ### Virtual devices
 `virtual/VirtualDevice` + `VirtualDeviceEngine` let you simulate a peripheral without hardware. Pass `Pair(VirtualDevice, BleDevice)` into the `BleManager` constructor; the virtual devices are merged into scan results, `getDevice`, and bonded/connected lists. See `app/.../VirtualBleDevice.kt` for an example.
 
+### Callback threading
+Public results (`BleDevice` / `BleManager.getConnectionStateObservable()` Observables, Singles, Completables) are handed off with `deliverToCallback()` (`CallbackScheduler.kt`, `Schedulers.io()`, `delayError` for streams), so user code never runs on the GATT binder thread or inside the engine's state lock. Library-internal code must subscribe to the raw streams instead (`BleDeviceEngine.getConnectionStateObservable()`, `BleDevice.connectionStateObservableInternal()`), otherwise every cached device would pin an io thread. Scan results stay on the main thread (Android default). Tests control delivery via `CallbackScheduler.override`.
+
 ### Logging
 Uses `com.algorigo.library:algorigo-logger` (`L.debug/info/error(tag, ...)`) with the tag hierarchy in `logging/Tags.kt` (`Ble`, `Ble.Engine.Default`, `Ble.Device.Default`, ...). Prefer these over `android.util.Log`.
