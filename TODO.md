@@ -427,7 +427,16 @@
     - 함께 수정: API 30에서는 위치 provider 변경 broadcast의 `EXTRA_PROVIDER_ENABLED`를 위치 사용 가능 여부로 썼습니다. 이 값은 **바뀐 provider 하나의 상태**라서, 다른 provider가 켜져 있어도 false가 되어 `LocationUnavailableException`으로 스캔이 끝날 수 있습니다. 이제 broadcast를 받을 때마다 `LocationManagerCompat.isLocationEnabled()`로 다시 읽습니다. (API 30 실기기가 없어 코드로만 확인)
     - 테스트: `BleManagerEngineImplScanAvailabilityTest`(4건, 단위 테스트의 SDK_INT가 0이라 API 30 이하 경로를 탐). 수정 전 코드에서는 2건이 실패했습니다(위치가 켜진 채 provider가 바뀌면 `startScan` 2회). 나머지 2건은 위치가 꺼지거나 블루투스가 꺼지면 기존처럼 에러로 끝나고 스캔을 멈추는지 확인하는 보호 테스트입니다.
     - 실기기 확인(Fold5 Android 17): API 31 이상은 위치 상태를 보지 않으므로 이 경로를 실기기에서 재현할 수는 없었고, 회귀만 확인했습니다. manufacturer data 필터 스캔 26초 동안 위치 끄기/켜기(`cmd location set-location-enabled`) → 블루투스 끄기를 했습니다. 스캔은 1번만 등록됐고(빈 목록 전달 1회), 위치 토글에는 영향이 없었으며, 블루투스를 끄자 `BluetoothUnavailableException`으로 끝나고 `stopScan`이 호출됐습니다.
-- [ ] **[버그] `CALLBACK_TYPE_MATCH_LOST`를 처리하지 않음** — `impl/BleScanner.kt:20`. `callbackType`을 무시하므로, 사라진 기기도 발견된 기기로 목록에 추가됩니다.
+- [x] **[버그] `CALLBACK_TYPE_MATCH_LOST`를 처리하지 않음** — `impl/BleScanner.kt:20`. `callbackType`을 무시하므로, 사라진 기기도 발견된 기기로 목록에 추가됩니다.
+  - ✅ 해결 (`feature/scan_match_lost`)
+    - `BleScanner`가 스캔 결과와 함께 콜백 종류를 전달합니다(`ScanEvent.lost`). MATCH_LOST는 발견됐던 기기가 사라졌다는 알림이므로 rssi 필터와 관계없이 전달하고, 디버그 로그(`scan match lost`)를 남깁니다.
+    - 스캔 목록(`scanObservable`)은 기존처럼 처음 발견된 순서를 유지하고 같은 기기는 최신 `ScanInfo`로 바꿉니다. MATCH_LOST이면 그 기기를 **목록에서 뺍니다**. 다시 발견되면 목록 끝에 추가됩니다.
+    - 사라진 기기를 위해 `BleDevice`를 새로 만들지 않고(delegate 호출 없음), 목록이 바뀌지 않으면 내보내지 않습니다. 목록 상태는 구독마다 새로 만듭니다.
+    - 공개 함수 `collectListLastSortedIndex`는 호환성을 위해 남겨 두었고, 엔진은 더 이상 사용하지 않습니다. 이 과정에서 minSdk 24에서 실행되지 않던 API 24 미만 분기도 없어졌습니다.
+    - 테스트: `BleManagerEngineImplScanListTest`(4건), `BleScannerTest`에 MATCH_LOST 2건 추가. 수정 전 코드에서는 목록 테스트 3건이 실패했습니다(사라진 기기가 목록에 남음, 다시 발견돼도 순서 그대로, 모르는 기기의 MATCH_LOST로 `BleDevice` 생성). 나머지 1건은 순서 유지와 `ScanInfo` 갱신을 확인하는 보호 테스트입니다.
+    - 실기기 확인(Fold5 → M446K nRF 광고). `FIRST_MATCH_AND_MATCH_LOST` + manufacturer data 필터로 60초 스캔하면서, 시작 약 19초 뒤 nRF 광고를 끄고 49초 뒤 다시 켰습니다. (nRF는 광고를 다시 켤 때 새 랜덤 주소를 씀)
+      - 수정 전: 광고를 끈 약 6초 뒤 스택이 같은 주소로 lost 콜백을 보냈지만 목록에 그대로 남았습니다. 광고를 다시 켠 뒤에는 **사라진 주소와 새 주소 2개**가 목록에 있었습니다.
+      - 수정 후: 광고를 끈 약 6초 뒤 `scan match lost` 로그와 함께 **목록이 비었고**, 광고를 다시 켜자 새 주소 1개만 목록에 나타났습니다.
 - [ ] **[버그] API 32 이하에서 `ScanInfo.advertisingDataMap`이 항상 비어 있음** — `ScanInfo.kt:20-27`. `bytes`를 읽기만 하고 파싱하지 않은 채 빈 map을 반환합니다. AD structure(length-type-value)를 직접 파싱해야 합니다.
 - [ ] **[버그] `BleScanFilter.Builder` 검증이 파라미터가 아니라 이전 필드 값을 검사함** — `BleScanFilter.kt:59, 103, 134`. 그래서 mask와 data의 길이가 달라도 검증을 통과하고, 스캔을 시작할 때 Android `ScanFilter.Builder`에서 `IllegalArgumentException`이 납니다.
 - [ ] **[버그] 런타임 권한을 확인하지 않음** — 전역 `@SuppressLint("MissingPermission")`. API 31 이상에서 `BLUETOOTH_SCAN/CONNECT`가 없으면 `deviceName`, `bonded`, `toString()`, 로그 출력에서도 `SecurityException`이 납니다. 작업 전에 권한을 확인하고 명확한 예외(`PermissionDeniedException`)를 내야 합니다.
