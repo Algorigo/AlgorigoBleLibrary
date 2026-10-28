@@ -2,10 +2,15 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- 블루투스 퍼미션 -->
+    <!--
+        BLE 가 없는 기기에도 설치를 막지 않는다. BLE 가 꼭 필요한 앱은 자기 manifest 에 required="true" 로 선언한다.
+        (manifest 병합 시 하나라도 required="true" 이면 true 가 된다)
+    -->
     <uses-feature
         android:name="android.hardware.bluetooth_le"
-        android:required="true" />
+        android:required="false" />
+
+    <!-- 블루투스 퍼미션. 앱에서 바꾸는 방법은 BleManager 의 KDoc 을 본다 -->
 
     <uses-permission
         android:name="android.permission.BLUETOOTH"
@@ -20,6 +25,7 @@
         android:name="android.permission.ACCESS_FINE_LOCATION"
         android:maxSdkVersion="30" />
 
+    <!-- 스캔 결과로 위치를 알아내지 않는다고 선언해서 API 31+ 에서 위치 권한 없이 스캔한다. 비콘 등 일부 광고는 걸러진다 -->
     <uses-permission
         android:name="android.permission.BLUETOOTH_SCAN"
         android:usesPermissionFlags="neverForLocation"
