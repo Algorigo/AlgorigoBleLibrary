@@ -641,7 +641,23 @@
       - read 전용 `2a38`에 notification: 내부 클래스 `BleDeviceEngineImpl$IllegalCharacteristicProperty`(메시지 null) → `IllegalCharacteristicPropertyException: Characteristic 00002a38-… does not support NOTIFY/INDICATE (properties 0x2)`
       - 상대 기기 블루투스 꺼짐(스택 로그 `onConnectionStateChange 19 -> 0`): notification 에러가 `DisconnectedException`(status 없음, 메시지 null) → `DisconnectedException: Disconnected (status 19, 0x13)`, `status=19`
       - 수정 전에는 위 예외가 모두 공통 타입이 없었고, 수정 후에는 모두 `BleException`이었습니다.
-- [ ] **[구조] 테스트 부재** — 예제 테스트만 있습니다. 순수 로직(`BleScanFilter`, `ScanInfo` 파싱, `BleScanOptionsConverter`, `collectListLastSortedIndex`) 단위 테스트, mock `BluetoothGatt`로 engine 상태 전이 테스트(Robolectric/MockK), `VirtualDevice` 기반 통합 테스트를 추가해야 합니다. 이를 위해 `BleDeviceEngineImpl`의 GATT 의존성을 주입 가능하게 만들어야 합니다.
+- [x] **[구조] 테스트 부재** — 예제 테스트만 있습니다. 순수 로직(`BleScanFilter`, `ScanInfo` 파싱, `BleScanOptionsConverter`, `collectListLastSortedIndex`) 단위 테스트, mock `BluetoothGatt`로 engine 상태 전이 테스트(Robolectric/MockK), `VirtualDevice` 기반 통합 테스트를 추가해야 합니다. 이를 위해 `BleDeviceEngineImpl`의 GATT 의존성을 주입 가능하게 만들어야 합니다.
+  - ✅ 해결 (`feature/test_coverage`, 앞의 수정들에서 쌓인 테스트 포함)
+    - 현재 JVM 단위 테스트는 약 50개 클래스, 213건입니다(이 항목을 시작할 때 204건). 각 버그 수정마다 테스트를 추가하면서 기반이 갖춰졌습니다.
+      - engine 상태 전이: MockK로 `BluetoothDevice`/`BluetoothGatt`를 만들고 `connectGatt`에 넘긴 `BluetoothGattCallback`을 잡아 시스템 콜백을 직접 부르는 `impl/GattTestFixture`. GATT 의존성은 `BluetoothDevice`를 통해 주입되고, API 33 경로는 `sdkInt` 주입으로 확인합니다. Robolectric은 쓰지 않았습니다.
+      - 시간/스레드: `testutil/RxTestSchedulerRule`(computation → TestScheduler, io → trampoline), 콜백 전달 시점은 `CallbackScheduler.override`.
+      - 순수 로직: `BleScanFilterTest`, `ScanInfoTest`(파싱), `BleScannerTest`, `RxCollectingListTest`.
+    - 이 항목에서 추가한 것:
+      - `BleScanOptionsConverterInstrumentedTest`(4건): Android `ScanSettings`/`ScanFilter` 변환. JVM의 android.jar에서는 Builder가 stub이라 기기에서 실행하는 instrumented test로 만들었습니다.
+      - `virtual/VirtualDeviceIntegrationTest`(2건): `BleManager`에 `VirtualDevice`를 등록하고 스캔 결과 병합(필터 적용) → 연결 → 특성 조회/write/read → notification 순서와 시작/종료 → `close()` → 연결 끊김 오류까지 공개 API로 확인합니다.
+      - `BleScanFilterTest`에 rssi 기준, 가상 기기 이름/주소 필터 테스트(2건), `RxCollectingListTest`(2건).
+    - 테스트를 쓰다 발견해 고친 것: `collectListLastSortedIndex`(공개 유틸)는 목록 상태를 함수 호출 시점에 만들어, 같은 Observable을 다시 구독하면 이전 구독의 항목이 섞였습니다. 이제 구독마다 새 목록을 씁니다(수정 전 코드에서 `eachSubscription_collectsIndependently` 실패). 라이브러리 내부는 이 유틸을 더 이상 쓰지 않습니다.
+    - 항상 실패하던 라이브러리 `ExampleInstrumentedTest`와 의미 없는 `ExampleUnitTest`를 지웠습니다(아래 P3 항목).
+    - CLAUDE.md의 "예제 테스트만 있다"는 설명을 현재 테스트 구성으로 바꿨습니다.
+    - 남은 것: CI(CircleCI)는 JVM 단위 테스트만 실행합니다. instrumented test는 기기/에뮬레이터가 있어야 해서 CI에 넣지 않았습니다.
+    - 실기기 확인:
+      - 라이브러리 `connectedDebugAndroidTest`: 수정 전 Fold5에서 3건 중 `ExampleInstrumentedTest` 1건 실패로 **전체 실패** → 수정 후 Fold5(Android 17)와 M446K(Android 16)에서 각각 6건 모두 통과.
+      - 샘플 앱 `connectedDebugAndroidTest`(Fold5): 6건 모두 통과. 오늘 바뀐 예외 타입과 콜백 스레드에서도 `ConnectDeviceFailureTest`, `DeviceActivityDisposeTest`가 통과합니다.
 - [x] **[구조] BLE와 Classic(SPP) 책임 분리** — `BleSppSocket`은 BLE가 아니라 RFCOMM인데 같은 상태 머신(`stateRelay`)을 공유합니다. 별도 클래스나 모듈로 분리하는 것을 검토합니다.
   - ✅ 해결 (`feature/separate_spp_connection`)
     - SPP 연결과 그 상태를 `impl/SppConnection`으로 분리했습니다. 소켓 생성·연결·정리, UUID 선택, 기기 검색 중지를 이 클래스가 맡고, 자체 상태(DISCONNECTED/CONNECTING/CONNECTED)를 가집니다.
@@ -692,7 +708,8 @@
 - [ ] **[구조]** `getDevice(mac)`에서 `getRemoteDevice`는 대문자 MAC만 허용합니다. 입력을 정규화해야 합니다.
 - [ ] **[구조]** `clazz.newInstance()`(`impl/BleManagerEngineImpl.kt:148`)는 deprecated이고, 사용하는 앱이 R8을 쓰면 no-arg 생성자가 제거될 수 있습니다. factory 람다 방식으로 바꾸거나 consumer proguard rule을 추가합니다.
 - [ ] **[배포]** Gradle에서 deprecated된 `buildDir`, `archivesBaseName`을 교체합니다.
-- [ ] **[구조]** `ExampleInstrumentedTest`가 항상 실패합니다. 패키지명을 `com.algorigo.algorigoble2.test`로 기대하지만, 실제 namespace는 `com.algorigo.rx.algorigoble2`입니다. 이 때문에 `connectedDebugAndroidTest` 전체 실행이 실패하므로, 수정하거나 삭제해야 합니다(`algorigoble2/src/androidTest/.../ExampleInstrumentedTest.kt`).
+- [x] **[구조]** `ExampleInstrumentedTest`가 항상 실패합니다. 패키지명을 `com.algorigo.algorigoble2.test`로 기대하지만, 실제 namespace는 `com.algorigo.rx.algorigoble2`입니다. 이 때문에 `connectedDebugAndroidTest` 전체 실행이 실패하므로, 수정하거나 삭제해야 합니다(`algorigoble2/src/androidTest/.../ExampleInstrumentedTest.kt`).
+  - ✅ 해결 (`feature/test_coverage`): P2 "테스트 부재" 항목에서 라이브러리의 `ExampleInstrumentedTest`와 `ExampleUnitTest`를 지웠습니다. Fold5와 M446K에서 `:algorigoble2:connectedDebugAndroidTest`가 통과합니다.
 - [ ] **[구조]** (실기기) 라이브러리 로그가 2~3번씩 중복 출력되는 경우가 있습니다. 예를 들어 `doOnError` 한 번에 같은 줄이 2~3번 나옵니다. 원인은 확인하지 못했습니다. 샘플 앱의 `BluetoothService`가 `AndroidHandler`를 추가하는 방식과 logger의 handler 전파 구조를 확인해야 합니다.
 
 ### 장기 기능
