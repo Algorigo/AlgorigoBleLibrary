@@ -643,7 +643,7 @@
       - 수정 전에는 위 예외가 모두 공통 타입이 없었고, 수정 후에는 모두 `BleException`이었습니다.
 - [x] **[구조] 테스트 부재** — 예제 테스트만 있습니다. 순수 로직(`BleScanFilter`, `ScanInfo` 파싱, `BleScanOptionsConverter`, `collectListLastSortedIndex`) 단위 테스트, mock `BluetoothGatt`로 engine 상태 전이 테스트(Robolectric/MockK), `VirtualDevice` 기반 통합 테스트를 추가해야 합니다. 이를 위해 `BleDeviceEngineImpl`의 GATT 의존성을 주입 가능하게 만들어야 합니다.
   - ✅ 해결 (`feature/test_coverage`, 앞의 수정들에서 쌓인 테스트 포함)
-    - 현재 JVM 단위 테스트는 약 50개 클래스, 213건입니다(이 항목을 시작할 때 204건). 각 버그 수정마다 테스트를 추가하면서 기반이 갖춰졌습니다.
+    - 현재 JVM 단위 테스트는 43개 클래스, 209건입니다(이 항목을 시작할 때 204건). 각 버그 수정마다 테스트를 추가하면서 기반이 갖춰졌습니다.
       - engine 상태 전이: MockK로 `BluetoothDevice`/`BluetoothGatt`를 만들고 `connectGatt`에 넘긴 `BluetoothGattCallback`을 잡아 시스템 콜백을 직접 부르는 `impl/GattTestFixture`. GATT 의존성은 `BluetoothDevice`를 통해 주입되고, API 33 경로는 `sdkInt` 주입으로 확인합니다. Robolectric은 쓰지 않았습니다.
       - 시간/스레드: `testutil/RxTestSchedulerRule`(computation → TestScheduler, io → trampoline), 콜백 전달 시점은 `CallbackScheduler.override`.
       - 순수 로직: `BleScanFilterTest`, `ScanInfoTest`(파싱), `BleScannerTest`, `RxCollectingListTest`.
