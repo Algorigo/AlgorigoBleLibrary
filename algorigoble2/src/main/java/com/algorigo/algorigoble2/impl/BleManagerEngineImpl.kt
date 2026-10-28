@@ -17,10 +17,10 @@ import com.algorigo.algorigoble2.exception.SystemServiceException
 import com.algorigo.algorigoble2.extension.locationManager
 import com.algorigo.algorigoble2.logging.Ble
 import com.algorigo.algorigoble2.rx_util.RxBroadcastReceiver
-import com.algorigo.algorigoble2.rx_util.collectListLastSortedIndex
 import com.algorigo.algorigoble2.virtual.VirtualDevice
 import com.algorigo.algorigoble2.virtual.VirtualDeviceEngine
 import com.algorigo.logger.L
+import io.reactivex.rxjava3.core.Maybe
 import io.reactivex.rxjava3.core.Observable
 import java.lang.ref.ReferenceQueue
 import java.lang.ref.WeakReference
@@ -101,27 +101,32 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
         return scanAvailableObservable
             .switchMap {
                 BleScanner.scanObservable(bluetoothAdapter, scanSettings, *scanFilters)
-                    .run {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                            mapOptional { scanResult ->
-                                getBleDevice(scanResult.device, scanResult.scanRecord)
-                                    ?.let { Optional.of(Pair(it, ScanInfo(scanResult))) }
-                                    ?: Optional.empty()
-                            }
-                        } else {
-                            map { scanResult ->
-                                listOf(
-                                    getBleDevice(scanResult.device, scanResult.scanRecord)
-                                        ?.let { Pair(it, ScanInfo(scanResult)) }
-                                )
-                            }
-                                .filter { it[0] != null }
-                                .map { it[0]!! }
-                        }
-                    }
-                    .collectListLastSortedIndex { it.first.deviceId }
+                    .collectScanList()
                     .startWithItem(listOf())
             }
+    }
+
+    /**
+     * 발견된 기기를 처음 발견된 순서대로 모아 목록으로 내보낸다. 같은 기기는 최신 [ScanInfo]로 바꾼다.
+     * 기기가 사라졌다는 결과(CALLBACK_TYPE_MATCH_LOST)이면 목록에서 뺀다. 목록이 바뀌지 않으면 내보내지 않는다.
+     */
+    private fun Observable<BleScanner.ScanEvent>.collectScanList(): Observable<List<Pair<BleDevice, ScanInfo>>> = Observable.defer {
+        // 구독마다 새 목록을 쓴다. 키는 BleDevice.deviceId 와 같은 MAC 주소
+        val devices = LinkedHashMap<String, Pair<BleDevice, ScanInfo>>()
+        concatMapMaybe { event ->
+            val address = event.result.device.address
+            if (event.lost) {
+                // 사라진 기기를 위해 BleDevice 를 새로 만들지 않는다
+                if (devices.remove(address) == null) {
+                    return@concatMapMaybe Maybe.empty()
+                }
+            } else {
+                val device = getBleDevice(event.result.device, event.result.scanRecord)
+                    ?: return@concatMapMaybe Maybe.empty()
+                devices[address] = Pair(device, ScanInfo(event.result))
+            }
+            Maybe.just(devices.values.toList())
+        }
     }
 
     override fun getDevices(): Collection<BleDevice> {

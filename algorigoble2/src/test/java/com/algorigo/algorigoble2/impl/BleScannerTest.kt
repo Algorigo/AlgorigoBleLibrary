@@ -6,6 +6,7 @@ import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
+import com.algorigo.algorigoble2.BleScanFilter
 import com.algorigo.algorigoble2.BleScanSettings
 import com.algorigo.algorigoble2.exception.SystemServiceException
 import com.algorigo.algorigoble2.testutil.RxTestSchedulerRule
@@ -60,8 +61,33 @@ class BleScannerTest {
         scanCallbackSlot.captured.onScanResult(ScanSettings.CALLBACK_TYPE_ALL_MATCHES, scanResult)
         observer.dispose()
 
-        observer.assertValue(scanResult)
+        observer.assertValue { it.result === scanResult && !it.lost }
         verify(exactly = 1) { scanner.stopScan(scanCallbackSlot.captured) }
+    }
+
+    @Test
+    fun matchLostCallback_isEmittedAsLost() {
+        val found = mockk<ScanResult>(relaxed = true)
+        val lost = mockk<ScanResult>(relaxed = true)
+
+        val observer = BleScanner.scanObservable(bluetoothAdapter, BleScanSettings.Builder().build()).test()
+        scanCallbackSlot.captured.onScanResult(ScanSettings.CALLBACK_TYPE_FIRST_MATCH, found)
+        scanCallbackSlot.captured.onScanResult(ScanSettings.CALLBACK_TYPE_MATCH_LOST, lost)
+
+        observer.assertValueCount(2)
+        assertEquals(listOf(found to false, lost to true), observer.values().map { it.result to it.lost })
+    }
+
+    @Test
+    fun matchLostCallback_isEmitted_evenIfItDoesNotPassRssiFilter() {
+        val lost = mockk<ScanResult>(relaxed = true)
+        every { lost.rssi } returns -100
+        val filter = BleScanFilter.Builder().setRssiThreshold(-60).build()
+
+        val observer = BleScanner.scanObservable(bluetoothAdapter, BleScanSettings.Builder().build(), filter).test()
+        scanCallbackSlot.captured.onScanResult(ScanSettings.CALLBACK_TYPE_MATCH_LOST, lost)
+
+        observer.assertValue { it.result === lost && it.lost }
     }
 
     @Test
