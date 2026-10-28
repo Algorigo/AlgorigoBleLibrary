@@ -7,10 +7,6 @@ jobs:
     - checkout
     - run:
         command: |
-          sdkmanager "system-images;android-29;default;x86"
-        name: Install system image "system-images;android-29;default;x86"
-    - run:
-        command: |
           find . -name 'build.gradle' | sort | xargs cat |
           shasum | awk '{print $1}' > ./tmp_gradle_cache_seed
         name: Generate cache checksum

@@ -21,18 +21,8 @@ def getUserName() {
     return System.properties['user.name']
 }
 
-buildscript {
-    repositories {
-        gradlePluginPortal()
-    }
-    dependencies {
-        classpath("org.jreleaser:org.jreleaser.gradle.plugin:1.19.0")
-    }
-}
-
 apply plugin: 'maven-publish'
 apply plugin: 'signing'
-apply plugin: 'org.jreleaser'
 
 group = "com.algorigo.rx"
 archivesBaseName = "algorigoble2"
@@ -184,11 +174,8 @@ dependencies {
     //ReactiveX
     // 공개 API 가 Observable/Single/Completable 을 반환하므로 api 로 노출한다 (기존 전이 의존성으로 해석되던 버전과 동일)
     api 'io.reactivex.rxjava3:rxjava:3.1.5'
-    implementation 'io.reactivex.rxjava3:rxkotlin:3.0.1'
+    // 스캔 목록의 시간 처리를 main thread 에서 한다 (AndroidSchedulers)
     implementation 'io.reactivex.rxjava3:rxandroid:3.0.2'
     //ReactiveX Relay
     implementation 'com.jakewharton.rxrelay3:rxrelay:3.0.1'
-
-    // gson
-    implementation 'com.google.code.gson:gson:2.12.1'
 }

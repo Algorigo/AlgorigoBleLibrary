@@ -81,8 +81,6 @@ class BleSppSocket private constructor(val bluetoothSocket: BluetoothSocket, con
     }
 
     companion object {
-        private val LOG_TAG = BleSppSocket::class.java.simpleName
-
         /** 연결하지 않은 채로 만든다. 연결 전에 할 일(검색 중지 등)을 한 뒤 [connect]를 부른다. */
         internal fun unconnected(bluetoothSocket: BluetoothSocket) = BleSppSocket(bluetoothSocket, connect = false)
     }

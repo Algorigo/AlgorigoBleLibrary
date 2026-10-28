@@ -410,8 +410,6 @@ open class BleDevice {
     }
 
     companion object {
-        private val TAG = BleDevice::class.java.simpleName
-
         const val DEFAULT_OPERATION_TIMEOUT_MILLIS = 10_000L
         const val DEFAULT_CONNECT_RETRY_DELAY_MILLIS = 1_000L
 

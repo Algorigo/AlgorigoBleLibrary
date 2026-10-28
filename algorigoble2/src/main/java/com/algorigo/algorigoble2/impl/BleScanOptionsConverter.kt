@@ -3,26 +3,18 @@ package com.algorigo.algorigoble2.impl
 import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanSettings
 import android.os.Build
-import androidx.annotation.RequiresApi
 import com.algorigo.algorigoble2.BleScanFilter
 import com.algorigo.algorigoble2.BleScanSettings
 
 internal object BleScanOptionsConverter {
 
-    @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
     fun convertScanSettings(scanSettings: BleScanSettings): ScanSettings {
         return ScanSettings.Builder()
             .setScanMode(scanSettings.scanMode.value)
             .setReportDelay(scanSettings.reportDelayMillis)
-            .run {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    setNumOfMatches(scanSettings.numOfMatches.value)
-                        .setCallbackType(scanSettings.callbackType.value)
-                        .setMatchMode(scanSettings.matchMode.value)
-                } else {
-                    this
-                }
-            }
+            .setNumOfMatches(scanSettings.numOfMatches.value)
+            .setCallbackType(scanSettings.callbackType.value)
+            .setMatchMode(scanSettings.matchMode.value)
             .run {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     setLegacy(scanSettings.legacy)
