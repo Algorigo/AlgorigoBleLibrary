@@ -5,6 +5,7 @@ import com.algorigo.algorigoble2.logging.Ble
 import com.algorigo.logger.L
 import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Observable
+import io.reactivex.rxjava3.core.Single
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
@@ -154,6 +155,12 @@ open class BleDevice {
     fun requestMtuSingle(mtu: Int = 517) = engine.requestMtuSingle(mtu).deliverToCallback()
 
     fun setMtuCompletable(mtu: Int = 517) = requestMtuSingle(mtu).ignoreElement()
+
+    /**
+     * 연결된 기기의 현재 신호 세기(RSSI, dBm)를 읽는다. 다른 GATT 작업과 같은 큐에서 하나씩 처리된다.
+     * 연결되지 않았으면 [BleManager.DisconnectedException], 실패 status 로 끝나면 [BleManager.GattOperationFailedException].
+     */
+    fun readRssiSingle(): Single<Int> = engine.readRssiSingle().deliverToCallback()
 
     /**
      * 연결 우선순위(연결 간격) 변경을 요청한다. Android 가 요청을 받으면 완료된다.

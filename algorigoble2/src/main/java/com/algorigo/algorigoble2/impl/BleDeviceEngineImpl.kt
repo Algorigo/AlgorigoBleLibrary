@@ -288,6 +288,8 @@ internal class BleDeviceEngineImpl(
         override fun onReadRemoteRssi(gatt: BluetoothGatt?, rssi: Int, status: Int) {
             super.onReadRemoteRssi(gatt, rssi, status)
             L.debug(Ble.Device.Default, "$logLabel : onReadRemoteRssi:$rssi, $status")
+            gattRequestPendingRelay.accept(false)
+            rssiRelay.accept(Pair(rssi, status))
         }
 
         override fun onMtuChanged(gatt: BluetoothGatt?, mtu: Int, status: Int) {
@@ -330,6 +332,7 @@ internal class BleDeviceEngineImpl(
     // 어느 서비스의 characteristic 인지 구분할 수 있도록 characteristic 을 함께 전달한다
     private val notificationRelay = PublishRelay.create<Pair<BluetoothGattCharacteristic, ByteArray>>()
     private val mtuRelay = PublishRelay.create<Pair<Int, Int>>()
+    private val rssiRelay = PublishRelay.create<Pair<Int, Int>>()
     private val operationQueue = PublishRelay.create<QueuedOperation<*>>().toSerialized()
     private val notificationSubscriptions = mutableMapOf<NotificationKey, SharedNotification>()
     // GATT 요청을 보냈고 아직 콜백을 받지 못한 상태(Android BluetoothGatt 가 busy 인 상태)
@@ -808,6 +811,26 @@ internal class BleDeviceEngineImpl(
             }
         }
 
+    override fun readRssiSingle(): Single<Int> {
+        return enqueue(OPERATION_READ_RSSI, getGattSingle()
+            .flatMap { gatt ->
+                rssiRelay
+                    .mergeWith(Completable.fromCallable {
+                        BlePermissions.checkConnect(context, sdkInt)
+                        L.debug(Ble.Device.Default, "$logLabel : readRemoteRssi")
+                        sendGattRequest(OPERATION_READ_RSSI) { gatt.readRemoteRssi() }
+                    })
+                    .firstOrError()
+                    .map { (rssi, status) ->
+                        if (status != BluetoothGatt.GATT_SUCCESS) {
+                            throw BleManager.GattOperationFailedException(OPERATION_READ_RSSI, status)
+                        }
+                        rssi
+                    }
+                    .retryOnCommunicationFailure()
+            })
+    }
+
     override fun requestMtuSingle(mtu: Int): Single<Int> {
         return enqueue(OPERATION_REQUEST_MTU, getGattSingle()
             .flatMap { gatt ->
@@ -977,6 +1000,7 @@ internal class BleDeviceEngineImpl(
         private const val OPERATION_CONNECT = "CONNECT"
         private const val OPERATION_REQUEST_MTU = "REQUEST_MTU"
         private const val OPERATION_REQUEST_CONNECTION_PRIORITY = "REQUEST_CONNECTION_PRIORITY"
+        private const val OPERATION_READ_RSSI = "READ_RSSI"
         private const val OPERATION_GET_CHARACTERISTICS = "GET_CHARACTERISTICS"
     }
 }

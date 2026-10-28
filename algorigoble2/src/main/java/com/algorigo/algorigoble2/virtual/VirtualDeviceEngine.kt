@@ -112,6 +112,17 @@ internal class VirtualDeviceEngine(private val virtualDevice: VirtualDevice) : B
             }
     }
 
+    override fun readRssiSingle(): Single<Int> {
+        return virtualDevice.connectionStateRelay
+            .firstOrError()
+            .map {
+                if (it != BleDevice.ConnectionState.CONNECTED) {
+                    throw BleManager.DisconnectedException()
+                }
+                virtualDevice.readRssi()
+            }
+    }
+
     override fun requestMtuSingle(mtu: Int): Single<Int> {
         return virtualDevice.connectionStateRelay
             .firstOrError()

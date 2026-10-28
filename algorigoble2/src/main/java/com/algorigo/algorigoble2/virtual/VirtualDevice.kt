@@ -83,6 +83,9 @@ abstract class VirtualDevice(
         }
     }
 
+    /** 연결된 동안 [BleDevice.readRssiSingle]이 돌려줄 RSSI(dBm). 기본값은 스캔 결과와 같은 0 이다. */
+    open fun readRssi(): Int = 0
+
     abstract fun getCharacteristicsSingle(): Single<List<BleCharacterisic>>
     abstract fun readCharacteristicSingle(characteristicUuid: UUID): Single<ByteArray>
     abstract fun writeCharacteristicSingle(characteristicUuid: UUID, byteArray: ByteArray): Single<ByteArray>
