@@ -4,8 +4,10 @@ import android.bluetooth.BluetoothGatt
 import com.algorigo.algorigoble2.logging.Ble
 import com.algorigo.logger.L
 import io.reactivex.rxjava3.core.Completable
+import io.reactivex.rxjava3.core.Flowable
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Single
+import io.reactivex.rxjava3.observers.DisposableCompletableObserver
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
@@ -93,6 +95,46 @@ open class BleDevice {
      */
     var operationTimeoutMillis = DEFAULT_OPERATION_TIMEOUT_MILLIS
 
+    /**
+     * true 이면 [connectCompletable]이 BluetoothDevice.connectGatt 의 autoConnect 로 연결한다.
+     * Android 가 기기가 보일 때까지 백그라운드에서 낮은 전력으로 기다렸다가 연결하므로, 바로 연결하는 것보다 오래 걸릴 수 있다.
+     * (connectCompletable 의 timeoutMillis 는 그대로 적용되므로 넉넉하게 준다)
+     * 본딩하지 않은 기기가 resolvable private address(주기적으로 바뀌는 주소)로 광고하면 Android 가 autoConnect 를 받지 않아
+     * 바로 [BleManager.DisconnectedException](status 135, 0x87)으로 실패한다. 이런 기기는 본딩하거나 autoConnect 없이 연결한다.
+     */
+    var autoConnect = false
+
+    /**
+     * [connectCompletable]이 연결 도중 링크가 끊겨(status 133, 직전 연결이 정리되는 중 등) 실패했을 때 다시 시도할 횟수. 기본값 0 은 다시 시도하지 않는다.
+     * 연결 타임아웃, 블루투스 꺼짐, 권한 없음, 이미 연결된 상태 등은 다시 시도하지 않는다.
+     */
+    var connectRetryCount = 0
+
+    /** 연결을 다시 시도하기 전, 그리고 [autoReconnect]로 다시 연결하기 전에 기다리는 시간 */
+    var connectRetryDelayMillis = DEFAULT_CONNECT_RETRY_DELAY_MILLIS
+
+    /**
+     * true 이면 [connectCompletable]로 연결된 뒤 [disconnect]를 부르지 않았는데 연결이 끊겼을 때(상대 기기가 끊음, 신호 약함 등) 다시 연결한다.
+     * 마지막 connectCompletable 과 같은 timeoutMillis 와 [autoConnect]로 연결하고, 실패하면 [connectRetryDelayMillis]마다 계속 다시 시도한다.
+     * [InitializableBleDevice]는 다시 연결할 때도 initializeCompletable() 을 실행한다. (connectCompletable 을 override 해서 추가한 단계는 실행하지 않는다)
+     *
+     * 재연결은 [disconnect], [connectCompletable] 호출, false 로 바꾸기, BleManager.close() 로 멈춘다.
+     * 블루투스가 꺼지면 기다렸다가 다시 켜지면 연결한다. 권한이 없는 등 다시 시도해도 소용없는 에러면 멈춘다.
+     * 재연결 중의 상태는 [getConnectionStateObservable]에서 DISCONNECTED/CONNECTING 으로 보인다.
+     */
+    var autoReconnect = false
+        set(value) {
+            field = value
+            if (!value) {
+                cancelReconnect(keepTarget = true)
+            }
+        }
+
+    private val reconnectLock = Any()
+    // 다시 연결할 연결의 timeoutMillis. connectCompletable 로 연결되면 정해지고, disconnect() 하면 지운다
+    private var reconnectTimeoutMillis: Long? = null
+    private var reconnectTask: DisposableCompletableObserver? = null
+
     fun bondCompletable() = engine.bondCompletable().deliverToCallback()
     fun unbondCompletable() = engine.unbondCompletable().deliverToCallback()
 
@@ -100,8 +142,141 @@ open class BleDevice {
     internal open fun connectionStateObservableInternal(): Observable<ConnectionState> = engine.getConnectionStateObservable()
 
     open fun getConnectionStateObservable(): Observable<ConnectionState> = connectionStateObservableInternal().deliverToCallback()
-    open fun connectCompletable(timeoutMillis: Long = 10000L): Completable =
-        engine.connectCompletable(timeoutMillis).deliverToCallback()
+
+    /**
+     * 연결한다. [timeoutMillis]는 연결 시도 한 번의 최대 대기 시간이다. ([connectRetryCount]로 다시 시도하면 시도마다 적용된다)
+     * 진행 중인 자동 재연결([autoReconnect])이 있으면 멈추고 새로 연결한다. 연결에 실패하면 자동 재연결도 하지 않는다.
+     */
+    open fun connectCompletable(timeoutMillis: Long = 10000L): Completable = Completable.defer {
+        val previousTimeoutMillis = cancelReconnect(keepTarget = false)
+        connectWithRetry(timeoutMillis, autoConnect, connectRetryCount, connectRetryDelayMillis)
+            .doOnComplete {
+                synchronized(reconnectLock) {
+                    reconnectTimeoutMillis = timeoutMillis
+                }
+            }
+            .doOnError {
+                // 이미 연결돼 있어서 실패했다면 기존 연결은 그대로이므로 그 연결의 재연결 설정을 되돌린다
+                if (it is BleManager.InvalidConnectionStateException && previousTimeoutMillis != null) {
+                    synchronized(reconnectLock) {
+                        if (reconnectTimeoutMillis == null) {
+                            reconnectTimeoutMillis = previousTimeoutMillis
+                        }
+                    }
+                }
+            }
+    }.deliverToCallback()
+
+    /** 연결 시도 한 번. [InitializableBleDevice]는 여기에 초기화를 붙인다. */
+    internal open fun connectOnce(timeoutMillis: Long, autoConnect: Boolean): Completable =
+        engine.connectCompletable(timeoutMillis, autoConnect)
+
+    private fun connectWithRetry(timeoutMillis: Long, autoConnect: Boolean, retryCount: Int, retryDelayMillis: Long): Completable {
+        var retried = 0
+        return connectOnce(timeoutMillis, autoConnect)
+            .retryWhen { errors ->
+                errors.flatMap { error ->
+                    if (isConnectRetryable(error) && retried++ < retryCount) {
+                        L.warning(Ble.Device, "$this : connect failed, retry ${retried}/$retryCount", error)
+                        waitBeforeConnect(retryDelayMillis)
+                    } else {
+                        Flowable.error(error)
+                    }
+                }
+            }
+    }
+
+    // 이전 연결이 완전히 끊긴 뒤(DISCONNECTING 이 끝난 뒤) 잠시 기다린다
+    private fun waitBeforeConnect(delayMillis: Long): Flowable<Long> =
+        connectionStateObservableInternal()
+            .filter { it == ConnectionState.DISCONNECTED }
+            .firstElement()
+            .ignoreElement()
+            .andThen(Flowable.timer(delayMillis, TimeUnit.MILLISECONDS))
+
+    /** 엔진이 연결이 끊겼다고(연결 시도 실패 포함) 알린다. */
+    internal fun notifyDisconnected() {
+        onDisconnected()
+        startReconnect()
+    }
+
+    /** BleManager 가 블루투스가 다시 켜졌다고 알린다. 블루투스가 꺼져서 멈춘 재연결을 다시 시작한다. */
+    internal fun notifyBluetoothEnabled() {
+        startReconnect()
+    }
+
+    /** 자동 재연결을 기다리거나 진행 중인지. BleManager.close() 가 멈출 기기를 고를 때 쓴다. */
+    internal val reconnectPending: Boolean
+        get() = synchronized(reconnectLock) { reconnectTimeoutMillis != null }
+
+    private fun startReconnect() {
+        val task = synchronized(reconnectLock) {
+            val timeoutMillis = reconnectTimeoutMillis
+            if (!autoReconnect || timeoutMillis == null || reconnectTask != null) {
+                return
+            }
+            val delayMillis = connectRetryDelayMillis
+            val autoConnect = autoConnect
+            L.info(Ble.Device, "$this : reconnect after ${delayMillis}ms")
+            val completable = waitBeforeConnect(delayMillis).ignoreElements()
+                .andThen(Completable.defer { connectOnce(timeoutMillis, autoConnect) }
+                    .retryWhen { errors ->
+                        errors.flatMap { error ->
+                            if (isReconnectRetryable(error)) {
+                                L.warning(Ble.Device, "$this : reconnect failed, retry after ${delayMillis}ms", error)
+                                waitBeforeConnect(delayMillis)
+                            } else {
+                                Flowable.error(error)
+                            }
+                        }
+                    })
+            object : DisposableCompletableObserver() {
+                override fun onComplete() {
+                    L.info(Ble.Device, "${this@BleDevice} : reconnected")
+                    finishReconnect(this, keepTarget = true)
+                }
+
+                override fun onError(e: Throwable) {
+                    // 블루투스가 다시 켜지면 이어서 연결한다
+                    val bluetoothDisabled = e is BleManager.BluetoothDisabledException
+                    L.error(Ble.Device, "${this@BleDevice} : reconnect stopped${if (bluetoothDisabled) " until bluetooth is enabled" else ""}", e)
+                    finishReconnect(this, keepTarget = bluetoothDisabled)
+                }
+            }.also { reconnectTask = it }
+                .let { it to completable }
+        }
+        // 잠금 밖에서 구독한다. (연결 취소가 엔진의 상태 잠금을 잡으므로 잠금 순서가 뒤집히지 않게 한다)
+        task.second.subscribe(task.first)
+    }
+
+    private fun finishReconnect(task: DisposableCompletableObserver, keepTarget: Boolean) {
+        synchronized(reconnectLock) {
+            if (reconnectTask === task) {
+                reconnectTask = null
+                if (!keepTarget) {
+                    reconnectTimeoutMillis = null
+                }
+            }
+        }
+    }
+
+    /**
+     * 진행 중인 재연결을 멈춘다. [keepTarget]이 false 이면 이후에 끊겨도 다시 연결하지 않는다.
+     * 지우기 전의 재연결 대상(timeoutMillis)을 돌려준다.
+     */
+    private fun cancelReconnect(keepTarget: Boolean): Long? {
+        val (task, timeoutMillis) = synchronized(reconnectLock) {
+            val previous = reconnectTask to reconnectTimeoutMillis
+            reconnectTask = null
+            if (!keepTarget) {
+                reconnectTimeoutMillis = null
+            }
+            previous
+        }
+        // 연결 중이던 재연결을 해제하면 엔진이 연결을 취소한다. 잠금 밖에서 해제한다
+        task?.dispose()
+        return timeoutMillis
+    }
 
     fun connect() {
         connectCompletable().subscribe({
@@ -111,7 +286,11 @@ open class BleDevice {
         })
     }
 
-    fun disconnect() = engine.disconnect()
+    /** 연결을 끊는다. 자동 재연결([autoReconnect])도 멈춘다. */
+    fun disconnect() {
+        cancelReconnect(keepTarget = false)
+        engine.disconnect()
+    }
 
     open fun onDisconnected() {
 
@@ -208,5 +387,24 @@ open class BleDevice {
         private val TAG = BleDevice::class.java.simpleName
 
         const val DEFAULT_OPERATION_TIMEOUT_MILLIS = 10_000L
+        const val DEFAULT_CONNECT_RETRY_DELAY_MILLIS = 1_000L
+
+        // GATT_ILLEGAL_PARAMETER. Android 가 연결 요청 자체를 받지 않은 경우 (예: autoConnect 로 본딩하지 않은 RPA 기기에 연결)
+        private const val GATT_ILLEGAL_PARAMETER = 0x87
+
+        // 연결 도중 링크가 끊겨 실패한 경우. (status 133, 직전 연결이 정리되는 중 등) 다시 시도하면 연결될 수 있다
+        internal fun isConnectRetryable(error: Throwable): Boolean = when (error) {
+            is BleManager.BluetoothDisabledException -> false
+            // 같은 요청은 다시 해도 같은 이유로 바로 실패한다
+            is BleManager.DisconnectedException -> error.status != GATT_ILLEGAL_PARAMETER
+            // discoverServices 호출/서비스 탐색 실패. (초기화 중의 read/write 실패 status 는 다시 해도 같으므로 제외한다)
+            is BleManager.ConnectFailedException -> true
+            is BleManager.GattOperationFailedException -> error.operation == BleDeviceEngine.OPERATION_DISCOVER_SERVICES
+            else -> false
+        }
+
+        // 재연결은 기기가 다시 보일 때까지 계속하므로 연결 타임아웃도 다시 시도한다
+        internal fun isReconnectRetryable(error: Throwable): Boolean =
+            isConnectRetryable(error) || error is BleManager.OperationTimeoutException
     }
 }

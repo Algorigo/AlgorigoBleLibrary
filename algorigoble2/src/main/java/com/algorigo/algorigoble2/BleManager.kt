@@ -169,7 +169,7 @@ class BleManager(
     override fun close() {
         engine.close()
         virtualDevices.values
-            .filter { it.connectionState != BleDevice.ConnectionState.DISCONNECTED }
+            .filter { it.connectionState != BleDevice.ConnectionState.DISCONNECTED || it.reconnectPending }
             .forEach { it.disconnect() }
     }
 

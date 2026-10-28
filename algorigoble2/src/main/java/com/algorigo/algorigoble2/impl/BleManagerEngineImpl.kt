@@ -79,12 +79,17 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
                 context?.applicationContext?.let { unregister(it, this) }
                 return
             }
-            if (intent?.action == BluetoothAdapter.ACTION_STATE_CHANGED &&
-                intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1) == BluetoothAdapter.STATE_OFF) {
-                engine.getDevices()
+            if (intent?.action != BluetoothAdapter.ACTION_STATE_CHANGED) {
+                return
+            }
+            when (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1)) {
+                BluetoothAdapter.STATE_OFF -> engine.getDevices()
                     .forEach {
                         (it.engine as? BleDeviceEngineImpl)?.onBluetoothDisabled()
                     }
+                // 블루투스가 꺼져서 멈춘 자동 재연결을 다시 시작한다
+                BluetoothAdapter.STATE_ON -> engine.getDevices()
+                    .forEach { it.notifyBluetoothEnabled() }
             }
         }
     }
@@ -108,9 +113,9 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
             closed = true
         }
         unregister(context, bluetoothReceiver)
-        // 블루투스 꺼짐을 더 이상 감지하지 않으므로, 이 엔진이 연결한 기기는 끊는다
+        // 블루투스 꺼짐을 더 이상 감지하지 않으므로, 이 엔진이 연결한 기기는 끊는다. (자동 재연결을 기다리는 기기도 멈춘다)
         getDevices()
-            .filter { it.connectionState != BleDevice.ConnectionState.DISCONNECTED }
+            .filter { it.connectionState != BleDevice.ConnectionState.DISCONNECTED || it.reconnectPending }
             .forEach { it.disconnect() }
     }
 

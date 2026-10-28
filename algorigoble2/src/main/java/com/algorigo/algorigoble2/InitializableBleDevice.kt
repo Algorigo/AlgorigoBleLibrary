@@ -36,11 +36,14 @@ abstract class InitializableBleDevice : BleDevice() {
      */
     var initializeTimeoutMillis = DEFAULT_INITIALIZE_TIMEOUT_MILLIS
 
-    final override fun connectCompletable(timeoutMillis: Long): Completable {
-        return super.connectCompletable(timeoutMillis)
-            .concatWith(getInitializeCompletable())
-            // 초기화가 다른 scheduler(timer 등)에서 끝나도 결과는 callback 스레드로 전달한다
+    final override fun connectCompletable(timeoutMillis: Long): Completable = super.connectCompletable(timeoutMillis)
+
+    // 연결 시도마다(다시 시도, 자동 재연결 포함) GATT 연결 뒤 초기화한다
+    final override fun connectOnce(timeoutMillis: Long, autoConnect: Boolean): Completable {
+        return super.connectOnce(timeoutMillis, autoConnect)
+            // 초기화(사용자 코드)를 GATT 바인더 스레드나 엔진의 상태 잠금 안에서 실행하지 않는다
             .deliverToCallback()
+            .concatWith(getInitializeCompletable())
     }
 
     private fun getInitializeCompletable(): Completable {
@@ -56,15 +59,15 @@ abstract class InitializableBleDevice : BleDevice() {
                     initializeRelay.accept(true)
                 }
                 .doOnError {
-                    // 초기화하지 못한 연결은 끊는다
+                    // 초기화하지 못한 연결은 끊는다. (다시 시도나 자동 재연결은 멈추지 않도록 엔진만 끊는다)
                     L.error(Ble.Device, "getInitializeCompletable", it)
-                    disconnect()
+                    engine.disconnect()
                 }
                 .doOnTerminate { terminated.set(true) }
                 .doOnDispose {
                     // 초기화가 끝나기 전에 구독을 해제하면, 연결 중에 해제한 것과 같이 연결을 취소한다
                     if (!terminated.get()) {
-                        disconnect()
+                        engine.disconnect()
                     }
                 }
         }

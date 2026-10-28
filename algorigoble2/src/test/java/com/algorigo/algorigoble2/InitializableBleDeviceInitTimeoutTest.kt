@@ -30,7 +30,7 @@ class InitializableBleDeviceInitTimeoutTest {
         override fun bondCompletable(): Completable = Completable.complete()
         override fun unbondCompletable(): Completable = Completable.complete()
         override fun getConnectionStateObservable(): Observable<BleDevice.ConnectionState> = state
-        override fun connectCompletable(timeoutMillis: Long): Completable = Completable.fromAction { state.accept(BleDevice.ConnectionState.CONNECTED) }
+        override fun connectCompletable(timeoutMillis: Long, autoConnect: Boolean): Completable = Completable.fromAction { state.accept(BleDevice.ConnectionState.CONNECTED) }
         override fun disconnect() {
             disconnectCount++
             state.accept(BleDevice.ConnectionState.DISCONNECTED)

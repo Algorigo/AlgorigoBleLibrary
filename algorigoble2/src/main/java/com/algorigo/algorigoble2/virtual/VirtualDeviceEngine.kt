@@ -31,7 +31,8 @@ internal class VirtualDeviceEngine(private val virtualDevice: VirtualDevice) : B
         return virtualDevice.connectionStateRelay
     }
 
-    override fun connectCompletable(timeoutMillis: Long): Completable {
+    // 가상 기기는 바로 연결되므로 autoConnect 는 쓰지 않는다
+    override fun connectCompletable(timeoutMillis: Long, autoConnect: Boolean): Completable {
         val relay = virtualDevice.connectionStateRelay
         return Completable.timer(100, TimeUnit.MILLISECONDS)
             .doOnSubscribe {
@@ -66,7 +67,7 @@ internal class VirtualDeviceEngine(private val virtualDevice: VirtualDevice) : B
         }
         // 실기기 엔진처럼 연결이 끊기면 알린다. (InitializableBleDevice 는 여기서 초기화 상태를 되돌린다)
         if (!wasDisconnected) {
-            bleDevice.onDisconnected()
+            bleDevice.notifyDisconnected()
         }
     }
 
