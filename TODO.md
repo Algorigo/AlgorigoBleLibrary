@@ -813,7 +813,23 @@
     - ⚠️ 반환 타입이 `Unit`에서 `Disposable`로 바뀌었습니다. Kotlin에서 반환값을 쓰지 않던 호출은 그대로 컴파일되지만, JVM 시그니처가 바뀌므로 사용하는 앱은 다시 컴파일해야 합니다.
     - 테스트: `ConnectDisposableTest`(3건: 연결 중 해제는 연결 취소(gatt disconnect/close, DISCONNECTED), 연결 뒤 해제는 연결 유지, 연결 실패가 RxJavaPlugins로 새지 않음).
     - 실기기 확인(Fold5 → M446K): `connect()` 직후(CONNECTING) 해제하면 `cancel connecting` 후 DISCONNECTED로 남았고, 다시 `connect()`해서 CONNECTED가 된 뒤 해제하면 1.5초 뒤에도 CONNECTED이고 read가 정상이었습니다.
-- [ ] **[구조]** bond 상태를 1초 간격 polling으로 확인합니다. `ACTION_BOND_STATE_CHANGED` broadcast로 바꾸고 타임아웃을 추가합니다. `removeBond`는 리플렉션으로 숨겨진 API를 호출하므로 향후 막힐 수 있습니다.
+- [x] **[구조]** bond 상태를 1초 간격 polling으로 확인합니다. `ACTION_BOND_STATE_CHANGED` broadcast로 바꾸고 타임아웃을 추가합니다. `removeBond`는 리플렉션으로 숨겨진 API를 호출하므로 향후 막힐 수 있습니다.
+  - ✅ 해결 (`feature/bond_broadcast`)
+    - `bondCompletable`/`unbondCompletable`이 이 기기의 `ACTION_BOND_STATE_CHANGED` broadcast를 구독한 뒤 요청하고, broadcast로 결과를 받습니다. 구독하는 동안만 receiver를 등록합니다.
+    - `timeoutMillis` 인자를 추가했습니다(기본 60초, `@JvmOverloads`로 인자 없는 기존 호출 유지). 넘기면 `OperationTimeoutException("BOND"/"UNBOND")`입니다. 사용자가 시스템 페어링 화면에서 확인해야 할 수 있어서 길게 잡았습니다. 시간이 지나도 시스템의 페어링 과정은 계속될 수 있다고 KDoc에 적었습니다.
+    - 실패 판단:
+      - 진행 중(BONDING)이던 본딩이 NONE으로 끝나면 `BondFailedException`이고, 실패 사유(숨겨진 `EXTRA_REASON`)를 새 `reason` 속성에 담습니다. 요청 직후에는 아직 NONE일 수 있어서 그 NONE은 실패로 보지 않습니다.
+      - 실기기에서 다른 기기와 본딩 중일 때 `createBond()`가 true를 돌려주지만 시스템은 본딩을 시작하지 않고(`Failed to initiate bonding`) broadcast도 보내지 않는 것을 확인했습니다. 시작되면 바로 BONDING이 되므로, 요청 5초 뒤에도 NONE이면 `BondFailedException("Bonding did not start ...")`으로 끝냅니다.
+      - 이미 진행 중인 본딩이 있으면 새로 요청하지 않고 결과를 기다립니다.
+    - `removeBond`는 공개 API가 없어 리플렉션을 유지했습니다. 막힌 Android 버전에서는 크래시 대신 `BondFailedException("removeBond is not available ...")`으로 알립니다.
+    - ⚠️ 동작 변화: 결과가 최대 1초 늦게 나오던 것이 broadcast 시점에 바로 나옵니다. 끝나지 않는 본딩은 무한정 기다리던 것이 timeout으로 끝납니다. `BleDeviceEngine`의 bond 함수 시그니처가 바뀌었습니다(내부 클래스).
+    - 테스트: `BondTest`(10건: 이미 본딩됨, BONDED broadcast로 완료(polling 없음, receiver 해제), BONDING→NONE은 사유와 함께 실패, 다른 기기 broadcast 무시, timeout, 시작되지 않은 본딩, `createBond` 거절, 진행 중인 본딩은 요청 없이 대기, 본딩 안 된 기기 해제, `removeBond`를 찾지 못하면 `BondFailedException`(JVM의 android.jar에는 숨겨진 API가 없음)).
+    - 실기기 확인(Fold5, 두 폰을 본딩하지 않기 위해 존재하지 않는 MAC으로 실패 경로를 확인):
+      - 이미 본딩된 기기: 요청 없이 4ms에 완료.
+      - 없는 기기, timeout 2초: 2.01초에 `OperationTimeoutException`.
+      - 위 본딩이 시스템에서 진행 중일 때 다른 기기 본딩: 시스템 로그에 `Failed to initiate pairing`, 5.0초에 `Bonding did not start`(보완 전에는 broadcast가 오지 않아 60초 timeout까지 기다렸음).
+      - 없는 기기: BONDING broadcast를 받은 뒤 시스템이 page timeout으로 BOND_NONE을 알리자 약 10ms 뒤 `BondFailedException("Bond failed (reason 4)")`(요청 후 6.5초).
+      - `removeBond` 리플렉션은 API 37에서도 호출됐습니다(본딩 안 된 기기라 false). 실제 본딩/해제 성공 경로는 두 폰을 본딩해야 해서 확인하지 않았습니다.
 - [ ] **[구조]** 라이브러리 manifest에 `uses-feature bluetooth_le required="true"`가 있어서 사용하는 앱에 설치 제한이 강제됩니다. 또 `neverForLocation` 플래그 때문에 비콘 스캔 결과가 필터링됩니다. `required="false"`로 바꾸거나, 앱에서 `tools:replace/remove`로 덮어쓰는 방법을 문서화합니다.
 - [ ] **[구조]** notification마다 로그 문자열(hex 변환, `device.name`)을 즉시 생성합니다. 고속 스트리밍에서 비용이 큽니다. 지연 평가로 바꾸거나 별도 verbose 레벨로 분리합니다.
 - [ ] **[구조]** `getDevice(mac)`에서 `getRemoteDevice`는 대문자 MAC만 허용합니다. 입력을 정규화해야 합니다.
