@@ -4,9 +4,9 @@ plugins {
 }
 
 android {
-    namespace 'com.algorigo.algorigoblelibrary'
+    namespace = 'com.algorigo.algorigoblelibrary'
 
-    compileSdk 35
+    compileSdk = 35
 
     defaultConfig {
         applicationId "com.algorigo.algorigoblelibrary"

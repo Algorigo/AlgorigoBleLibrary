@@ -860,7 +860,13 @@
     - 실기기 확인(Fold5, AGP 8.6.1의 R8 full mode): 샘플 앱에 리플렉션으로만 만드는 임시 하위 클래스(`ReflectOnlyDevice`)와 `getDevice(mac, ReflectOnlyDevice::class.java)` 호출을 넣고 minify한 release APK로 확인했습니다(확인 후 되돌림).
       - 규칙 전: dex에서 이 클래스의 생성자가 지워졌고(Direct methods 없음), 앱에서 호출하면 `InstantiationException: java.lang.Class<n0.p> cannot be instantiated`로 크래시가 났습니다.
       - 규칙 후: dex에 `<init>()V`가 남았고, 같은 호출이 `p null(AA:BB:CC:DD:EE:01)` 기기를 정상으로 만들었습니다. (입력은 `aabbccddee01`로, 앞 항목의 MAC 정규화도 release 빌드에서 동작)
-- [ ] **[배포]** Gradle에서 deprecated된 `buildDir`, `archivesBaseName`을 교체합니다.
+- [x] **[배포]** Gradle에서 deprecated된 `buildDir`, `archivesBaseName`을 교체합니다.
+  - ✅ 해결 (`feature/gradle_deprecations`)
+    - `archivesBaseName`을 `base { archivesName = "algorigoble2" }`로 바꾸고, `artifactId`와 `namespace`에서 `base.archivesName.get()`을 씁니다. 이것이 `BasePluginConvention` deprecation 경고의 원인이기도 했습니다.
+    - 루트 `clean` 태스크의 `rootProject.buildDir`를 `rootProject.layout.buildDirectory`로 바꿨습니다.
+    - `--warning-mode all`로 찾은 나머지 경고(Groovy 공백 대입 문법, Gradle 10에서 제거 예정)도 고쳤습니다: 두 모듈의 `namespace`, `compileSdk`를 `=` 대입으로 바꿈.
+    - 확인: `./gradlew help clean --warning-mode all`의 deprecation 경고가 10건(공백 대입 4, archivesBaseName 3, BasePluginConvention 3)에서 0건이 됐습니다. 바꾸기 전후 결과물이 같습니다: release AAR 이름 `algorigoble2-release.aar`, AAR manifest package `com.algorigo.rx.algorigoble2`, 생성된 POM(`groupId`, `artifactId` 포함)이 diff 없이 같음.
+    - 이 확인 중 `./gradlew build`에서 `VirtualDeviceNotificationOrderTest`가 실패했습니다. 이 변경과 관계없이 이전 커밋에서도 단독 실행하면 실패하는 불안정한 테스트여서 아래 항목으로 따로 고쳤습니다.
 - [x] **[구조]** `ExampleInstrumentedTest`가 항상 실패합니다. 패키지명을 `com.algorigo.algorigoble2.test`로 기대하지만, 실제 namespace는 `com.algorigo.rx.algorigoble2`입니다. 이 때문에 `connectedDebugAndroidTest` 전체 실행이 실패하므로, 수정하거나 삭제해야 합니다(`algorigoble2/src/androidTest/.../ExampleInstrumentedTest.kt`).
   - ✅ 해결 (`feature/test_coverage`): P2 "테스트 부재" 항목에서 라이브러리의 `ExampleInstrumentedTest`와 `ExampleUnitTest`를 지웠습니다. Fold5와 M446K에서 `:algorigoble2:connectedDebugAndroidTest`가 통과합니다.
 - [ ] **[구조]** (실기기) 라이브러리 로그가 2~3번씩 중복 출력되는 경우가 있습니다. 예를 들어 `doOnError` 한 번에 같은 줄이 2~3번 나옵니다. 원인은 확인하지 못했습니다. 샘플 앱의 `BluetoothService`가 `AndroidHandler`를 추가하는 방식과 logger의 handler 전파 구조를 확인해야 합니다.
