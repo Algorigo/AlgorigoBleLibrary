@@ -97,13 +97,17 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
         scanSettings: BleScanSettings,
         vararg scanFilters: BleScanFilter
     ): Observable<List<Pair<BleDevice, ScanInfo>>> {
-        // 스캔 가능 상태가 다시 나오면 이전 스캔을 멈추고 새로 시작한다. (flatMap 이면 두 스캔이 동시에 돌며 목록이 번갈아 전달된다)
-        return scanAvailableObservable
-            .switchMap {
-                BleScanner.scanObservable(bluetoothAdapter, scanSettings, *scanFilters)
-                    .collectScanList()
-                    .startWithItem(listOf())
-            }
+        return Observable.defer {
+            // 권한이 없으면 플랫폼의 SecurityException 대신 PermissionDeniedException 으로 바로 실패한다
+            BlePermissions.checkScan(context)
+            // 스캔 가능 상태가 다시 나오면 이전 스캔을 멈추고 새로 시작한다. (flatMap 이면 두 스캔이 동시에 돌며 목록이 번갈아 전달된다)
+            scanAvailableObservable
+                .switchMap {
+                    BleScanner.scanObservable(bluetoothAdapter, scanSettings, *scanFilters)
+                        .collectScanList()
+                        .startWithItem(listOf())
+                }
+        }
     }
 
     /**
@@ -134,6 +138,7 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
     }
 
     override fun getBondedDevices(): List<BleDevice> {
+        BlePermissions.checkConnect(context)
         return bluetoothAdapter.bondedDevices.mapNotNull {
             getBleDevice(it)
         }
@@ -159,7 +164,6 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
             L.error(Ble.Engine.Default, "getRemoteDevice error", e)
             return null
         }
-        L.debug(Ble.Engine.Default, "bluetoothDevice:${bluetoothDevice.name}")
         return createBleDevice(bluetoothDevice, clazz = clazz)
     }
 

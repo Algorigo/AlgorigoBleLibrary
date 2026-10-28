@@ -44,9 +44,11 @@ open class BleDevice {
     val deviceId: String
         get() = engine.deviceId
 
+    /** API 31 이상에서 BLUETOOTH_CONNECT 권한이 없으면 [BleManager.PermissionDeniedException] */
     val deviceName: String?
         get() = engine.deviceName
 
+    /** API 31 이상에서 BLUETOOTH_CONNECT 권한이 없으면 [BleManager.PermissionDeniedException] */
     val bonded: Boolean
         get() = engine.bonded
 
@@ -116,7 +118,13 @@ open class BleDevice {
         if (!::engine.isInitialized) {
             return "${javaClass.simpleName}(engine not initialized)"
         }
-        return "${javaClass.simpleName} $deviceName($deviceId)"
+        // 로그나 문자열 템플릿에서 쓰이므로 이름을 읽을 권한(API 31+ BLUETOOTH_CONNECT)이 없어도 예외를 내지 않는다
+        val name = try {
+            deviceName
+        } catch (e: SecurityException) {
+            "(permission denied)"
+        }
+        return "${javaClass.simpleName} $name($deviceId)"
     }
 
     /** 같은 기기(deviceId)이면 같다. engine 이 붙기 전에는 자기 자신과만 같다. */
