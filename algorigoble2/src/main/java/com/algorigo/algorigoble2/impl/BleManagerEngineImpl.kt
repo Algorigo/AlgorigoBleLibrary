@@ -62,6 +62,8 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
         .map {
             it.first && it.second
         }
+        // 위치 provider 변경(API 30 이하)처럼 상태가 그대로인 broadcast 로 같은 값이 다시 나와도 스캔을 다시 시작하지 않는다
+        .distinctUntilChanged()
 
     private val bluetoothReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -95,8 +97,9 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
         scanSettings: BleScanSettings,
         vararg scanFilters: BleScanFilter
     ): Observable<List<Pair<BleDevice, ScanInfo>>> {
+        // 스캔 가능 상태가 다시 나오면 이전 스캔을 멈추고 새로 시작한다. (flatMap 이면 두 스캔이 동시에 돌며 목록이 번갈아 전달된다)
         return scanAvailableObservable
-            .flatMap {
+            .switchMap {
                 BleScanner.scanObservable(bluetoothAdapter, scanSettings, *scanFilters)
                     .run {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -191,13 +194,9 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
             .concatWith(
                 RxBroadcastReceiver
                     .broadCastReceiverObservable(context, IntentFilter(LocationManager.PROVIDERS_CHANGED_ACTION))
-                    .map { intent ->
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                            intent.getBooleanExtra(LocationManager.EXTRA_PROVIDER_ENABLED, false)
-                        } else {
-                            LocationManagerCompat.isLocationEnabled(context.locationManager)
-                        }
-                    }
+                    // EXTRA_PROVIDER_ENABLED 는 바뀐 provider 하나의 상태라서, 다른 provider 가 켜져 있어도 false 일 수 있다.
+                    // 위치 사용 가능 여부는 매번 다시 읽는다
+                    .map { LocationManagerCompat.isLocationEnabled(context.locationManager) }
             )
     }
 
