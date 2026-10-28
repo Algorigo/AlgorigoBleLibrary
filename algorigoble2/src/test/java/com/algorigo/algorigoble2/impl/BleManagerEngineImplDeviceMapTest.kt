@@ -82,9 +82,11 @@ class BleManagerEngineImplDeviceMapTest {
         addresses.forEach { mockDevice(it) }
         val engine = BleManagerEngineImpl(context, delegate)
         val adding = AtomicBoolean(true)
+        // deviceMap 은 앱이 참조하지 않는 기기를 GC 되게 두므로, 개수를 확인하려면 만든 기기를 들고 있어야 한다
+        val created = mutableListOf<BleDevice?>()
 
         val writer = executor.submit {
-            addresses.forEach { engine.getDevice<BleDevice>(it, null) }
+            addresses.forEach { created.add(engine.getDevice<BleDevice>(it, null)) }
             adding.set(false)
         }
         val reader = executor.submit(Callable {
@@ -100,6 +102,7 @@ class BleManagerEngineImplDeviceMapTest {
         writer.get(10, TimeUnit.SECONDS)
         reader.get(10, TimeUnit.SECONDS)
         assertEquals(addresses.size, engine.getDevices().size)
+        assertEquals(addresses.size, created.size)
     }
 
     companion object {
