@@ -16,6 +16,9 @@ internal abstract class BleManagerEngine(protected val bleDeviceDelegate: BleMan
     abstract fun getConnectedDevices(): List<BleDevice>
     abstract fun initVirtualDevice(deviceId: VirtualDevice, bleDevice: BleDevice): BleDevice
 
+    /** 시스템에 등록한 receiver 등을 해제하고 연결된 기기를 끊는다. 여러 번 불러도 된다. */
+    abstract fun close()
+
     open fun <T : BleDevice> getDevice(macAddress: String, clazz: Class<T>? = null): BleDevice? {
         return getDevices()
             .filter { it.deviceId == macAddress }
