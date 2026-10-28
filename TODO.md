@@ -830,7 +830,15 @@
       - 위 본딩이 시스템에서 진행 중일 때 다른 기기 본딩: 시스템 로그에 `Failed to initiate pairing`, 5.0초에 `Bonding did not start`(보완 전에는 broadcast가 오지 않아 60초 timeout까지 기다렸음).
       - 없는 기기: BONDING broadcast를 받은 뒤 시스템이 page timeout으로 BOND_NONE을 알리자 약 10ms 뒤 `BondFailedException("Bond failed (reason 4)")`(요청 후 6.5초).
       - `removeBond` 리플렉션은 API 37에서도 호출됐습니다(본딩 안 된 기기라 false). 실제 본딩/해제 성공 경로는 두 폰을 본딩해야 해서 확인하지 않았습니다.
-- [ ] **[구조]** 라이브러리 manifest에 `uses-feature bluetooth_le required="true"`가 있어서 사용하는 앱에 설치 제한이 강제됩니다. 또 `neverForLocation` 플래그 때문에 비콘 스캔 결과가 필터링됩니다. `required="false"`로 바꾸거나, 앱에서 `tools:replace/remove`로 덮어쓰는 방법을 문서화합니다.
+- [x] **[구조]** 라이브러리 manifest에 `uses-feature bluetooth_le required="true"`가 있어서 사용하는 앱에 설치 제한이 강제됩니다. 또 `neverForLocation` 플래그 때문에 비콘 스캔 결과가 필터링됩니다. `required="false"`로 바꾸거나, 앱에서 `tools:replace/remove`로 덮어쓰는 방법을 문서화합니다.
+  - ✅ 해결 (`feature/manifest_requirements`)
+    - `uses-feature android.hardware.bluetooth_le`를 `required="false"`로 바꿨습니다. manifest 병합은 하나라도 `required="true"`이면 true가 되므로, BLE가 꼭 필요한 앱은 자기 manifest에 선언하면 됩니다.
+    - `neverForLocation`은 그대로 두었습니다. 대부분의 앱은 위치 권한 없이 스캔하는 쪽이 낫기 때문입니다. 스캔 결과로 위치를 알아내야 하는 앱(비콘 등)이 플래그를 지우고 API 31+에서도 위치 권한을 선언하는 방법(`tools:remove="android:usesPermissionFlags"`, `tools:remove="android:maxSdkVersion"`)을 문서화했습니다. 저장소에 README가 없어서 `BleManager` 클래스 KDoc과 라이브러리 manifest 주석에 적었습니다.
+    - ⚠️ 동작 변화: 이 라이브러리를 쓰는 앱이 BLE 미지원 기기 필터링을 라이브러리 manifest에 기대고 있었다면, 이제 앱 manifest에 직접 선언해야 합니다.
+    - 확인(샘플 앱의 merged manifest):
+      - 변경 전 `required="true"` → 변경 후 `required="false"`.
+      - KDoc의 예시 세 줄(`uses-feature required="true"`, `BLUETOOTH_SCAN tools:remove`, `ACCESS_FINE_LOCATION tools:remove`)을 샘플 앱 manifest에 잠시 넣으면 `required="true"`, 플래그 없는 `BLUETOOTH_SCAN`, `maxSdkVersion` 없는 `ACCESS_FINE_LOCATION`으로 병합됐습니다(확인 후 되돌림).
+      - 라이브러리/샘플 앱 lint 통과. (manifest 선언 변경이라 실기기 확인은 하지 않았습니다)
 - [ ] **[구조]** notification마다 로그 문자열(hex 변환, `device.name`)을 즉시 생성합니다. 고속 스트리밍에서 비용이 큽니다. 지연 평가로 바꾸거나 별도 verbose 레벨로 분리합니다.
 - [ ] **[구조]** `getDevice(mac)`에서 `getRemoteDevice`는 대문자 MAC만 허용합니다. 입력을 정규화해야 합니다.
 - [ ] **[구조]** `clazz.newInstance()`(`impl/BleManagerEngineImpl.kt:148`)는 deprecated이고, 사용하는 앱이 R8을 쓰면 no-arg 생성자가 제거될 수 있습니다. factory 람다 방식으로 바꾸거나 consumer proguard rule을 추가합니다.

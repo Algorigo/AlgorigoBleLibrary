@@ -19,6 +19,19 @@ import java.io.Closeable
 import java.util.UUID
 import java.util.logging.Logger
 
+/**
+ * 스캔, 기기 조회, 연결 상태를 관리한다.
+ *
+ * 라이브러리 manifest 가 앱에 합쳐지는 항목과 앱에서 바꾸는 방법:
+ * - `uses-feature android.hardware.bluetooth_le` 는 required="false" 다. BLE 가 없는 기기에 설치되지 않게 하려면 앱 manifest 에
+ *   `<uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />` 를 선언한다.
+ * - API 31+ 의 BLUETOOTH_SCAN 에 `usesPermissionFlags="neverForLocation"` 이 있어 위치 권한 없이 스캔하지만, Android 가 비콘 등 일부 광고를 걸러 낸다.
+ *   스캔 결과로 위치를 알아내야 하는 앱은 플래그를 지우고 위치 권한을 API 31+ 에서도 선언한다. (그 경우 ACCESS_FINE_LOCATION 도 요청해야 한다)
+ *   ```
+ *   <uses-permission android:name="android.permission.BLUETOOTH_SCAN" tools:remove="android:usesPermissionFlags" />
+ *   <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" tools:remove="android:maxSdkVersion" />
+ *   ```
+ */
 class BleManager(
     context: Context,
     private val delegate: BleDeviceDelegate = defaultBleDeviceDelegate,
