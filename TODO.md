@@ -477,7 +477,15 @@
     - 실기기 확인(Fold5 → M446K nRF Connect). nRF GATT 서버에 서비스 `0000bbb0-…-aabbccddeeff`를 추가하고, 그 안에 Heart Rate 서비스와 같은 UUID의 `2a38`(Read+Notify, 값 `05`)을 넣었습니다. (Heart Rate의 `2a38`은 Read 전용, 값 `01`)
       - 수정 전: `2a38` characteristic 2개 중 항상 Heart Rate 것만 선택돼 read는 `01`, notification 설정은 `IllegalCharacteristicProperty`(notify 속성 없음)로 실패했습니다. 두 번째 서비스의 `2a38`에는 접근할 방법이 없었습니다. 없는 UUID read는 `IllegalStateException: null`.
       - 수정 후: 기존 API는 그대로(`01`, notification 실패). `read(HR, 2a38)` = `01`, `read(bbb0, 2a38)` = `05`, `setupNotification(bbb0, 2a38)` 성공(CCCD 쓰기 status 0). `read(bbb0, aaa1)`은 `CharacteristicNotFoundException: Characteristic 0000aaa1-… not found in service 0000bbb0-…`, 없는 UUID는 `Characteristic 0000ffff-… not found`.
-- [ ] **[버그] CCCD descriptor가 없으면 NPE** — `impl/BleDeviceEngineImpl.kt:475`. 원인을 알기 어려운 에러가 나옵니다.
+- [x] **[버그] CCCD descriptor가 없으면 NPE** — `impl/BleDeviceEngineImpl.kt:475`. 원인을 알기 어려운 에러가 나옵니다.
+  - ✅ 해결 (`feature/missing_cccd`)
+    - notification/indication을 켜기 전에 NOTIFY/INDICATE 속성과 CCCD(0x2902)가 있는지 확인합니다. CCCD가 없으면 `BleManager.DescriptorNotFoundException(characteristicUuid, descriptorUuid)`로 실패합니다(`CharacteristicNotFoundException`과 같이 `IllegalStateException` 상속).
+    - 켤 수 없는 characteristic이면 `setCharacteristicNotification`을 호출하지 않습니다. 이전에는 켰다가 정리하면서 끄고, 끄기 위한 descriptor 쓰기도 실패해서 `DISABLE_NOTIFICATION_VALUE error` 로그가 남았습니다. (속성이 없는 경우의 `IllegalCharacteristicProperty`도 같은 방식으로 미리 확인)
+    - 참고: 앞의 "deprecated GATT API" 수정 이후 API 33 이상에서는 NPE 대신 플랫폼의 `IllegalArgumentException: descriptor must not be null`이 났습니다. API 32 이하는 NPE.
+    - 테스트: `BleDeviceEngineImplMissingCccdTest`(3건). 수정 전 엔진에서는 3건 모두 실패했습니다(API 32 이하 NPE, API 33 mock에서는 응답을 기다리며 멈춤, 속성이 없을 때 `setCharacteristicNotification` 호출).
+    - 실기기 확인(Fold5 → M446K). M446K에는 CCCD가 없는 indicate characteristic이 실제로 2개 있었습니다: Generic Attribute의 Service Changed(`1801/2a05`)와 Samsung 서비스의 `594a36e6-…`(descriptor는 `3952`만 있음).
+      - 수정 전: 두 characteristic 모두 `IllegalArgumentException: descriptor must not be null`. 그 전에 `setCharacteristicNotification(true/false)`가 호출되고 `DISABLE_NOTIFICATION_VALUE error`가 3번 기록됐습니다.
+      - 수정 후: 두 characteristic 모두 2~4ms 만에 `DescriptorNotFoundException: Descriptor 00002902-… not found in characteristic …`이고, `setCharacteristicNotification`은 호출되지 않았습니다. 이어서 `aaa1` notification 설정은 정상이었습니다.
 - [x] **[버그] `onBluetoothDisabled()`가 CONNECTED 상태만 처리함** — `impl/BleDeviceEngineImpl.kt:528-537`. CONNECTING이나 SPP 상태인 기기는 정리되지 않습니다.
   - ✅ 해결 (`feature/bluetooth_off_all_states`)
     - `onBluetoothDisabled()`가 상태별로 기다리지 않고 바로 정리합니다(`stateLock` 안에서).
