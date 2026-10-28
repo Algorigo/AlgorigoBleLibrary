@@ -544,7 +544,18 @@
   - 그래서 이어진 read 4건이 각각 6번씩 `prior command is not finished`로 거절됐고, 결국 `CommunicationFailedException`으로 실패했습니다.
   - ATT transaction timeout은 30초이므로, 라이브러리 타임아웃이 이보다 짧으면 이런 일이 생길 수 있습니다.
   - 제안: 타임아웃이 나면 호출자에게는 바로 에러를 주되, 큐는 늦은 콜백이나 연결 끊김(최대 ATT timeout 30초)까지 다음 작업을 막습니다. 또는 타임아웃 시 링크를 끊고 재연결하도록 안내합니다.
-- [ ] **[버그] `InitializableBleDevice` 초기화에 타임아웃이 없음** — `InitializableBleDevice.kt:30-46`. 실패하면 `disconnect()`도 두 번 호출됩니다.
+- [x] **[버그] `InitializableBleDevice` 초기화에 타임아웃이 없음** — `InitializableBleDevice.kt:30-46`. 실패하면 `disconnect()`도 두 번 호출됩니다.
+  - ✅ 해결 (`feature/initialize_timeout`)
+    - `InitializableBleDevice.initializeTimeoutMillis`(기본 `DEFAULT_INITIALIZE_TIMEOUT_MILLIS` = 30초)를 추가했습니다. GATT 연결 뒤 `initializeCompletable()`이 이 시간 안에 끝나지 않으면 연결을 끊고 `TimeoutException`으로 실패합니다. (연결 타임아웃과는 별개)
+    - 초기화가 실패하면 `disconnect()`를 한 번만 호출합니다.
+    - 함께 수정: 초기화가 끝나기 전에 `connectCompletable` 구독을 해제하면, 연결 중에 해제한 것과 같이 연결을 끊습니다. 이전에는 GATT가 연결된 채 INITIALIZING으로 남았습니다. (초기화가 끝난 뒤의 해제는 연결을 유지)
+    - ⚠️ 동작 변경: 30초보다 오래 걸리는 초기화는 이제 실패합니다. 필요하면 `initializeTimeoutMillis`를 늘려야 합니다.
+    - 테스트: `InitializableBleDeviceInitTimeoutTest`(5건, disconnect 호출 횟수를 세는 fake engine 사용). 수정 전 코드에서는 4건이 실패했습니다(타임아웃 없음 2건, 실패 시 disconnect 2회, 초기화 중 해제 시 연결 유지). 나머지 1건은 초기화가 끝난 뒤 해제해도 연결을 유지하는지 확인합니다.
+    - 함께 수정한 테스트: `BleManagerEngineImplDeviceMapTest.iteratingDevices_whileOtherThreadAddsDevices_doesNotThrow`가 만든 기기를 참조하지 않아, `deviceMap`이 약한 참조로 바뀐 뒤 GC 시점에 따라 299/300으로 간헐 실패했습니다. 기기를 참조하도록 고쳤습니다(별도 커밋).
+    - 실기기 확인(Fold5 → M446K. delegate가 초기화 단계를 제어하는 `InitializableBleDevice`를 만들도록 하고, `initializeTimeoutMillis` = 3초):
+      - 초기화가 끝나지 않음: 수정 전에는 15초 뒤에도 **INITIALIZING**으로 기다렸습니다. 수정 후에는 연결 후 3초 만에(전체 3.47초) `TimeoutException`과 함께 연결을 끊었습니다.
+      - 초기화 실패(Device Name read 후 에러): 수정 전에는 엔진 로그에 `disconnect`와 `disconnect ignored, state is DISCONNECTING`이 함께 남았습니다(2회 호출). 수정 후에는 `disconnect` 1회.
+      - INITIALIZING에서 connect 구독 해제: 수정 전 2초 뒤에도 **INITIALIZING**(GATT 연결 유지) → 수정 후 DISCONNECTED.
 - [ ] **[버그] BroadcastReceiver를 `finalize()`에서 해제함** — `impl/BleManagerEngineImpl.kt:69-77`. `finalize()`는 호출 시점이 보장되지 않습니다. `BleManager`를 여러 개 만들면 receiver와 deviceMap도 각각 생기므로, 같은 기기에 대한 객체가 중복됩니다. 싱글턴으로 강제하거나 `close()` API를 제공해야 합니다.
 - [ ] **[버그] `getDevice()`가 가상 기기보다 실제 엔진을 먼저 조회함 (실기기)** — `BleManager.kt:88-91`, `impl/BleManagerEngineImpl.kt:125-140`
   - `BleManager.getDeviceInner()`는 `engine.getDevice()`를 먼저 호출하고, 결과가 없을 때만 `virtualDevices`를 봅니다.
