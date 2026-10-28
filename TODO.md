@@ -677,7 +677,23 @@
 
 - [x] **[기능] 쓰기 타입 선택 API** — `writeCharacteristicSingle(uuid, bytes, writeType)` (with/without response).
   - ✅ 해결 (`feature/write_type`): 위 "쓰기 타입 문제" 항목과 함께 `BleDevice.WriteType`으로 추가했습니다.
-- [ ] **[기능] Connection priority** — `requestConnectionPriority(HIGH/BALANCED/LOW_POWER)`. 처리량과 지연에 큰 영향을 줍니다.
+- [x] **[기능] Connection priority** — `requestConnectionPriority(HIGH/BALANCED/LOW_POWER)`. 처리량과 지연에 큰 영향을 줍니다.
+  - ✅ 해결 (`feature/connection_priority`)
+    - `BleDevice.ConnectionPriority`(BALANCED/HIGH/LOW_POWER)와 `requestConnectionPriorityCompletable(priority)`를 추가했습니다. Android가 요청을 받으면 완료됩니다. 연결되지 않았으면 `DisconnectedException`, Android가 거절하면 `GattRequestRejectedException("REQUEST_CONNECTION_PRIORITY")`로 실패합니다.
+    - ATT 작업이 아니라 링크 파라미터 요청이라 GATT 작업 큐를 거치지 않습니다. 진행 중인 read/write를 기다리지 않고 바로 요청합니다.
+    - 실제 적용된 연결 간격은 `BluetoothGattCallback`의 숨겨진(@hide) 콜백 `onConnectionUpdated`로만 알 수 있어서, 같은 시그니처로 선언해 로그(`interval/latency/timeout`)로 남깁니다. R8이 지우지 않도록 `@Keep`을 붙였습니다.
+    - 새 간격은 상대 기기와 협상한 뒤에 적용되므로 Completable이 완료된 직후에는 아직 이전 간격일 수 있습니다. 완료 시점을 적용 시점까지 미루지 않은 이유: 숨겨진 콜백에 의존해야 하고, 간격이 바뀌지 않는 요청(이미 같은 우선순위 등)에는 콜백이 오지 않아 기다릴 수 없습니다. KDoc에 적었습니다.
+    - 가상 기기는 연결돼 있으면 바로 완료합니다.
+    - 테스트: `ConnectionPriorityTest`(4건: 우선순위 값 전달, 거절 시 `GattRequestRejectedException`, 연결 전 요청은 GATT를 호출하지 않고 `DisconnectedException`, 숨겨진 콜백이 프레임워크와 같은 JVM 시그니처로 선언됐는지).
+    - 실기기 확인(Fold5 → M446K, 우선순위마다 BODY_SENSOR_LOCATION read 20회 왕복 시간):
+      | 요청 | 적용된 간격(`onConnectionUpdated`) | read 왕복 median |
+      |---|---|---|
+      | (연결 직후 기본) | - | 60.8ms |
+      | LOW_POWER | 120ms, latency 7 | 241.1ms |
+      | HIGH | 15ms, latency 1 | 약 28ms (적용 후) |
+      | BALANCED | 30ms, latency 5 | 60.0ms |
+      - 요청 자체는 2~11ms에 완료되지만, LOW_POWER → HIGH는 적용까지 6.6~8.5초가 걸렸습니다(긴 간격에서는 파라미터 갱신 절차도 느림). BALANCED/LOW_POWER로 바꿀 때는 0.3~0.5초였습니다.
+      - 연결이 끊긴 뒤 요청: `DisconnectedException`.
 - [ ] **[기능] RSSI 읽기** — `readRemoteRssi()`. 콜백(`impl/BleDeviceEngineImpl.kt:171`)은 있지만 로그만 남깁니다.
 - [ ] **[기능] 자동 재연결 / `autoConnect` 옵션** — 현재 `autoConnect=false`로 고정되어 있고, 끊겼을 때 재연결하는 정책이 없습니다. status 133이면 재시도하는 옵션도 필요합니다.
   - (실기기) 이전 연결이 끊긴 직후(1~3초 이내)에 같은 기기로 다시 연결하면, 링크가 정리되는 도중이라 `connectCompletable()`이 `DisconnectedException`으로 실패하는 경우가 2회 있었습니다. 몇 초 뒤에 다시 시도하면 성공했습니다. 연결 재시도 정책을 정할 때 이 경우도 함께 고려해야 합니다.
