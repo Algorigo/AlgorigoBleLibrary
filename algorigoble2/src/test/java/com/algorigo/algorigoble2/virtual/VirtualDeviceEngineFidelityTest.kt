@@ -110,16 +110,31 @@ class VirtualDeviceNotificationOrderTest {
         val received = mutableListOf<Int>()
         val count = 1000
         val done = CountDownLatch(count)
+        val subscribed = CountDownLatch(1)
         device.setupNotification(BleDevice.NotificationType.NOTIFICATION, uuid)
             .flatMap { it }
             .subscribe {
-                synchronized(received) { received.add(((it[0].toInt() and 0xFF) shl 8) or (it[1].toInt() and 0xFF)) }
-                done.countDown()
+                val value = ((it[0].toInt() and 0xFF) shl 8) or (it[1].toInt() and 0xFF)
+                if (value == MARKER) {
+                    subscribed.countDown()
+                } else {
+                    synchronized(received) { received.add(value) }
+                    done.countDown()
+                }
             }
 
+        // 설정 완료가 callback 스레드로 전달된 뒤에 notification 스트림을 구독하므로, 그 전에 보낸 notification 은 받지 못한다.
+        // 표시 값이 도착할 때까지 보내서 구독이 끝난 것을 확인한 뒤 순서를 확인할 값을 보낸다
+        while (!subscribed.await(10, TimeUnit.MILLISECONDS)) {
+            virtualDevice.send(uuid, MARKER)
+        }
         repeat(count) { virtualDevice.send(uuid, it) }
         done.await(10, TimeUnit.SECONDS)
 
         assertEquals((0 until count).toList(), synchronized(received) { received.toList() })
+    }
+
+    companion object {
+        private const val MARKER = 0xFFFF
     }
 }
