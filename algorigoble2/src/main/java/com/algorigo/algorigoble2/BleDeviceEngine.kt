@@ -34,4 +34,6 @@ internal abstract class BleDeviceEngine() {
     abstract fun connectSppSocket(uuid: UUID? = null): Observable<BleSppSocket>
 
     abstract fun requestMtuSingle(mtu: Int): Single<Int>
+
+    abstract fun requestConnectionPriorityCompletable(priority: BleDevice.ConnectionPriority): Completable
 }

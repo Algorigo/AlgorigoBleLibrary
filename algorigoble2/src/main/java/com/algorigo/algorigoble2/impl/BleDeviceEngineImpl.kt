@@ -12,6 +12,7 @@ import android.bluetooth.BluetoothStatusCodes
 import android.content.Context
 import android.os.Build
 import androidx.annotation.ChecksSdkIntAtLeast
+import androidx.annotation.Keep
 import androidx.annotation.RequiresApi
 import com.algorigo.algorigoble2.BleCharacterisic
 import com.algorigo.algorigoble2.BleDevice
@@ -294,6 +295,16 @@ internal class BleDeviceEngineImpl(
             L.debug(Ble.Device.Default, "$logLabel : onMtuChanged:$mtu, $status")
             gattRequestPendingRelay.accept(false)
             mtuRelay.accept(Pair(mtu, status))
+        }
+
+        /**
+         * 연결 파라미터가 바뀌면 불린다. BluetoothGattCallback 의 숨겨진(@hide) 콜백(API 26+)이라 override 표시 없이 같은 시그니처로 선언한다.
+         * 연결 우선순위 요청의 결과를 확인할 수 있도록 로그만 남긴다. (interval 1.25ms 단위, timeout 10ms 단위)
+         */
+        @Keep
+        @Suppress("unused")
+        fun onConnectionUpdated(gatt: BluetoothGatt, interval: Int, latency: Int, timeout: Int, status: Int) {
+            L.debug(Ble.Device.Default, "$logLabel : onConnectionUpdated: interval ${interval * 1.25}ms, latency $latency, timeout ${timeout * 10}ms, status $status")
         }
     }
 
@@ -782,6 +793,21 @@ internal class BleDeviceEngineImpl(
         }
     }
 
+    /**
+     * 연결 우선순위(연결 간격) 변경을 요청한다. ATT 작업이 아니라 링크 파라미터 요청이므로 작업 큐를 거치지 않는다.
+     * Android 가 요청을 받으면 완료되며, 실제 연결 간격은 상대 기기와의 협상으로 정해진다.
+     */
+    override fun requestConnectionPriorityCompletable(priority: BleDevice.ConnectionPriority): Completable =
+        getGattSingle().flatMapCompletable { gatt ->
+            BlePermissions.checkConnect(context, sdkInt)
+            L.debug(Ble.Device.Default, "$logLabel : requestConnectionPriority : $priority")
+            if (gatt.requestConnectionPriority(priority.value)) {
+                Completable.complete()
+            } else {
+                Completable.error(BleManager.GattRequestRejectedException(OPERATION_REQUEST_CONNECTION_PRIORITY))
+            }
+        }
+
     override fun requestMtuSingle(mtu: Int): Single<Int> {
         return enqueue(OPERATION_REQUEST_MTU, getGattSingle()
             .flatMap { gatt ->
@@ -950,6 +976,7 @@ internal class BleDeviceEngineImpl(
         // OperationTimeoutException 등에 쓰는 작업 이름 (나머지는 Type 의 이름을 쓴다)
         private const val OPERATION_CONNECT = "CONNECT"
         private const val OPERATION_REQUEST_MTU = "REQUEST_MTU"
+        private const val OPERATION_REQUEST_CONNECTION_PRIORITY = "REQUEST_CONNECTION_PRIORITY"
         private const val OPERATION_GET_CHARACTERISTICS = "GET_CHARACTERISTICS"
     }
 }
