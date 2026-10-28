@@ -437,7 +437,12 @@
     - 실기기 확인(Fold5 → M446K nRF 광고). `FIRST_MATCH_AND_MATCH_LOST` + manufacturer data 필터로 60초 스캔하면서, 시작 약 19초 뒤 nRF 광고를 끄고 49초 뒤 다시 켰습니다. (nRF는 광고를 다시 켤 때 새 랜덤 주소를 씀)
       - 수정 전: 광고를 끈 약 6초 뒤 스택이 같은 주소로 lost 콜백을 보냈지만 목록에 그대로 남았습니다. 광고를 다시 켠 뒤에는 **사라진 주소와 새 주소 2개**가 목록에 있었습니다.
       - 수정 후: 광고를 끈 약 6초 뒤 `scan match lost` 로그와 함께 **목록이 비었고**, 광고를 다시 켜자 새 주소 1개만 목록에 나타났습니다.
-- [ ] **[버그] API 32 이하에서 `ScanInfo.advertisingDataMap`이 항상 비어 있음** — `ScanInfo.kt:20-27`. `bytes`를 읽기만 하고 파싱하지 않은 채 빈 map을 반환합니다. AD structure(length-type-value)를 직접 파싱해야 합니다.
+- [x] **[버그] API 32 이하에서 `ScanInfo.advertisingDataMap`이 항상 비어 있음** — `ScanInfo.kt:20-27`. `bytes`를 읽기만 하고 파싱하지 않은 채 빈 map을 반환합니다. AD structure(length-type-value)를 직접 파싱해야 합니다.
+  - ✅ 해결 (`feature/parse_advertising_data`)
+    - API 32 이하에서는 `ScanRecord.bytes`를 AD structure(length 1바이트, type 1바이트, data)로 직접 파싱합니다(`parseAdvertisingData`, internal). API 33 이상은 기존처럼 플랫폼의 `advertisingDataMap`을 씁니다.
+    - 규칙은 API 33의 `ScanRecord.getAdvertisingDataMap()`과 맞췄습니다. 길이가 0이면(뒤쪽 0 padding) 끝내고, 광고 데이터와 scan response에 같은 type이 있으면 마지막 값을 씁니다. 길이가 남은 바이트를 넘는 잘못된 structure를 만나면 그 앞까지만 돌려줍니다.
+    - 테스트: `ScanInfoTest`(5건). 수정 전 코드에서는 `ScanInfo` 경로 테스트가 빈 map으로 실패했습니다(나머지 4건은 새 파서의 경계 조건 테스트라 수정 전 코드에는 해당 함수가 없음).
+    - 실기기 확인(Fold5 Android 17): API 32 이하 실기기가 없어서, 대신 실제로 수신한 광고 레코드에 대해 새 파서 결과와 플랫폼 `advertisingDataMap`을 비교했습니다. 필터 없이 10초 스캔한 **1443건(기기 98개, AD type 9종: 0x01/02/03/07/09/0a/16/21/ff)이 모두 일치**했습니다. M446K nRF 광고는 `{0x01=02, 0x09=재홍의 Jump3(UTF-8), 0xff=59000102030405}`로 파싱됐습니다.
 - [ ] **[버그] `BleScanFilter.Builder` 검증이 파라미터가 아니라 이전 필드 값을 검사함** — `BleScanFilter.kt:59, 103, 134`. 그래서 mask와 data의 길이가 달라도 검증을 통과하고, 스캔을 시작할 때 Android `ScanFilter.Builder`에서 `IllegalArgumentException`이 납니다.
 - [ ] **[버그] 런타임 권한을 확인하지 않음** — 전역 `@SuppressLint("MissingPermission")`. API 31 이상에서 `BLUETOOTH_SCAN/CONNECT`가 없으면 `deviceName`, `bonded`, `toString()`, 로그 출력에서도 `SecurityException`이 납니다. 작업 전에 권한을 확인하고 명확한 예외(`PermissionDeniedException`)를 내야 합니다.
 - [ ] **[버그] characteristic을 UUID로만 찾음** — `impl/BleDeviceEngineImpl.kt:451-465`. 여러 서비스에 같은 UUID가 있으면 첫 번째 것이 선택됩니다. 찾지 못하면 메시지 없는 `IllegalStateException()`이 납니다. serviceUuid를 받는 오버로드와 `CharacteristicNotFoundException`을 추가해야 합니다.
