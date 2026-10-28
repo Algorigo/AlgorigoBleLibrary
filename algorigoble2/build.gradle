@@ -25,7 +25,9 @@ apply plugin: 'maven-publish'
 apply plugin: 'signing'
 
 group = "com.algorigo.rx"
-archivesBaseName = "algorigoble2"
+base {
+    archivesName = "algorigoble2"
+}
 if (getCurrentGitBranch().contains('master')) {
     version = versionStr
 } else {
@@ -39,7 +41,7 @@ afterEvaluate {
             mavenJava(MavenPublication) {
                 // aar + sources/javadoc jar + 의존성(api → compile, implementation → runtime)이 POM 에 포함된다
                 from components.release
-                artifactId = archivesBaseName
+                artifactId = base.archivesName.get()
                 pom {
                     name = 'AlgorigoBleLibrary'
                     description = 'Ble Library for Android using ReactiveX'
@@ -119,9 +121,9 @@ tasks.named('check') {
 }
 
 android {
-    namespace "$group.$archivesBaseName"
+    namespace = "$group.${base.archivesName.get()}"
 
-    compileSdk 35
+    compileSdk = 35
 
     defaultConfig {
         minSdkVersion 24
