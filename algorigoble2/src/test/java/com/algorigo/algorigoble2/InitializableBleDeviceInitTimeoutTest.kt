@@ -42,6 +42,7 @@ class InitializableBleDeviceInitTimeoutTest {
         override fun setupNotification(type: BleDevice.NotificationType, serviceUuid: UUID?, characteristicUuid: UUID): Observable<Observable<ByteArray>> = Observable.never()
         override fun connectSppSocket(uuid: UUID?): Observable<BleSppSocket> = Observable.never()
         override fun requestMtuSingle(mtu: Int): Single<Int> = Single.never()
+        override fun requestConnectionPriorityCompletable(priority: BleDevice.ConnectionPriority): Completable = Completable.never()
     }
 
     private val initialize = CompletableSubject.create()

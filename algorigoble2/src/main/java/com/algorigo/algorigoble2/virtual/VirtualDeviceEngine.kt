@@ -103,6 +103,15 @@ internal class VirtualDeviceEngine(private val virtualDevice: VirtualDevice) : B
         return Observable.error(UnsupportedOperationException("Virtual device does not support spp socket"))
     }
 
+    // 가상 기기에는 연결 간격이 없으므로 연결돼 있으면 바로 완료한다
+    override fun requestConnectionPriorityCompletable(priority: BleDevice.ConnectionPriority): Completable {
+        return virtualDevice.connectionStateRelay
+            .firstOrError()
+            .flatMapCompletable {
+                if (it == BleDevice.ConnectionState.CONNECTED) Completable.complete() else Completable.error(BleManager.DisconnectedException())
+            }
+    }
+
     override fun requestMtuSingle(mtu: Int): Single<Int> {
         return virtualDevice.connectionStateRelay
             .firstOrError()

@@ -1,5 +1,6 @@
 package com.algorigo.algorigoble2
 
+import android.bluetooth.BluetoothGatt
 import com.algorigo.algorigoble2.logging.Ble
 import com.algorigo.logger.L
 import io.reactivex.rxjava3.core.Completable
@@ -34,6 +35,19 @@ open class BleDevice {
     enum class NotificationType(val byteArray: ByteArray) {
         NOTIFICATION(byteArrayOf(0x01, 0x00)),
         INDICATION(byteArrayOf(0x02, 0x00)),
+    }
+
+    /**
+     * 연결 우선순위. 연결 간격(connection interval)을 정해서 처리량, 지연, 전력 사용에 영향을 준다.
+     * 실제 간격은 Android 버전/기기와 상대 기기와의 협상에 따라 다르다.
+     */
+    enum class ConnectionPriority(val value: Int) {
+        /** 기본값. 중간 정도의 연결 간격 */
+        BALANCED(BluetoothGatt.CONNECTION_PRIORITY_BALANCED),
+        /** 짧은 연결 간격. 처리량이 높고 지연이 짧지만 전력을 더 쓴다. 대량 전송(펌웨어 업데이트 등)에 쓴다 */
+        HIGH(BluetoothGatt.CONNECTION_PRIORITY_HIGH),
+        /** 긴 연결 간격. 전력을 아끼지만 처리량이 낮고 지연이 길다 */
+        LOW_POWER(BluetoothGatt.CONNECTION_PRIORITY_LOW_POWER),
     }
 
     enum class WriteType {
@@ -140,6 +154,15 @@ open class BleDevice {
     fun requestMtuSingle(mtu: Int = 517) = engine.requestMtuSingle(mtu).deliverToCallback()
 
     fun setMtuCompletable(mtu: Int = 517) = requestMtuSingle(mtu).ignoreElement()
+
+    /**
+     * 연결 우선순위(연결 간격) 변경을 요청한다. Android 가 요청을 받으면 완료된다.
+     * 새 간격은 상대 기기와 협상한 뒤에 적용되므로 완료 직후에는 아직 이전 간격일 수 있다.
+     * (긴 간격에서 짧은 간격으로 바꿀 때 실기기에서 수 초가 걸렸다)
+     * 연결되지 않았으면 [BleManager.DisconnectedException], Android 가 거절하면 [BleManager.GattRequestRejectedException].
+     */
+    fun requestConnectionPriorityCompletable(priority: ConnectionPriority): Completable =
+        engine.requestConnectionPriorityCompletable(priority).deliverToCallback()
 
     // engine 은 생성 후 initEngine() 으로 붙는다. 그 전에 equals/hashCode/toString 이 불려도 예외가 나지 않게 한다
     private val deviceIdOrNull: String?
