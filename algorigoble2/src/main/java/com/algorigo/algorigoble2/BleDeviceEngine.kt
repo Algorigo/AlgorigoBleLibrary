@@ -35,5 +35,7 @@ internal abstract class BleDeviceEngine() {
 
     abstract fun requestMtuSingle(mtu: Int): Single<Int>
 
+    abstract fun readRssiSingle(): Single<Int>
+
     abstract fun requestConnectionPriorityCompletable(priority: BleDevice.ConnectionPriority): Completable
 }
