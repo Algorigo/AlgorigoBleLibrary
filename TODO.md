@@ -500,7 +500,16 @@
       - 블루투스를 다시 켜고 3초 뒤 S23 재연결: 수정 전 실행에서는 status 133으로 실패했고, 수정 후 실행에서는 성공했습니다. 블루투스를 켠 직후의 스택 타이밍 문제로 보이며 이번 수정과는 관계없습니다.
       - DISCONNECTING 구간은 너무 짧아(약 100ms) 실기기에서 맞추지 못했고, SPP는 실기기로 확인하지 못했습니다.
   - (실기기) 연결되지 않은 기기마다 `DisconnectedException` 스택트레이스를 로그로 남깁니다. 테스트에서는 BT를 한 번 끌 때 캐시된 기기 57개에 대해 57개의 스택트레이스가 출력되었습니다. 아래 "스캔 결과가 계속 쌓이는" 문제와 함께 처리해야 합니다.
-- [ ] **[버그] SPP 관련 문제** — `impl/BleDeviceEngineImpl.kt:503`, `BleSppSocket.kt:16, 28, 40`
+- [x] **[버그] SPP 관련 문제** — `impl/BleDeviceEngineImpl.kt:503`, `BleSppSocket.kt:16, 28, 40`
+  - ✅ 해결 (`feature/spp_fixes`)
+    - uuid를 지정하지 않은 `connectSppSocket()`: 기기 UUID 중 SPP(`00001101-…`)가 있으면 SPP, 없으면 기존처럼 첫 UUID, 기기 UUID를 모르면(`uuids`가 null, SDP를 한 적 없음) 표준 SPP UUID를 씁니다. ⚠️ 기기 UUID에 SPP가 있지만 첫 번째가 아니면, 이전에는 첫 UUID를 썼고 이제는 SPP를 씁니다.
+    - `readSingle`: `read()`가 실제로 읽은 길이를 확인합니다. 크기를 지정하면 다 채울 때까지 읽고, `-1`(받은 만큼)이면 읽은 만큼만 돌려줍니다. 스트림이 닫혀 -1을 받으면 `IOException`. 인자 검증 오타(`size < -2`)를 `size < -1`로 고쳤습니다.
+    - 연결: 엔진은 연결하지 않은 `BleSppSocket`을 만든 뒤, 기기 검색을 멈추고(`cancelDiscovery()`, API 31+에서 SCAN 권한이 없으면 건너뜀) 연결합니다. 연결에 실패하면 RFCOMM 소켓을 닫습니다(이전에는 생성자에서 실패하면 소켓이 닫히지 않았음). 공개 생성자 `BleSppSocket(socket)`은 호환을 위해 기존처럼 만들면서 연결하고, 실패하면 소켓을 닫습니다.
+    - 테스트: `SppSocketTest`(8건). 수정 전 코드에서는 8건 모두 실패했습니다.
+    - 실기기 확인(Fold5). Fold5와 M446K는 페어링돼 있지 않아서, 사용자 기기에 본딩을 새로 만들지 않는 범위에서만 확인했습니다. SDP를 한 적 없는(uuids = null) M446K의 Classic 주소로 uuid 없이 `connectSppSocket()` 호출:
+      - 수정 전: 7ms 만에 `NullPointerException: getUuids(...) must not be null`.
+      - 수정 후: `cancelDiscovery` → SPP UUID로 RFCOMM 연결 시도 → M446K에 SPP 서비스가 없어 SDP 후 2.1초 만에 `IOException: read failed, socket might closed or timeout`, 소켓 close, 상태 DISCONNECTED. 페어링 요청은 뜨지 않았습니다.
+      - 실제 SPP 데이터 송수신(`readSingle` 부분 읽기)은 SPP 서버 기기가 없어 단위 테스트로만 확인했습니다.
   - `bluetoothDevice.uuids`는 null일 수 있어서 NPE가 날 수 있습니다. 기본 SPP UUID(`00001101-...`)로 fallback하거나 `fetchUuidsWithSdp()`를 사용해야 합니다.
   - `inputStream.read()`의 반환 길이를 확인하지 않습니다. 그래서 일부만 읽혔을 때 뒤쪽이 0으로 채워진 배열이 반환됩니다.
   - 인자 검증의 `size < -2`는 `size < -1`의 오타입니다.
