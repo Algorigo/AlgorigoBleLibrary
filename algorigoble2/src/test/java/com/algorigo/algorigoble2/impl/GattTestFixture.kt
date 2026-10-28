@@ -37,6 +37,7 @@ internal class GattTestFixture(val bleDevice: BleDevice = BleDevice(), sdkInt: I
     val bluetoothDevice: BluetoothDevice = mockk(relaxed = true)
 
     private val gattStates = mutableMapOf<BluetoothGatt, FakeGattState>()
+    private val descriptorLists = mutableMapOf<BluetoothGattCharacteristic, MutableList<BluetoothGattDescriptor>>()
     val gatt: BluetoothGatt = newGatt()
 
     private val callbackSlot = slot<BluetoothGattCallback>()
@@ -125,6 +126,9 @@ internal class GattTestFixture(val bleDevice: BleDevice = BleDevice(), sdkInt: I
         every { characteristic.getDescriptor(CCCD_UUID) } returns descriptor
         every { descriptor.uuid } returns CCCD_UUID
         every { descriptor.characteristic } returns characteristic
+        val descriptors = mutableListOf(descriptor)
+        descriptorLists[characteristic] = descriptors
+        every { characteristic.descriptors } answers { descriptors.toList() }
         every { service.getCharacteristic(any()) } returns null
         every { service.getCharacteristic(uuid) } returns characteristic
         every { service.characteristics } returns listOf(characteristic)
@@ -138,6 +142,7 @@ internal class GattTestFixture(val bleDevice: BleDevice = BleDevice(), sdkInt: I
         every { descriptor.uuid } returns uuid
         every { descriptor.characteristic } returns characteristic
         every { characteristic.getDescriptor(uuid) } returns descriptor
+        descriptorLists[characteristic]?.add(descriptor)
         return descriptor
     }
 

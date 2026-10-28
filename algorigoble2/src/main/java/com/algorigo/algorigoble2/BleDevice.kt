@@ -296,7 +296,14 @@ open class BleDevice {
 
     }
 
+    /** 모든 서비스의 characteristic 목록. 서비스별로 보려면 [getServicesSingle]을 쓴다. */
     fun getCharacteristicsSingle() = engine.getCharacteristicsSingle().deliverToCallback()
+
+    /**
+     * 연결된 기기의 서비스 목록과 각 서비스의 characteristic(속성, descriptor 포함). 연결되지 않았으면 [BleManager.DisconnectedException].
+     * 서비스 목록은 연결(서비스 탐색) 때와 기기가 서비스 변경을 알렸을 때 갱신되므로, 다시 연결한 뒤에는 다시 조회한다.
+     */
+    fun getServicesSingle(): Single<List<BleService>> = engine.getServicesSingle().deliverToCallback()
 
     // characteristic 을 UUID 로만 찾으면 여러 서비스에 같은 UUID 가 있을 때 처음 찾은 것을 쓴다. 서비스를 지정하려면 serviceUuid 를 받는 함수를 쓴다.
     // 찾지 못하면 BleManager.CharacteristicNotFoundException 으로 실패한다

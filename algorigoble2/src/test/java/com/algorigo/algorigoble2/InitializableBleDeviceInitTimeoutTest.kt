@@ -37,6 +37,7 @@ class InitializableBleDeviceInitTimeoutTest {
             bleDevice.onDisconnected()
         }
         override fun getCharacteristicsSingle(): Single<List<BleCharacterisic>> = Single.never()
+        override fun getServicesSingle(): Single<List<BleService>> = Single.never()
         override fun readCharacteristicSingle(serviceUuid: UUID?, characteristicUuid: UUID): Single<ByteArray> = Single.never()
         override fun writeCharacteristicSingle(serviceUuid: UUID?, characteristicUuid: UUID, byteArray: ByteArray, writeType: BleDevice.WriteType): Single<ByteArray> = Single.never()
         override fun readDescriptorSingle(serviceUuid: UUID?, characteristicUuid: UUID, descriptorUuid: UUID): Single<ByteArray> = Single.never()

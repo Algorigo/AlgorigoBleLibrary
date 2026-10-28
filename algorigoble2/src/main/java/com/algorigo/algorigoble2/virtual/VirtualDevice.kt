@@ -3,6 +3,7 @@ package com.algorigo.algorigoble2.virtual
 import com.algorigo.algorigoble2.BleCharacterisic
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleManager
+import com.algorigo.algorigoble2.BleService
 import com.jakewharton.rxrelay3.BehaviorRelay
 import com.jakewharton.rxrelay3.PublishRelay
 import io.reactivex.rxjava3.core.Observable
@@ -115,9 +116,25 @@ abstract class VirtualDevice(
         Single.error(BleManager.DescriptorNotFoundException(characteristicUuid, descriptorUuid))
 
     abstract fun getCharacteristicsSingle(): Single<List<BleCharacterisic>>
+
+    /**
+     * 연결된 동안 [BleDevice.getServicesSingle]이 부른다. 기본은 [getCharacteristicsSingle]의 characteristic 을
+     * [BleCharacterisic.serviceUuid]로 묶은 primary 서비스들이고, serviceUuid 가 없는 characteristic 은 [UNKNOWN_SERVICE_UUID] 서비스로 묶는다.
+     */
+    open fun getServicesSingle(): Single<List<BleService>> = getCharacteristicsSingle()
+        .map { characteristics ->
+            characteristics
+                .groupBy { it.serviceUuid ?: UNKNOWN_SERVICE_UUID }
+                .map { (serviceUuid, list) -> BleService(serviceUuid, true, list) }
+        }
     abstract fun readCharacteristicSingle(characteristicUuid: UUID): Single<ByteArray>
     abstract fun writeCharacteristicSingle(characteristicUuid: UUID, byteArray: ByteArray): Single<ByteArray>
     abstract fun onNotificationStarted(type: BleDevice.NotificationType, characteristicUuid: UUID)
     abstract fun onNotificationStop(characteristicUuid: UUID)
 
+    companion object {
+        /** serviceUuid 를 지정하지 않은 가상 characteristic 을 묶는 서비스의 UUID */
+        @JvmField
+        val UNKNOWN_SERVICE_UUID: UUID = UUID(0L, 0L)
+    }
 }

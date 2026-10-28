@@ -15,4 +15,13 @@ class BleCharacteristicImpl(private val bluetoothGattCharacteristic: BluetoothGa
 
     override fun isNotifyAvailable() = bluetoothGattCharacteristic.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0 ||
             bluetoothGattCharacteristic.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0
+
+    override val serviceUuid: UUID?
+        get() = bluetoothGattCharacteristic.service?.uuid
+
+    override val properties: Int
+        get() = bluetoothGattCharacteristic.properties
+
+    override val descriptorUuids: List<UUID>
+        get() = bluetoothGattCharacteristic.descriptors.map { it.uuid }
 }
