@@ -738,7 +738,20 @@
       - 2901 쓰기: nRF 서버가 쓰기를 허용하지 않아 `GattOperationFailedException(WRITE_DESCRIPTOR, status 3)`.
       - CCCD 읽기: notification 전 `0000` → `setupNotification` 중 `0100` → dispose 후 `0000`. CCCD 직접 쓰기는 `IllegalArgumentException`(GATT 호출 없음).
       - 없는 descriptor: `DescriptorNotFoundException`. characteristic read 2건과 descriptor read 3건을 동시에 요청해도 모두 성공(287ms, 거절 없음).
-- [ ] **[기능] 블루투스 어댑터 상태와 권한 상태 공개 API** — 내부의 `scanAvailableObservable`을 `BleManager`에서 공개하고, BT 활성화 요청과 필요한 권한 목록을 제공하는 helper를 추가합니다.
+- [x] **[기능] 블루투스 어댑터 상태와 권한 상태 공개 API** — 내부의 `scanAvailableObservable`을 `BleManager`에서 공개하고, BT 활성화 요청과 필요한 권한 목록을 제공하는 helper를 추가합니다.
+  - ✅ 해결 (`feature/adapter_permission_api`)
+    - 상태: `BleManager.isBluetoothEnabled`와 `getScanAvailabilityObservable()`을 추가했습니다. `ScanAvailability(bluetoothEnabled, locationEnabled)`(+ `available`)를 구독 시 현재 값부터, 블루투스나 위치(API 30 이하)가 바뀔 때마다 내보냅니다. 같은 상태는 다시 내보내지 않고, 내부 스트림과 달리 스캔할 수 없는 상태도 에러 없이 알립니다. 다른 공개 스트림처럼 callback 스레드(io)에서 전달됩니다. 위치는 API 31 이상에서 스캔에 필요 없으므로 항상 true입니다.
+    - 스캔이 쓰는 내부 스트림(`SystemServiceException`을 내는 것)도 같은 상태 스트림에서 만들도록 바꿨습니다. 스캔 동작은 같습니다.
+    - 권한: `BleManager.getRequiredPermissions()`(API 31+ `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT` / API 29~30 `ACCESS_FINE_LOCATION` / 그 이하 `ACCESS_COARSE_LOCATION`)와 `getMissingPermissions(context)`를 추가했습니다(`@JvmStatic`). 라이브러리가 권한을 확인할 때 쓰는 기준(`BlePermissions`)과 같은 목록입니다. 런타임 권한은 바뀌어도 알림이 없어서 상태 스트림에는 넣지 않았습니다.
+    - 설정 요청: `BleManager.createEnableBluetoothIntent()`(`ACTION_REQUEST_ENABLE`, API 31+는 `BLUETOOTH_CONNECT` 필요)와 `createLocationSettingsIntent()`를 추가했습니다. 앱이 블루투스를 직접 켜는 `BluetoothAdapter.enable()`은 API 33부터 막혀 있어 Intent로 사용자에게 요청하는 방식만 제공합니다.
+    - 샘플 앱의 권한 목록(두 화면)과 블루투스 켜기 Intent를 helper로 바꿨습니다.
+    - 테스트: `PermissionHelperTest`(3건: API 레벨별 필요 권한, 허용되지 않은 권한만 반환, API 28 이하에서 FINE으로 스캔 권한 충족), `BleManagerEngineImplScanAvailabilityTest`에 2건(상태 변화를 에러 없이 순서대로 전달·같은 상태 생략, `isBluetoothEnabled`), 기기 테스트 `BleManagerHelperInstrumentedTest`(3건: Intent action과 처리 화면 존재, 이 기기의 필요 권한, 없는 권한은 실제로 거부된 권한).
+    - 실기기 확인(Fold5, Android API 37):
+      - `BleManagerHelperInstrumentedTest` 3건 통과.
+      - 권한: 모두 허용 시 `missing=[]`, `BLUETOOTH_CONNECT`만 회수하면 `missing=[BLUETOOTH_CONNECT]`(스캔은 정상), `BLUETOOTH_SCAN`만 회수하면 `missing=[BLUETOOTH_SCAN]`이고 스캔은 `PermissionDeniedException`.
+      - 상태 스트림: 구독 즉시 `available=true` → 블루투스를 끄면 `bluetoothEnabled=false` → `createEnableBluetoothIntent()`로 연 시스템 대화상자("…에서 블루투스 켜기를 요청합니다", 허용/거부)에서 허용 → `available=true`. 모두 io 스레드에서 전달됐고 에러는 없었습니다.
+      - 샘플 앱: `BLUETOOTH_CONNECT`를 회수하고 스캔을 누르면 helper 목록으로 권한을 요청하고(근처 기기 권한 대화상자), 허용 뒤 스캔 결과가 나옵니다.
+      - 위치 서비스 경로(API 30 이하)는 이 장비로 확인하지 못했습니다(단위 테스트로 확인).
 - [ ] **[기능] 스캔 개선**
   - 일정 시간 보이지 않는 기기를 목록에서 제거(device lost timeout)합니다.
   - `ScanInfo`에 serviceUuids, serviceData, txPower, `isConnectable`(API 26), timestamp를 추가합니다.

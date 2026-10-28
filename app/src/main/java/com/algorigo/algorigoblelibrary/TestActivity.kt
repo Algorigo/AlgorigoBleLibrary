@@ -1,14 +1,13 @@
 package com.algorigo.algorigoblelibrary
 
-import android.Manifest
 import android.content.Intent
-import android.os.Build
 import android.os.Bundle
 import android.view.View
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.RecyclerView
 import com.algorigo.algorigoble2.BleDevice
+import com.algorigo.algorigoble2.BleManager
 import com.algorigo.library.rx.Rx2ServiceBindingFactory
 import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
 import io.reactivex.rxjava3.core.Completable
@@ -102,17 +101,6 @@ class TestActivity : RequestPermissionActivity() {
         disposable?.dispose()
     }
 
-    private fun getPermissions(): Array<String> {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            arrayOf(
-                Manifest.permission.BLUETOOTH_SCAN,
-                Manifest.permission.BLUETOOTH_CONNECT,
-            )
-        } else {
-            arrayOf(
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION,
-            )
-        }
-    }
+    // 이 기기(Android 버전)에서 스캔과 연결에 필요한 권한
+    private fun getPermissions(): Array<String> = BleManager.getRequiredPermissions().toTypedArray()
 }

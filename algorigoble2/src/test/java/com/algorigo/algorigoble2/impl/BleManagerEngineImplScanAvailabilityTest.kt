@@ -13,6 +13,7 @@ import android.content.IntentFilter
 import android.location.LocationManager
 import com.algorigo.algorigoble2.BleManager
 import com.algorigo.algorigoble2.BleScanSettings
+import com.algorigo.algorigoble2.ScanAvailability
 import com.algorigo.algorigoble2.exception.SystemServiceException
 import com.algorigo.algorigoble2.testutil.RxTestSchedulerRule
 import io.mockk.Runs
@@ -117,6 +118,38 @@ class BleManagerEngineImplScanAvailabilityTest {
 
         observer.assertError(SystemServiceException.LocationUnavailableException::class.java)
         verify(exactly = 1) { scanner.stopScan(any<ScanCallback>()) }
+    }
+
+    // 공개 상태 스트림은 스캔할 수 없는 상태도 에러 없이 알린다
+    @Test
+    fun availability_emitsCurrentStateAndChanges_withoutError() {
+        val observer = engine.getScanAvailabilityObservable().test()
+
+        every { locationManager.isProviderEnabled(any()) } returns false
+        providersChanged(changedProviderEnabled = false)
+        // 상태가 그대로인 broadcast 는 다시 내보내지 않는다
+        providersChanged(changedProviderEnabled = false)
+        bluetoothStateChanged(BluetoothAdapter.STATE_TURNING_OFF)
+        every { locationManager.isProviderEnabled(any()) } returns true
+        providersChanged(changedProviderEnabled = true)
+        bluetoothStateChanged(BluetoothAdapter.STATE_ON)
+
+        observer.assertValues(
+            ScanAvailability(bluetoothEnabled = true, locationEnabled = true),
+            ScanAvailability(bluetoothEnabled = true, locationEnabled = false),
+            ScanAvailability(bluetoothEnabled = false, locationEnabled = false),
+            ScanAvailability(bluetoothEnabled = false, locationEnabled = true),
+            ScanAvailability(bluetoothEnabled = true, locationEnabled = true),
+        )
+        observer.assertNoErrors().assertNotComplete()
+        assertEquals(listOf(true, false, false, false, true), observer.values().map { it.available })
+    }
+
+    @Test
+    fun isBluetoothEnabled_readsAdapterState() {
+        assertEquals(true, engine.isBluetoothEnabled)
+        every { adapter.isEnabled } returns false
+        assertEquals(false, engine.isBluetoothEnabled)
     }
 
     @Test
