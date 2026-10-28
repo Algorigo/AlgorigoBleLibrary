@@ -808,7 +808,11 @@
       - CI(`.circleci/config.yml`)에서 쓰지 않는 android-29 system image 설치 단계를 지웠습니다(에뮬레이터를 띄우지 않음).
     - CLAUDE.md의 `Engine` 설명을 고쳤습니다.
     - 테스트: `BleManagerVirtualLookupTest`에 deprecated 생성자로 만든 `BleManager`가 같은 동작(가상 기기 조회)을 하는지 1건을 추가했습니다. `./gradlew build`(lint 포함) 통과, 샘플 앱 컴파일 통과, Fold5에서 `connectedDebugAndroidTest` 9건 통과(스캔 설정/필터 변환 포함).
-- [ ] **[구조]** `BleDevice.connect()`가 Disposable을 버립니다(fire-and-forget). 제거하거나 Disposable을 반환해야 합니다.
+- [x] **[구조]** `BleDevice.connect()`가 Disposable을 버립니다(fire-and-forget). 제거하거나 Disposable을 반환해야 합니다.
+  - ✅ 해결 (`feature/connect_disposable`): 샘플 앱이 쓰고 있어서 지우지 않고 `Disposable`을 돌려주게 했습니다. 해제하면 진행 중인 연결을 취소하고, 연결된 뒤에 해제해도 연결은 유지됩니다. 결과는 이전처럼 로그로만 남깁니다(로그 오타 `conntection` 수정, 기기 표시). KDoc에 결과가 필요하면 `connectCompletable()`을 쓰라고 적었습니다.
+    - ⚠️ 반환 타입이 `Unit`에서 `Disposable`로 바뀌었습니다. Kotlin에서 반환값을 쓰지 않던 호출은 그대로 컴파일되지만, JVM 시그니처가 바뀌므로 사용하는 앱은 다시 컴파일해야 합니다.
+    - 테스트: `ConnectDisposableTest`(3건: 연결 중 해제는 연결 취소(gatt disconnect/close, DISCONNECTED), 연결 뒤 해제는 연결 유지, 연결 실패가 RxJavaPlugins로 새지 않음).
+    - 실기기 확인(Fold5 → M446K): `connect()` 직후(CONNECTING) 해제하면 `cancel connecting` 후 DISCONNECTED로 남았고, 다시 `connect()`해서 CONNECTED가 된 뒤 해제하면 1.5초 뒤에도 CONNECTED이고 read가 정상이었습니다.
 - [ ] **[구조]** bond 상태를 1초 간격 polling으로 확인합니다. `ACTION_BOND_STATE_CHANGED` broadcast로 바꾸고 타임아웃을 추가합니다. `removeBond`는 리플렉션으로 숨겨진 API를 호출하므로 향후 막힐 수 있습니다.
 - [ ] **[구조]** 라이브러리 manifest에 `uses-feature bluetooth_le required="true"`가 있어서 사용하는 앱에 설치 제한이 강제됩니다. 또 `neverForLocation` 플래그 때문에 비콘 스캔 결과가 필터링됩니다. `required="false"`로 바꾸거나, 앱에서 `tools:replace/remove`로 덮어쓰는 방법을 문서화합니다.
 - [ ] **[구조]** notification마다 로그 문자열(hex 변환, `device.name`)을 즉시 생성합니다. 고속 스트리밍에서 비용이 큽니다. 지연 평가로 바꾸거나 별도 verbose 레벨로 분리합니다.
