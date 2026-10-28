@@ -752,10 +752,20 @@
       - 상태 스트림: 구독 즉시 `available=true` → 블루투스를 끄면 `bluetoothEnabled=false` → `createEnableBluetoothIntent()`로 연 시스템 대화상자("…에서 블루투스 켜기를 요청합니다", 허용/거부)에서 허용 → `available=true`. 모두 io 스레드에서 전달됐고 에러는 없었습니다.
       - 샘플 앱: `BLUETOOTH_CONNECT`를 회수하고 스캔을 누르면 helper 목록으로 권한을 요청하고(근처 기기 권한 대화상자), 허용 뒤 스캔 결과가 나옵니다.
       - 위치 서비스 경로(API 30 이하)는 이 장비로 확인하지 못했습니다(단위 테스트로 확인).
-- [ ] **[기능] 스캔 개선**
+- [x] **[기능] 스캔 개선**
   - 일정 시간 보이지 않는 기기를 목록에서 제거(device lost timeout)합니다.
   - `ScanInfo`에 serviceUuids, serviceData, txPower, `isConnectable`(API 26), timestamp를 추가합니다.
   - "30초 내 5회 이상 startScan" 제한(이 경우 결과 없이 조용히 실패)을 감지하거나 방지합니다.
+  - ✅ 해결 (`feature/scan_improvements`)
+    - 사라진 기기 timeout: `BleScanSettings.Builder.setDeviceLostTimeout(timeoutMillis)`(기본 0 = 사용 안 함)를 추가했습니다. 기기마다 마지막으로 보인 시각을 기록하고, 최대 1초 간격으로 확인해서 timeout 동안 다시 보이지 않은 기기를 목록에서 빼고 목록을 내보냅니다. 빠진 기기가 다시 보이면 목록 끝에 추가됩니다. MATCH_LOST 콜백과 함께 쓸 수 있습니다. 시간 확인과 목록 전달은 스캔 결과처럼 main thread에서 합니다.
+    - `ScanInfo`에 `serviceUuids`(List<UUID>), `serviceData`(Map<UUID, ByteArray>), `txPower`(광고의 TX Power Level, 없으면 확장 광고의 TX power(API 26+)), `isConnectable`(API 26+, 그 아래는 null), `timestampNanos`(`elapsedRealtimeNanos` 기준)를 추가했습니다. 광고에 없는 항목은 null입니다. 생성자에 `@JvmOverloads`를 붙여 기존 생성자(`ScanInfo(rssi)`, `ScanInfo(rssi, map, manufacturerData)`)를 Java에서도 그대로 쓸 수 있습니다.
+    - startScan 횟수 제한: Android는 앱이 30초 안에 startScan을 5번 넘게 부르면 그 스캔을 결과 없이 무시합니다(logcat에만 `scanning too frequently`). `ScanStartLimiter`가 이 프로세스에서 라이브러리가 시작한 스캔을 기록해서, 한도를 넘는 시작은 한도가 풀리는 시각(+500ms 여유)까지 미루고 경고 로그를 남깁니다. 미뤄지는 동안 구독을 해제하거나 startScan이 실패한 경우는 세지 않습니다. 같은 앱의 다른 코드가 부른 startScan은 알 수 없어서 막지 못합니다.
+    - ⚠️ 동작 변화: 30초 안에 6번째로 시작하는 스캔은 결과 없이 조용히 실패하는 대신, 시작이 늦어진 뒤 정상으로 결과를 받습니다.
+    - 테스트: `ScanInfoTest`에 4건(서비스 UUID/데이터/시각, txPower 우선순위, isConnectable은 API 26+만, 기존 생성자), `BleManagerEngineImplScanListTest`에 3건(timeout 동안 안 보인 기기 제거·계속 보이는 기기 유지·다시 보이면 추가, timeout 없으면 유지, 제거할 기기가 없으면 내보내지 않음), `ScanStartLimiterTest`(4건: 30초 안 5번 허용 후 6번째 미룸, 6번째 스캔이 허용 시각에 시작, 시작 전 해제는 세지 않음, 실패한 시작은 세지 않음). `RxTestSchedulerRule`이 main thread scheduler도 `TestScheduler`로 바꾸고 `ScanStartLimiter`를 초기화합니다.
+    - 실기기 확인(Fold5 → M446K nRF 광고, 같은 프로브를 수정 전/후 코드로 실행):
+      - 스캔 시작/정지 6번 연속(각 스캔은 nRF 광고를 찾으면 정지): 수정 전에는 1~5번째는 0.3~0.9초에 찾았지만 6번째(시작 후 2.7초)는 40초 동안 결과가 없었고, logcat에 `registerAndStartScan(): ... is scanning too frequently`, `onScannerRegistered(status=6) ... App is scanning too frequently`가 남았습니다. 수정 후에는 6번째 시작이 28.6초 미뤄진 뒤 28.9초에 기기를 찾았고, `scanning too frequently` 로그는 없었습니다.
+      - 사라진 기기 timeout(5초): nRF 광고를 끄자 약 5초 뒤 목록에서 빠졌고, 다시 켜자 바로 목록에 들어왔습니다(광고를 다시 시작해 주소가 바뀜). 목록은 main thread에서 전달됐습니다.
+      - 주변 기기의 새 항목: 서비스 UUID(예: Nordic UART `6e400001-…`), 서비스 데이터(`0000fcf1-…`, `0000fe9f-…` 등), `txPower=12`(TX Power Level을 광고하는 기기), `isConnectable` true/false, `timestampNanos`(조회 시점의 `elapsedRealtimeNanos`보다 조금 이전 값)가 채워졌습니다.
 - [ ] **[기능] 서비스/characteristic 트리 조회** — 현재 `BleCharacterisic`은 uuid와 속성 플래그만 제공합니다. 소속 service, descriptor 목록, raw properties를 제공해야 합니다.
 
 ---
