@@ -867,6 +867,10 @@
     - `--warning-mode all`로 찾은 나머지 경고(Groovy 공백 대입 문법, Gradle 10에서 제거 예정)도 고쳤습니다: 두 모듈의 `namespace`, `compileSdk`를 `=` 대입으로 바꿈.
     - 확인: `./gradlew help clean --warning-mode all`의 deprecation 경고가 10건(공백 대입 4, archivesBaseName 3, BasePluginConvention 3)에서 0건이 됐습니다. 바꾸기 전후 결과물이 같습니다: release AAR 이름 `algorigoble2-release.aar`, AAR manifest package `com.algorigo.rx.algorigoble2`, 생성된 POM(`groupId`, `artifactId` 포함)이 diff 없이 같음.
     - 이 확인 중 `./gradlew build`에서 `VirtualDeviceNotificationOrderTest`가 실패했습니다. 이 변경과 관계없이 이전 커밋에서도 단독 실행하면 실패하는 불안정한 테스트여서 아래 항목으로 따로 고쳤습니다.
+- [x] **[테스트]** (P3 작업 중 발견) `VirtualDeviceNotificationOrderTest`가 단독으로 실행하면 실패합니다. 1000개 중 앞쪽 7~8개가 빠졌습니다.
+  - ✅ 해결 (`feature/fix_notification_order_test`): 테스트의 경쟁 문제였습니다. `setupNotification`의 설정 완료가 callback 스레드로 넘어간 뒤에 안쪽 notification 스트림을 구독하는데, 테스트는 구독 직후 바로 보내기 시작해서 그 사이에 보낸 notification을 받지 못했습니다. 실기기에서도 설정이 끝나기 전의 notification은 받지 않으므로 라이브러리 동작은 맞습니다. 다른 테스트 뒤에 실행되는 전체 실행에서는 대개 통과했지만, `clean` 뒤 `./gradlew build`나 단독 실행에서는 실패했습니다(P3 작업 전 커밋 `ef8d278`에서도 같음).
+    - 표시 값이 도착할 때까지 보내서 구독이 끝난 것을 확인한 뒤, 순서를 확인할 1000개를 보내도록 고쳤습니다.
+    - 확인: 단독 실행 5번(`--rerun-tasks`) 모두 통과, `./gradlew clean build` 통과(단위 테스트 300건).
 - [x] **[구조]** `ExampleInstrumentedTest`가 항상 실패합니다. 패키지명을 `com.algorigo.algorigoble2.test`로 기대하지만, 실제 namespace는 `com.algorigo.rx.algorigoble2`입니다. 이 때문에 `connectedDebugAndroidTest` 전체 실행이 실패하므로, 수정하거나 삭제해야 합니다(`algorigoble2/src/androidTest/.../ExampleInstrumentedTest.kt`).
   - ✅ 해결 (`feature/test_coverage`): P2 "테스트 부재" 항목에서 라이브러리의 `ExampleInstrumentedTest`와 `ExampleUnitTest`를 지웠습니다. Fold5와 M446K에서 `:algorigoble2:connectedDebugAndroidTest`가 통과합니다.
 - [ ] **[구조]** (실기기) 라이브러리 로그가 2~3번씩 중복 출력되는 경우가 있습니다. 예를 들어 `doOnError` 한 번에 같은 줄이 2~3번 나옵니다. 원인은 확인하지 못했습니다. 샘플 앱의 `BluetoothService`가 `AndroidHandler`를 추가하는 방식과 logger의 handler 전파 구조를 확인해야 합니다.
