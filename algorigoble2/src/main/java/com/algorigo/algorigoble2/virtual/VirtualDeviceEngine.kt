@@ -81,6 +81,17 @@ internal class VirtualDeviceEngine(private val virtualDevice: VirtualDevice) : B
     }
 
     // 가상 기기는 쓰기 타입을 구분하지 않는다
+    override fun readDescriptorSingle(serviceUuid: UUID?, characteristicUuid: UUID, descriptorUuid: UUID): Single<ByteArray> {
+        return virtualDevice.readDescriptorSingleExternal(characteristicUuid, descriptorUuid)
+    }
+
+    override fun writeDescriptorSingle(serviceUuid: UUID?, characteristicUuid: UUID, descriptorUuid: UUID, byteArray: ByteArray): Single<ByteArray> {
+        if (descriptorUuid == CLIENT_CHARACTERISTIC_CONFIG_UUID) {
+            return Single.error(cccdWriteError())
+        }
+        return virtualDevice.writeDescriptorSingleExternal(characteristicUuid, descriptorUuid, byteArray)
+    }
+
     override fun writeCharacteristicSingle(serviceUuid: UUID?, characteristicUuid: UUID, byteArray: ByteArray, writeType: BleDevice.WriteType): Single<ByteArray> {
         return virtualDevice.writeCharacteristicSingleExternal(characteristicUuid, byteArray)
     }

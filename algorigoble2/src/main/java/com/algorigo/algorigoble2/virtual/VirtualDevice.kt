@@ -43,6 +43,26 @@ abstract class VirtualDevice(
             }
         }
 
+    fun readDescriptorSingleExternal(characteristicUuid: UUID, descriptorUuid: UUID): Single<ByteArray> = connectionStateRelay
+        .firstOrError()
+        .flatMap {
+            if (it == BleDevice.ConnectionState.CONNECTED) {
+                readDescriptorSingle(characteristicUuid, descriptorUuid)
+            } else {
+                Single.error(BleManager.DisconnectedException())
+            }
+        }
+
+    fun writeDescriptorSingleExternal(characteristicUuid: UUID, descriptorUuid: UUID, byteArray: ByteArray): Single<ByteArray> = connectionStateRelay
+        .firstOrError()
+        .flatMap {
+            if (it == BleDevice.ConnectionState.CONNECTED) {
+                writeDescriptorSingle(characteristicUuid, descriptorUuid, byteArray)
+            } else {
+                Single.error(BleManager.DisconnectedException())
+            }
+        }
+
     fun setupNotification(type: BleDevice.NotificationType, characteristicUuid: UUID): Observable<Observable<ByteArray>> = connectionStateRelay
         .switchMap {
             if (it == BleDevice.ConnectionState.CONNECTED) {
@@ -85,6 +105,14 @@ abstract class VirtualDevice(
 
     /** 연결된 동안 [BleDevice.readRssiSingle]이 돌려줄 RSSI(dBm). 기본값은 스캔 결과와 같은 0 이다. */
     open fun readRssi(): Int = 0
+
+    /** 연결된 동안 [BleDevice.readDescriptorSingle]이 부른다. 기본은 descriptor 가 없다. ([BleManager.DescriptorNotFoundException]) */
+    open fun readDescriptorSingle(characteristicUuid: UUID, descriptorUuid: UUID): Single<ByteArray> =
+        Single.error(BleManager.DescriptorNotFoundException(characteristicUuid, descriptorUuid))
+
+    /** 연결된 동안 [BleDevice.writeDescriptorSingle]이 부른다. (CCCD 는 오지 않는다) 기본은 descriptor 가 없다. */
+    open fun writeDescriptorSingle(characteristicUuid: UUID, descriptorUuid: UUID, byteArray: ByteArray): Single<ByteArray> =
+        Single.error(BleManager.DescriptorNotFoundException(characteristicUuid, descriptorUuid))
 
     abstract fun getCharacteristicsSingle(): Single<List<BleCharacterisic>>
     abstract fun readCharacteristicSingle(characteristicUuid: UUID): Single<ByteArray>

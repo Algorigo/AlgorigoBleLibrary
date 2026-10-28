@@ -39,6 +39,8 @@ class InitializableBleDeviceInitTimeoutTest {
         override fun getCharacteristicsSingle(): Single<List<BleCharacterisic>> = Single.never()
         override fun readCharacteristicSingle(serviceUuid: UUID?, characteristicUuid: UUID): Single<ByteArray> = Single.never()
         override fun writeCharacteristicSingle(serviceUuid: UUID?, characteristicUuid: UUID, byteArray: ByteArray, writeType: BleDevice.WriteType): Single<ByteArray> = Single.never()
+        override fun readDescriptorSingle(serviceUuid: UUID?, characteristicUuid: UUID, descriptorUuid: UUID): Single<ByteArray> = Single.never()
+        override fun writeDescriptorSingle(serviceUuid: UUID?, characteristicUuid: UUID, descriptorUuid: UUID, byteArray: ByteArray): Single<ByteArray> = Single.never()
         override fun setupNotification(type: BleDevice.NotificationType, serviceUuid: UUID?, characteristicUuid: UUID): Observable<Observable<ByteArray>> = Observable.never()
         override fun connectSppSocket(uuid: UUID?): Observable<BleSppSocket> = Observable.never()
         override fun requestMtuSingle(mtu: Int): Single<Int> = Single.never()

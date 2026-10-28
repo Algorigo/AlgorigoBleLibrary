@@ -60,7 +60,8 @@ internal class BleDeviceEngineImpl(
     }
 
     // 쓰기 응답은 값을 담지 않는다. (쓴 값은 요청한 쪽이 알고 있고, characteristic.value 는 다른 콜백이 덮어쓸 수 있다)
-    private data class ReplyData(val type: Type, val uuid: UUID, val byteArray: ByteArray, val status: Int) {
+    // [uuid]는 characteristic 의 UUID, [descriptorUuid]는 descriptor 응답일 때만 있다
+    private data class ReplyData(val type: Type, val uuid: UUID, val byteArray: ByteArray, val status: Int, val descriptorUuid: UUID? = null) {
         /** 콜백 status 가 실패이면 값 대신 [BleManager.GattOperationFailedException]을 던진다. */
         fun valueOrThrow(): ByteArray {
             if (status != BluetoothGatt.GATT_SUCCESS) {
@@ -76,6 +77,7 @@ internal class BleDeviceEngineImpl(
             if (uuid != other.uuid) return false
             if (!byteArray.contentEquals(other.byteArray)) return false
             if (status != other.status) return false
+            if (descriptorUuid != other.descriptorUuid) return false
             return true
         }
 
@@ -84,6 +86,7 @@ internal class BleDeviceEngineImpl(
             result = 31 * result + uuid.hashCode()
             result = 31 * result + byteArray.contentHashCode()
             result = 31 * result + status
+            result = 31 * result + (descriptorUuid?.hashCode() ?: 0)
             return result
         }
     }
@@ -252,9 +255,9 @@ internal class BleDeviceEngineImpl(
         }
 
         private fun handleDescriptorRead(gatt: BluetoothGatt?, descriptor: BluetoothGattDescriptor, value: ByteArray, status: Int) {
-            L.debug(Ble.Device.Default, "$logLabel : onDescriptorRead:${descriptor.characteristic?.uuid}:${value.toHexString()}")
+            L.debug(Ble.Device.Default, "$logLabel : onDescriptorRead:$status, ${descriptor.characteristic?.uuid}:${descriptor.uuid}:${value.toHexString()}")
             gattRequestPendingRelay.accept(false)
-            replyRelay.accept(ReplyData(Type.READ_DESCRIPTOR, descriptor.characteristic.uuid, value, status))
+            replyRelay.accept(ReplyData(Type.READ_DESCRIPTOR, descriptor.characteristic.uuid, value, status, descriptor.uuid))
         }
 
         override fun onDescriptorWrite(
@@ -263,10 +266,10 @@ internal class BleDeviceEngineImpl(
             status: Int
         ) {
             super.onDescriptorWrite(gatt, descriptor, status)
-            L.debug(Ble.Device.Default, "$logLabel : onDescriptorWrite:$status, ${descriptor?.characteristic?.uuid}")
+            L.debug(Ble.Device.Default, "$logLabel : onDescriptorWrite:$status, ${descriptor?.characteristic?.uuid}:${descriptor?.uuid}")
             descriptor?.let {
                 gattRequestPendingRelay.accept(false)
-                replyRelay.accept(ReplyData(Type.WRITE_DESCRIPTOR, it.characteristic.uuid, byteArrayOf(), status))
+                replyRelay.accept(ReplyData(Type.WRITE_DESCRIPTOR, it.characteristic.uuid, byteArrayOf(), status, it.uuid))
             }
         }
 
@@ -758,31 +761,72 @@ internal class BleDeviceEngineImpl(
         else -> null
     }
 
+    /** notification/indication 을 켜거나 끄도록 CCCD 를 쓴다. */
     private fun writeDescriptor(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, byteArray: ByteArray): Single<ByteArray> {
         return enqueue(Type.WRITE_DESCRIPTOR.name, Single.defer {
             val error = notificationSetupError(characteristic)
             if (error != null) {
                 Single.error(error)
             } else {
-                replyRelay
-                    .doOnSubscribe {
-                        val descriptor = characteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG_UUID)
-                        L.debug(Ble.Device.Default, "$logLabel : writeDescriptor : ${characteristic.uuid} : ${byteArray.toHexString()}")
-                        sendGattRequest(Type.WRITE_DESCRIPTOR.name) {
-                            if (usesValueGattApi()) {
-                                gatt.writeDescriptor(descriptor, byteArray).isGattRequestAccepted("writeDescriptor")
-                            } else {
-                                descriptor.value = byteArray
-                                gatt.writeDescriptor(descriptor)
-                            }
-                        }
-                    }
-                    .filter { it.uuid == characteristic.uuid && it.type == Type.WRITE_DESCRIPTOR }
-                    .map { it.valueOrThrow(); byteArray }
-                    .firstOrError()
+                requestWriteDescriptor(gatt, characteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG_UUID), byteArray)
                     .retryOnCommunicationFailure()
             }
         })
+    }
+
+    /** descriptor 쓰기를 요청하고 그 descriptor 의 응답을 기다린다. 작업 큐 안에서 부른다. */
+    private fun requestWriteDescriptor(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, byteArray: ByteArray): Single<ByteArray> {
+        val characteristicUuid = descriptor.characteristic.uuid
+        return replyRelay
+            .mergeWith(Completable.fromCallable {
+                L.debug(Ble.Device.Default, "$logLabel : writeDescriptor : $characteristicUuid : ${descriptor.uuid} : ${byteArray.toHexString()}")
+                sendGattRequest(Type.WRITE_DESCRIPTOR.name) {
+                    if (usesValueGattApi()) {
+                        gatt.writeDescriptor(descriptor, byteArray).isGattRequestAccepted("writeDescriptor")
+                    } else {
+                        descriptor.value = byteArray
+                        gatt.writeDescriptor(descriptor)
+                    }
+                }
+            })
+            .filter { it.type == Type.WRITE_DESCRIPTOR && it.uuid == characteristicUuid && it.descriptorUuid == descriptor.uuid }
+            .map { it.valueOrThrow(); byteArray }
+            .firstOrError()
+    }
+
+    override fun readDescriptorSingle(serviceUuid: UUID?, characteristicUuid: UUID, descriptorUuid: UUID): Single<ByteArray> {
+        return enqueue(Type.READ_DESCRIPTOR.name, getGattSingle()
+            .flatMap { gatt ->
+                getDescriptor(serviceUuid, characteristicUuid, descriptorUuid)
+                    .flatMap { descriptor ->
+                        replyRelay
+                            .mergeWith(Completable.fromCallable {
+                                L.debug(Ble.Device.Default, "$logLabel : readDescriptor : $characteristicUuid : $descriptorUuid")
+                                sendGattRequest(Type.READ_DESCRIPTOR.name) { gatt.readDescriptor(descriptor) }
+                            })
+                            .filter { it.type == Type.READ_DESCRIPTOR && it.uuid == characteristicUuid && it.descriptorUuid == descriptorUuid }
+                            .map { it.valueOrThrow() }
+                            .firstOrError()
+                    }
+                    .retryOnCommunicationFailure()
+            })
+    }
+
+    override fun writeDescriptorSingle(serviceUuid: UUID?, characteristicUuid: UUID, descriptorUuid: UUID, byteArray: ByteArray): Single<ByteArray> {
+        if (descriptorUuid == CLIENT_CHARACTERISTIC_CONFIG_UUID) {
+            return Single.error(cccdWriteError())
+        }
+        return enqueue(Type.WRITE_DESCRIPTOR.name, getGattSingle()
+            .flatMap { gatt ->
+                getDescriptor(serviceUuid, characteristicUuid, descriptorUuid)
+                    .flatMap { requestWriteDescriptor(gatt, it, byteArray) }
+                    .retryOnCommunicationFailure()
+            })
+    }
+
+    private fun getDescriptor(serviceUuid: UUID?, characteristicUuid: UUID, descriptorUuid: UUID): Single<BluetoothGattDescriptor> {
+        return getCharacteristic(serviceUuid, characteristicUuid)
+            .map { it.getDescriptor(descriptorUuid) ?: throw BleManager.DescriptorNotFoundException(characteristicUuid, descriptorUuid) }
     }
 
     override fun connectSppSocket(uuid: UUID?): Observable<BleSppSocket> = Observable.defer {
@@ -986,7 +1030,7 @@ internal class BleDeviceEngineImpl(
     companion object {
         private val LOG_TAG = BleDeviceEngineImpl::class.java.simpleName
 
-        private val CLIENT_CHARACTERISTIC_CONFIG_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+        private val CLIENT_CHARACTERISTIC_CONFIG_UUID = BleDeviceEngine.CLIENT_CHARACTERISTIC_CONFIG_UUID
         private const val MAX_RETRY_COUNT = 5
         private const val RETRY_DELAY_MILLIS = 500L
         // ATT transaction timeout(30초) + 여유
