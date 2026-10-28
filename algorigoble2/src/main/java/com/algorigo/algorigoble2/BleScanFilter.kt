@@ -1,6 +1,5 @@
 package com.algorigo.algorigoble2
 
-import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.os.Build
@@ -54,7 +53,6 @@ class BleScanFilter private constructor(
             return this
         }
 
-        @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
         fun setServiceUuid(serviceUuid: ParcelUuid?, uuidMask: ParcelUuid?): Builder {
             // 이전 값이 아니라 이번에 받은 인자를 검사한다. (uuid 없이 mask 만 있으면 스캔 시작 시 필터가 조용히 빠진다)
             require(!(uuidMask != null && serviceUuid == null)) { "uuid is null while uuidMask is not null!" }
@@ -85,7 +83,6 @@ class BleScanFilter private constructor(
             return this
         }
 
-        @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
         fun setServiceData(
             serviceDataUuid: ParcelUuid,
             serviceData: ByteArray?
@@ -96,7 +93,6 @@ class BleScanFilter private constructor(
             return this
         }
 
-        @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
         fun setServiceData(
             serviceDataUuid: ParcelUuid,
             serviceData: ByteArray, serviceDataMask: ByteArray
@@ -110,7 +106,6 @@ class BleScanFilter private constructor(
             return this
         }
 
-        @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
         fun setManufacturerData(
             manufacturerId: Int,
             manufacturerData: ByteArray?
@@ -122,7 +117,6 @@ class BleScanFilter private constructor(
             return this
         }
 
-        @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
         fun setManufacturerData(
             manufacturerId: Int,
             manufacturerData: ByteArray?,
@@ -157,22 +151,9 @@ class BleScanFilter private constructor(
         }
     }
 
-    @SuppressLint("MissingPermission")
+    // 이름, 주소 등은 startScan 에 넘긴 ScanFilter 가 걸러 주므로 여기서는 ScanFilter 에 없는 rssi 조건만 확인한다
+    @Suppress("UNUSED_PARAMETER")
     fun isOk(device: BluetoothDevice, rssi: Int, scanRecord: ByteArray?): Boolean {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            // bluetoothAdapter.bluetoothLeScanner.startScan contains name, address filter
-        } else {
-            name?.also {
-                if (device.name != it) {
-                    return false
-                }
-            }
-            deviceAddress?.also {
-                if (device.address != it) {
-                    return false
-                }
-            }
-        }
         rssiThreshold?.also {
             if (rssi < it) {
                 return false

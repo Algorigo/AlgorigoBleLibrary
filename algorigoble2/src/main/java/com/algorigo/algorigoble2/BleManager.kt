@@ -22,9 +22,18 @@ import java.util.logging.Logger
 class BleManager(
     context: Context,
     private val delegate: BleDeviceDelegate = defaultBleDeviceDelegate,
-    engine: Engine = Engine.ALGORIGO_BLE,
     virtualDevices: Array<Pair<VirtualDevice, BleDevice>> = arrayOf()
 ) : Closeable {
+
+    /** 엔진을 고르던 이전 생성자. 엔진은 하나뿐이라 [engine]은 쓰지 않는다. */
+    @Deprecated("BleManager has only one engine. Remove the engine argument.", ReplaceWith("BleManager(context, delegate, virtualDevices)"))
+    @Suppress("UNUSED_PARAMETER", "DEPRECATION")
+    constructor(
+        context: Context,
+        delegate: BleDeviceDelegate,
+        engine: Engine,
+        virtualDevices: Array<Pair<VirtualDevice, BleDevice>> = arrayOf(),
+    ) : this(context, delegate, virtualDevices)
 
     // 라이브러리가 던지는 예외. 모두 [BleException]의 하위 타입이다
 
@@ -72,8 +81,9 @@ class BleManager(
     /** 스캔을 시작하지 못한 경우. [errorCode]는 ScanCallback.SCAN_FAILED_* 값이다. */
     class ScanFailedException(val errorCode: Int) : BleException("Scan failed with error code $errorCode")
 
+    /** 이전에 엔진(RxAndroidBle/자체 구현)을 고르던 값. 지금은 자체 구현 하나뿐이다. */
+    @Deprecated("BleManager has only one engine")
     enum class Engine {
-//        RX_ANDROID_BLE,
         ALGORIGO_BLE,
     }
 
@@ -92,20 +102,11 @@ class BleManager(
         }
     }
 
-    data class ConnectionStateData(
-        val bleDevice: BleDevice,
-        val connectionState: BleDevice.ConnectionState,
-    )
-
-    private val engine: BleManagerEngine
+    private val engine: BleManagerEngine = BleManagerEngineImpl(context.applicationContext, delegate)
     // 키는 대문자 MAC. 가상 기기는 MAC 대소문자와 관계없이 찾는다
     private val virtualDevices: Map<String, BleDevice>
 
     init {
-        when (engine) {
-//            Engine.RX_ANDROID_BLE -> this.engine = RxAndroidBleEngine(context.applicationContext, delegate)
-            Engine.ALGORIGO_BLE -> this.engine = BleManagerEngineImpl(context.applicationContext, delegate)
-        }
         this.virtualDevices = virtualDevices.associate {
             Pair(
                 it.first.deviceId.uppercase(),

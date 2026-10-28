@@ -87,6 +87,20 @@ class BleManagerVirtualLookupTest {
         assertSame(lowercaseVirtual, manager.getConnectedDevice(LOWERCASE_ADDRESS.uppercase()))
     }
 
+    // 엔진을 고르던 이전 생성자도 같은 BleManager 를 만든다
+    @Suppress("DEPRECATION")
+    @Test
+    fun deprecatedEngineConstructor_stillWorks() {
+        val device = BleDevice()
+        val delegate = object : BleManager.BleDeviceDelegate() {
+            override fun createBleDevice(bluetoothDevice: BluetoothDevice, scanRecord: android.bluetooth.le.ScanRecord?) = BleDevice()
+        }
+        val legacy = BleManager(context, delegate, BleManager.Engine.ALGORIGO_BLE, arrayOf(Virtual(VALID_ADDRESS) to device))
+
+        assertSame(device, legacy.getDevice(VALID_ADDRESS))
+        assertTrue(device.virtual)
+    }
+
     companion object {
         private const val VALID_ADDRESS = "12:34:56:78:90:01"
         private const val LOWERCASE_ADDRESS = "12:34:56:78:90:ab"

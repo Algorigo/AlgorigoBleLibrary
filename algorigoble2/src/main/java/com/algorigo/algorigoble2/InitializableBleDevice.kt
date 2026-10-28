@@ -81,8 +81,6 @@ abstract class InitializableBleDevice : BleDevice() {
     }
 
     companion object {
-        private val TAG = InitializableBleDevice::class.java.simpleName
-
         const val DEFAULT_INITIALIZE_TIMEOUT_MILLIS = 30_000L
     }
 }

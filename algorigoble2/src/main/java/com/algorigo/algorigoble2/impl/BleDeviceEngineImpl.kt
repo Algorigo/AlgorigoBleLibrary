@@ -1043,8 +1043,6 @@ internal class BleDeviceEngineImpl(
     }
 
     companion object {
-        private val LOG_TAG = BleDeviceEngineImpl::class.java.simpleName
-
         private val CLIENT_CHARACTERISTIC_CONFIG_UUID = BleDeviceEngine.CLIENT_CHARACTERISTIC_CONFIG_UUID
         private const val MAX_RETRY_COUNT = 5
         private const val RETRY_DELAY_MILLIS = 500L

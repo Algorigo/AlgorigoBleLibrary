@@ -21,8 +21,8 @@ class LoggingTagInstrumentedTest {
     fun nestedTags_canBeInitializedAndUsedForLogging() {
         val tags = listOf(
             Ble,
-            Ble.Engine, Ble.Engine.Rx, Ble.Engine.Default,
-            Ble.Device, Ble.Device.Rx, Ble.Device.Default, Ble.Device.Provisioning,
+            Ble.Engine, Ble.Engine.Default,
+            Ble.Device, Ble.Device.Default,
         )
 
         tags.forEach { L.debug(it, "tag initialization check") }

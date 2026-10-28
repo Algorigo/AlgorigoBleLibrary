@@ -50,32 +50,27 @@ class BleScanSettings private constructor(
         private var mPhy = ScanSettings.PHY_LE_ALL_SUPPORTED
         private var deviceLostTimeoutMillis = 0L
 
-        @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
         fun setScanMode(scanMode: ScanMode): Builder {
             this.scanMode = scanMode
             return this
         }
 
-        @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
         fun setReportDelay(reportDelayMillis: Long): Builder {
             require(reportDelayMillis >= 0) { "reportDelay must be > 0" }
             this.reportDelayMillis = reportDelayMillis
             return this
         }
 
-        @RequiresApi(Build.VERSION_CODES.M)
         fun setNumOfMatches(numOfMatches: MatchNumber): Builder {
             numOfMatchesPerFilter = numOfMatches
             return this
         }
 
-        @RequiresApi(Build.VERSION_CODES.M)
         fun setCallbackType(callbackType: CallbackType): Builder {
             this.callbackType = callbackType
             return this
         }
 
-        @RequiresApi(Build.VERSION_CODES.M)
         fun setMatchMode(matchMode: MatchMode): Builder {
             this.matchMode = matchMode
             return this

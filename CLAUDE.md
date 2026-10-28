@@ -37,7 +37,7 @@ Git-flow with `v2/` prefixes: `v2/develop` (integration), `v2/master` (release, 
 
 Public API / engine split: user-facing classes delegate everything to `internal` abstract engines, so the platform implementation and the virtual (fake) implementation are interchangeable.
 
-- `BleManager` → `BleManagerEngine` (impl: `impl/BleManagerEngineImpl`). Handles scanning, device lookup/caching, bonded/connected device lists, and a global connection-state stream. The `Engine` enum is a vestige of a removed RxAndroidBle backend; only `ALGORIGO_BLE` exists.
+- `BleManager` → `BleManagerEngine` (impl: `impl/BleManagerEngineImpl`). Handles scanning, device lookup/caching, bonded/connected device lists, and a global connection-state stream. The deprecated `Engine` enum and the constructor taking it are a vestige of a removed RxAndroidBle backend; there is only one engine.
 - `BleDevice` → `BleDeviceEngine` (impl: `impl/BleDeviceEngineImpl`, wraps `BluetoothGatt`). `BleDevice` is `open` and meant to be subclassed by consumers for device-specific protocols; the engine is injected after construction via `initEngine()`, so subclasses need a no-arg constructor and must not touch `deviceId`/`engine` in their constructor.
 - `BleManager.BleDeviceDelegate.createBleDevice()` decides which `BleDevice` subclass to instantiate for a scanned device (return `null` to ignore it). `getDevice(mac, Class)` instead instantiates via `clazz.newInstance()`. `BleManagerEngineImpl.deviceMap` caches one `BleDevice` per `BluetoothDevice`.
 - `InitializableBleDevice` adds a post-connect `initializeCompletable()` step; until it completes, its connection state reports `INITIALIZING` even though GATT is connected, and a failed init disconnects.
