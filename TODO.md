@@ -701,8 +701,29 @@
     - 가상 기기는 연결돼 있으면 `VirtualDevice.readRssi()` 값을 돌려줍니다. 기본값은 가상 기기 스캔 결과와 같은 0이고, 하위 클래스에서 바꿀 수 있습니다(기존 하위 클래스는 수정할 필요 없음).
     - 테스트: `ReadRssiTest`(6건: 콜백 값 전달, 실패 status, 거절 후 재시도, 처리 중인 read가 끝날 때까지 기다림, 읽는 중 연결 끊김은 끊긴 사유 포함 `DisconnectedException`, 연결 전 요청은 GATT 호출 없이 실패), `VirtualDeviceRssiTest`(2건).
     - 실기기 확인(Fold5 → M446K): 연속 5회 읽기 3~13ms에 성공(-24dBm, 스캔 RSSI -39dBm). characteristic read 3건과 RSSI 읽기 3건을 동시에 요청해도 모두 성공했습니다(`[01, rssi -24, 재홍의 Jump3, rssi -22, 01, rssi -22]`, 268ms, 거절 없음). 연결이 끊긴 뒤 요청은 `DisconnectedException`.
-- [ ] **[기능] 자동 재연결 / `autoConnect` 옵션** — 현재 `autoConnect=false`로 고정되어 있고, 끊겼을 때 재연결하는 정책이 없습니다. status 133이면 재시도하는 옵션도 필요합니다.
+- [x] **[기능] 자동 재연결 / `autoConnect` 옵션** — 현재 `autoConnect=false`로 고정되어 있고, 끊겼을 때 재연결하는 정책이 없습니다. status 133이면 재시도하는 옵션도 필요합니다.
   - (실기기) 이전 연결이 끊긴 직후(1~3초 이내)에 같은 기기로 다시 연결하면, 링크가 정리되는 도중이라 `connectCompletable()`이 `DisconnectedException`으로 실패하는 경우가 2회 있었습니다. 몇 초 뒤에 다시 시도하면 성공했습니다. 연결 재시도 정책을 정할 때 이 경우도 함께 고려해야 합니다.
+  - ✅ 해결 (`feature/auto_reconnect`)
+    - `BleDevice`에 연결 정책 속성 4개를 추가했습니다. 기본값은 모두 기존 동작과 같습니다.
+      - `autoConnect`(기본 false): `connectGatt`의 autoConnect로 연결합니다. 기기가 보일 때까지 Android가 백그라운드에서 기다리므로 `timeoutMillis`를 넉넉히 줘야 합니다.
+      - `connectRetryCount`(기본 0), `connectRetryDelayMillis`(기본 1000ms): `connectCompletable()`이 연결 도중 링크가 끊겨 실패하면(`DisconnectedException`: status 133, 직전 연결이 정리되는 중 등. 서비스 탐색 실패 포함) 이전 연결이 완전히 끊길 때까지 기다린 뒤 지연 시간만큼 쉬고 다시 시도합니다. `timeoutMillis`는 시도마다 적용됩니다.
+        - 다시 시도하지 않는 에러: 연결 타임아웃(사용자가 정한 시간), 블루투스 꺼짐, 권한 없음, 상태 오류, status 0x87(Android가 요청 자체를 거절. 아래 실기기 확인 참고), 초기화 중 read/write의 GATT 실패 status(다시 해도 같음).
+      - `autoReconnect`(기본 false): `connectCompletable()`로 연결된 뒤 `disconnect()`를 부르지 않았는데 끊기면, 마지막 연결과 같은 `timeoutMillis`/`autoConnect`로 다시 연결합니다. 실패하면 `connectRetryDelayMillis`마다 계속 시도합니다(기기가 아직 안 보이는 연결 타임아웃도 다시 시도).
+        - `disconnect()`, `connectCompletable()` 호출, `autoReconnect = false`, `BleManager.close()`로 멈춥니다. 연결에 실패한 `connectCompletable()`은 재연결 대상이 되지 않습니다. 이미 연결된 상태에서 `connectCompletable()`을 다시 불러 실패한 경우에는 기존 연결의 재연결 설정을 유지합니다.
+        - 블루투스가 꺼지면 재연결을 멈췄다가, 다시 켜지면(`BleManagerEngineImpl`의 receiver가 `STATE_ON`을 받으면) 이어서 연결합니다.
+        - 재연결 중의 상태는 공개 연결 상태에서 `DISCONNECTED → CONNECTING → (INITIALIZING →) CONNECTED`로 보입니다.
+    - 구조: 재시도와 재연결은 엔진이 아니라 `BleDevice`에서 합니다. 연결 시도 한 번을 `connectOnce()`(internal open)로 나누고 `InitializableBleDevice`가 여기에 초기화를 붙여서, 다시 시도하거나 다시 연결할 때도 `initializeCompletable()`이 실행됩니다. 엔진은 끊김을 `bleDevice.notifyDisconnected()`로 알립니다(`onDisconnected()` 호출 후 필요하면 재연결 예약). CLAUDE.md에 적었습니다.
+    - ⚠️ 동작 변화:
+      - `InitializableBleDevice`의 `initializeCompletable()`이 GATT 연결 직후 callback 스레드(io)에서 실행됩니다. 이전에도 `connectCompletable()`의 결과가 callback 스레드로 넘어온 뒤 실행됐으므로 실행 스레드는 같습니다.
+      - 초기화에 실패하면 엔진 연결만 끊습니다(이전에는 공개 `disconnect()`). 연결이 끊기는 동작은 같고, 재시도/재연결 설정을 지우지 않는 점만 다릅니다.
+      - `connectCompletable(timeoutMillis)`를 override 해서 연결 뒤 단계를 추가한 하위 클래스는, 자동 재연결 때 그 단계가 실행되지 않습니다(재연결은 `connectOnce()`를 부름). 연결 뒤 단계가 필요하면 `InitializableBleDevice`를 써야 합니다. KDoc에 적었습니다.
+    - 테스트: `AutoReconnectTest`(17건: autoConnect 전달, 기본은 재시도 없음, 지연 후 재시도, 재시도 소진 시 마지막 에러, 타임아웃/블루투스 꺼짐/0x87은 재시도 안 함, 서비스 탐색 실패는 재시도하고 초기화 GATT 실패는 안 함, 기본은 재연결 없음, 끊기면 autoConnect 설정으로 재연결, 성공할 때까지 계속 시도, disconnect()로 진행 중인 재연결 취소, 사용자 disconnect 후 재연결 안 함, autoReconnect=false로 멈춤, 이미 연결된 상태의 connect 실패는 재연결 유지, 실패한 연결은 재연결 안 함, 블루투스 꺼짐 동안 멈췄다 켜지면 재연결, Initializable 재연결 시 다시 초기화, 초기화 중 끊김은 재시도), `BleManagerEngineImplReconnectTest`(2건: `STATE_ON` 방송으로 재연결 재개, `close()`가 대기 중인 재연결을 멈춤).
+    - 실기기 확인(Fold5 → M446K):
+      - 상대 기기가 끊음(nRF에서 DISCONNECT): status 19로 끊긴 뒤 1초 후 재연결 시작, 0.5초 만에 CONNECTED, 재연결 후 read 정상. 이후 `disconnect()`하면 5초 동안 DISCONNECTED 유지(다시 연결하지 않음).
+      - `InitializableBleDevice` + autoReconnect: 상태 `DISCONNECTED → CONNECTING → INITIALIZING → CONNECTED`, 초기화(read 포함)가 두 번 실행됐고 둘 다 io 스레드(`RxCachedThreadScheduler`)에서 실행. 기존 초기화 프로브(초기화 실패, 초기화 중 dispose, 초기화 타임아웃) 결과는 이전과 같습니다.
+      - Fold5 블루투스 끄기/켜기: 꺼지면 DISCONNECTED → 1초 후 재연결 시도가 `BluetoothDisabledException`으로 멈춤(`reconnect stopped until bluetooth is enabled`) → 블루투스를 켜면 1초 후 재연결 → CONNECTED, read 정상.
+      - `autoConnect = true`: M446K(nRF)는 본딩하지 않은 상태에서 주기적으로 바뀌는 주소(RPA)로 광고하므로, Android가 백그라운드 연결 목록에 넣지 못하고(`Unable to add RPA ... to background connection`) 83~102ms 만에 status 135(0x87, GATT_ILLEGAL_PARAMETER)로 실패했습니다. 다시 해도 같으므로 재시도하지 않도록 했고(`connectRetryCount = 3`에서도 connectGatt 1회), autoConnect KDoc에 적었습니다. 본딩한 기기나 고정 주소 기기에서의 autoConnect 연결은 이 장비로 확인하지 못했습니다(두 폰을 본딩하지 않음).
+      - 위에 적힌 "끊긴 직후 재연결 실패"는 이번에는 재현되지 않았습니다(같은 프로세스에서 끊김 직후 0ms/1000ms 뒤 재연결 50회, 별도 프로세스로 연달아 7회 모두 성공). 같은 증상(`DisconnectedException`)은 `connectRetryCount`로 다시 시도됩니다(단위 테스트로 확인).
 - [ ] **[기능] 일반 descriptor read/write API** — 현재는 CCCD 쓰기만 내부에서 사용합니다. `Type.READ_DESCRIPTOR`는 정의되어 있지만 쓰이지 않습니다.
 - [ ] **[기능] 블루투스 어댑터 상태와 권한 상태 공개 API** — 내부의 `scanAvailableObservable`을 `BleManager`에서 공개하고, BT 활성화 요청과 필요한 권한 목록을 제공하는 helper를 추가합니다.
 - [ ] **[기능] 스캔 개선**
