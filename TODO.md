@@ -443,7 +443,16 @@
     - 규칙은 API 33의 `ScanRecord.getAdvertisingDataMap()`과 맞췄습니다. 길이가 0이면(뒤쪽 0 padding) 끝내고, 광고 데이터와 scan response에 같은 type이 있으면 마지막 값을 씁니다. 길이가 남은 바이트를 넘는 잘못된 structure를 만나면 그 앞까지만 돌려줍니다.
     - 테스트: `ScanInfoTest`(5건). 수정 전 코드에서는 `ScanInfo` 경로 테스트가 빈 map으로 실패했습니다(나머지 4건은 새 파서의 경계 조건 테스트라 수정 전 코드에는 해당 함수가 없음).
     - 실기기 확인(Fold5 Android 17): API 32 이하 실기기가 없어서, 대신 실제로 수신한 광고 레코드에 대해 새 파서 결과와 플랫폼 `advertisingDataMap`을 비교했습니다. 필터 없이 10초 스캔한 **1443건(기기 98개, AD type 9종: 0x01/02/03/07/09/0a/16/21/ff)이 모두 일치**했습니다. M446K nRF 광고는 `{0x01=02, 0x09=재홍의 Jump3(UTF-8), 0xff=59000102030405}`로 파싱됐습니다.
-- [ ] **[버그] `BleScanFilter.Builder` 검증이 파라미터가 아니라 이전 필드 값을 검사함** — `BleScanFilter.kt:59, 103, 134`. 그래서 mask와 data의 길이가 달라도 검증을 통과하고, 스캔을 시작할 때 Android `ScanFilter.Builder`에서 `IllegalArgumentException`이 납니다.
+- [x] **[버그] `BleScanFilter.Builder` 검증이 파라미터가 아니라 이전 필드 값을 검사함** — `BleScanFilter.kt:59, 103, 134`. 그래서 mask와 data의 길이가 달라도 검증을 통과하고, 스캔을 시작할 때 Android `ScanFilter.Builder`에서 `IllegalArgumentException`이 납니다.
+  - ✅ 해결 (`feature/scan_filter_validation`)
+    - `setServiceUuid(uuid, mask)`, `setServiceData(uuid, data, mask)`, `setManufacturerData(id, data, mask)`가 **이번 호출의 인자**를 검사합니다. mask가 있는데 uuid/data가 없거나, data와 mask의 길이가 다르면 빌더에서 바로 `IllegalArgumentException`이 납니다.
+    - 함께 고쳐진 문제: 이전 호출의 잘못된 값을 검사했기 때문에, 잘못된 값을 설정한 뒤 올바른 값으로 다시 설정하면 오히려 실패했습니다.
+    - ⚠️ 동작 변경: uuid 없이 mask만 넘기는 `setServiceUuid(null, mask)`는 이제 실패합니다. 이전에는 통과했지만 스캔을 시작할 때 uuid가 없어서 필터가 조용히 빠졌습니다.
+    - 테스트: `BleScanFilterTest`(6건). 수정 전 코드에서는 5건이 실패했습니다. 나머지 1건은 올바른 mask가 저장되는지 확인하는 보호 테스트입니다.
+    - 실기기 확인(Fold5 → M446K nRF 광고, manufacturer data `0x0059 / 0102030405`):
+      - 길이가 다른 mask(data 5바이트, mask 2바이트): 수정 전에는 빌더를 통과하고 **스캔을 시작할 때** `IllegalArgumentException`. 수정 후에는 **빌더에서** 바로 같은 예외.
+      - 잘못된 값 뒤에 올바른 값(`0102000000` / mask `FFFF000000`) 다시 설정: 수정 전에는 **올바른 호출이 실패**. 수정 후에는 통과하고 이 prefix mask로 M446K를 434ms 만에 찾았습니다.
+      - 앞 2바이트가 다른 mask(`0103…`)는 수정 전후 모두 8초 동안 찾지 못했습니다(mask가 실제로 적용됨).
 - [ ] **[버그] 런타임 권한을 확인하지 않음** — 전역 `@SuppressLint("MissingPermission")`. API 31 이상에서 `BLUETOOTH_SCAN/CONNECT`가 없으면 `deviceName`, `bonded`, `toString()`, 로그 출력에서도 `SecurityException`이 납니다. 작업 전에 권한을 확인하고 명확한 예외(`PermissionDeniedException`)를 내야 합니다.
 - [ ] **[버그] characteristic을 UUID로만 찾음** — `impl/BleDeviceEngineImpl.kt:451-465`. 여러 서비스에 같은 UUID가 있으면 첫 번째 것이 선택됩니다. 찾지 못하면 메시지 없는 `IllegalStateException()`이 납니다. serviceUuid를 받는 오버로드와 `CharacteristicNotFoundException`을 추가해야 합니다.
 - [ ] **[버그] CCCD descriptor가 없으면 NPE** — `impl/BleDeviceEngineImpl.kt:475`. 원인을 알기 어려운 에러가 나옵니다.
