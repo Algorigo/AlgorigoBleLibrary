@@ -32,17 +32,42 @@ internal class VirtualDeviceEngine(private val virtualDevice: VirtualDevice) : B
     }
 
     override fun connectCompletable(timeoutMillis: Long): Completable {
+        val relay = virtualDevice.connectionStateRelay
         return Completable.timer(100, TimeUnit.MILLISECONDS)
             .doOnSubscribe {
-                virtualDevice.connectionStateRelay.accept(BleDevice.ConnectionState.CONNECTING)
+                relay.accept(BleDevice.ConnectionState.CONNECTING)
             }
-            .doOnComplete {
-                virtualDevice.connectionStateRelay.accept(BleDevice.ConnectionState.CONNECTED)
+            .andThen(Completable.fromAction {
+                synchronized(relay) {
+                    // 연결 중에 disconnect() 가 불렸으면 실기기처럼 연결하지 않고 실패한다
+                    if (relay.value != BleDevice.ConnectionState.CONNECTING) {
+                        throw BleManager.DisconnectedException()
+                    }
+                    relay.accept(BleDevice.ConnectionState.CONNECTED)
+                }
+            })
+            .doOnDispose {
+                // 연결이 끝나기 전에 구독을 해제하면 연결 시도를 취소한다
+                synchronized(relay) {
+                    if (relay.value == BleDevice.ConnectionState.CONNECTING) {
+                        relay.accept(BleDevice.ConnectionState.DISCONNECTED)
+                    }
+                }
             }
     }
 
     override fun disconnect() {
-        virtualDevice.connectionStateRelay.accept(BleDevice.ConnectionState.DISCONNECTED)
+        val wasDisconnected = synchronized(virtualDevice.connectionStateRelay) {
+            (virtualDevice.connectionStateRelay.value == BleDevice.ConnectionState.DISCONNECTED).also {
+                if (!it) {
+                    virtualDevice.connectionStateRelay.accept(BleDevice.ConnectionState.DISCONNECTED)
+                }
+            }
+        }
+        // 실기기 엔진처럼 연결이 끊기면 알린다. (InitializableBleDevice 는 여기서 초기화 상태를 되돌린다)
+        if (!wasDisconnected) {
+            bleDevice.onDisconnected()
+        }
     }
 
     override fun getCharacteristicsSingle(): Single<List<BleCharacterisic>> {
