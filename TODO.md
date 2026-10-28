@@ -421,7 +421,12 @@
       - 수정 전: 스캔 기기 116개 → 캐시 116개, 상태 이벤트 **116건(모두 처음 DISCONNECTED)**, GC 후에도 **116개**가 남음.
       - 수정 후: 스캔 기기 79개 → 상태 이벤트 **0건**, GC 후 캐시 **1개**(프로브가 들고 있는 S23, 같은 인스턴스).
       - S23 연결 후 프로브가 참조를 버리고 GC: 수정 전과 후 모두 연결된 기기 1개(같은 인스턴스)가 유지되고 Device Name read가 정상이었습니다. 연결부터 해제까지의 이벤트는 수정 후 4건(CONNECTING → CONNECTED → DISCONNECTING → DISCONNECTED)이었습니다.
-- [ ] **[버그] API ≤ 30에서 위치 provider가 바뀌면 스캔이 중복 실행됨** — `impl/BleManagerEngineImpl.kt:84`. `combineLatest`가 `(true, true)`를 다시 내보내면 `flatMap`이 두 번째 스캔을 시작합니다. 그러면 두 스캔의 목록이 번갈아 전달됩니다. `distinctUntilChanged()`와 `switchMap`을 사용해야 합니다.
+- [x] **[버그] API ≤ 30에서 위치 provider가 바뀌면 스캔이 중복 실행됨** — `impl/BleManagerEngineImpl.kt:84`. `combineLatest`가 `(true, true)`를 다시 내보내면 `flatMap`이 두 번째 스캔을 시작합니다. 그러면 두 스캔의 목록이 번갈아 전달됩니다. `distinctUntilChanged()`와 `switchMap`을 사용해야 합니다.
+  - ✅ 해결 (`feature/scan_restart_on_provider_change`)
+    - 스캔 가능 상태에 `distinctUntilChanged()`를 적용해서, 상태가 그대로인 broadcast로는 스캔을 다시 시작하지 않습니다. 스캔 시작은 `flatMap` 대신 `switchMap`으로 바꿔서, 상태가 다시 나오더라도 이전 스캔을 멈추고 하나만 유지합니다.
+    - 함께 수정: API 30에서는 위치 provider 변경 broadcast의 `EXTRA_PROVIDER_ENABLED`를 위치 사용 가능 여부로 썼습니다. 이 값은 **바뀐 provider 하나의 상태**라서, 다른 provider가 켜져 있어도 false가 되어 `LocationUnavailableException`으로 스캔이 끝날 수 있습니다. 이제 broadcast를 받을 때마다 `LocationManagerCompat.isLocationEnabled()`로 다시 읽습니다. (API 30 실기기가 없어 코드로만 확인)
+    - 테스트: `BleManagerEngineImplScanAvailabilityTest`(4건, 단위 테스트의 SDK_INT가 0이라 API 30 이하 경로를 탐). 수정 전 코드에서는 2건이 실패했습니다(위치가 켜진 채 provider가 바뀌면 `startScan` 2회). 나머지 2건은 위치가 꺼지거나 블루투스가 꺼지면 기존처럼 에러로 끝나고 스캔을 멈추는지 확인하는 보호 테스트입니다.
+    - 실기기 확인(Fold5 Android 17): API 31 이상은 위치 상태를 보지 않으므로 이 경로를 실기기에서 재현할 수는 없었고, 회귀만 확인했습니다. manufacturer data 필터 스캔 26초 동안 위치 끄기/켜기(`cmd location set-location-enabled`) → 블루투스 끄기를 했습니다. 스캔은 1번만 등록됐고(빈 목록 전달 1회), 위치 토글에는 영향이 없었으며, 블루투스를 끄자 `BluetoothUnavailableException`으로 끝나고 `stopScan`이 호출됐습니다.
 - [ ] **[버그] `CALLBACK_TYPE_MATCH_LOST`를 처리하지 않음** — `impl/BleScanner.kt:20`. `callbackType`을 무시하므로, 사라진 기기도 발견된 기기로 목록에 추가됩니다.
 - [ ] **[버그] API 32 이하에서 `ScanInfo.advertisingDataMap`이 항상 비어 있음** — `ScanInfo.kt:20-27`. `bytes`를 읽기만 하고 파싱하지 않은 채 빈 map을 반환합니다. AD structure(length-type-value)를 직접 파싱해야 합니다.
 - [ ] **[버그] `BleScanFilter.Builder` 검증이 파라미터가 아니라 이전 필드 값을 검사함** — `BleScanFilter.kt:59, 103, 134`. 그래서 mask와 data의 길이가 달라도 검증을 통과하고, 스캔을 시작할 때 Android `ScanFilter.Builder`에서 `IllegalArgumentException`이 납니다.
