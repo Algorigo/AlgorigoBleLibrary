@@ -610,7 +610,37 @@
       - read 결과를 1초 동안 처리하는 구독자 바로 뒤에 요청한 read(3회): 수정 전 **1109~1190ms** → 수정 후 108~137ms.
       - CONNECTED를 1.5초 동안 처리하는 상태 관찰자가 있을 때 다른 스레드의 `disconnect()`: 수정 전 **1511ms** 대기 → 수정 후 7ms.
       - 회귀(MTU, read, 응답 있는/없는 write, CCCD) 정상.
-- [ ] **[구조] 예외 계층 정리** — 현재 `IllegalStateException`, `RuntimeException("Error")`, `NoSuchElementException`, `BleManager.DisconnectedException` 등이 섞여 있습니다. `sealed class BleException`(Disconnected(status), GattError(status), Timeout, CharacteristicNotFound, PermissionDenied, BondFailed(reason), BluetoothDisabled)로 통일하고 **연결 끊김 사유(HCI status)**를 노출합니다.
+- [x] **[구조] 예외 계층 정리** — 현재 `IllegalStateException`, `RuntimeException("Error")`, `NoSuchElementException`, `BleManager.DisconnectedException` 등이 섞여 있습니다. `sealed class BleException`(Disconnected(status), GattError(status), Timeout, CharacteristicNotFound, PermissionDenied, BondFailed(reason), BluetoothDisabled)로 통일하고 **연결 끊김 사유(HCI status)**를 노출합니다.
+  - ✅ 해결 (`feature/ble_exception_hierarchy`)
+    - 공통 상위 타입 `BleException`을 추가했습니다. 라이브러리가 BLE 작업 실패로 던지는 예외는 모두 이 타입이라 `catch (e: BleException)`으로 받을 수 있습니다.
+      - sealed가 아니라 abstract로 했습니다. 공개 타입 `exception.SystemServiceException`이 다른 패키지에 있어 sealed의 하위 타입이 될 수 없고, 라이브러리가 나중에 예외를 추가하면 사용하는 쪽의 exhaustive `when`이 컴파일 오류가 나기 때문입니다.
+      - 기존 예외 이름과 위치(`BleManager.XxxException`)는 그대로 두고 상위 타입만 바꿨습니다.
+    - 연결 끊김 사유: `DisconnectedException(status)`. `onConnectionStateChange`의 status(예: 8 연결 타임아웃, 19 상대 기기가 끊음, 22 호스트가 끊음, 62 연결 수립 실패, 133 GATT_ERROR)를 진행 중이던 작업, notification 스트림, 연결 시도의 에러로 전달합니다. 이 앱이 `disconnect()`로 끊었거나 사유를 모르면 null.
+    - 정리한 타입(모두 `BleManager` 안):
+      - `DisconnectedException(status)` / 하위 `BluetoothDisabledException`(블루투스가 꺼져 끝난 작업·연결, `connectGatt`가 null을 돌려준 경우. 이전 `ConnectFailedException("bluetooth is disabled" 등)`)
+      - `OperationTimeoutException(operation, timeoutMillis)`: 연결(CONNECT), 초기화(INITIALIZE), GATT 작업 타임아웃. 이전 `java.util.concurrent.TimeoutException`.
+      - `GattOperationFailedException(operation, status)` / 하위 `MtuChangeFailedException`
+      - `GattRequestRejectedException(operation)`: 이전 내부 전용 `CommunicationFailedException`(재시도 후에도 거절됨)
+      - `IllegalCharacteristicPropertyException(characteristicUuid, properties, operation)`: 이전 내부 전용 `IllegalCharacteristicProperty`(메시지 없음)
+      - `InvalidConnectionStateException(state, expected)`: 이미 연결 중인데 connect 등. 이전 `IllegalStateException`.
+      - `NotificationTypeConflictException`, `ScanFailedException(errorCode)`: 이전 `IllegalStateException`.
+      - `ConnectFailedException`, `CharacteristicNotFoundException`, `DescriptorNotFoundException`, `PermissionDeniedException`, `BondFailedException`(예상하지 못한 bond 상태도 포함), `exception.SystemServiceException`
+    - 표준 예외로 남긴 것: 잘못된 인자(`IllegalArgumentException`), SPP 소켓 I/O(`IOException`)와 받은 데이터 없음(`NoSuchElementException`, 샘플 앱이 이 값으로 "데이터 없음"을 처리), 가상 기기의 SPP 미지원(`UnsupportedOperationException`).
+    - 함께 수정: 블루투스 상태 broadcast에 알 수 없는 값이 오면 `IllegalStateException`으로 스캔이 끝났는데, 이제 STATE_ON이 아니면 블루투스를 쓸 수 없는 것으로 처리합니다.
+    - BondFailed(reason)는 사유를 넣지 않았습니다. 현재 bond가 1초 polling이라 사유를 알 수 없습니다(P3 "bond 상태 broadcast" 항목에서 가능).
+    - ⚠️ 동작 변경(사용하는 코드의 catch 확인 필요):
+      - 타임아웃을 `java.util.concurrent.TimeoutException`으로 잡던 코드는 `BleManager.OperationTimeoutException`으로 바꿔야 합니다.
+      - 이미 연결 중인데 connect, GATT 연결 중 SPP 연결의 `IllegalStateException` → `InvalidConnectionStateException`.
+      - 블루투스가 꺼진 경우의 `ConnectFailedException` → `BluetoothDisabledException`(DisconnectedException 하위).
+      - 이번 개발 중에 추가한 `PermissionDeniedException`(SecurityException 상속)과 `CharacteristicNotFoundException`/`DescriptorNotFoundException`(IllegalStateException 상속)은 `BleException`을 상속하도록 바꿨습니다.
+    - CLAUDE.md에 예외 규칙을 적고, 오래된 엔진 설명(작업 큐 없음, `serviceSingle` 캐시)을 현재 구조로 고쳤습니다.
+    - 테스트: `BleExceptionTest`(9건: 모든 예외의 상위 타입, 원격 끊김 status가 작업·notification·연결 시도로 전달, 로컬 끊김은 null, 블루투스 꺼짐, 타임아웃의 작업 이름, 거절 후 재시도, MTU 실패 타입, 연결 상태 오류). 새 타입을 쓰므로 수정 전 코드에서는 컴파일되지 않습니다(수정 전 동작은 아래 실기기 결과로 비교). 기존 테스트 25건의 기대 예외를 새 타입으로 바꿨습니다.
+    - 실기기 확인(Fold5 → M446K. 같은 프로브를 수정 전/후 코드로 실행. 상대 기기 끊김은 연결 중 호스트에서 M446K의 블루투스를 끔):
+      - 도달할 수 없는 주소 연결 3초: `java.util.concurrent.TimeoutException: The source did not signal an event for 3000 milliseconds…` → `OperationTimeoutException: CONNECT timed out after 3000ms`
+      - 연결된 상태에서 다시 connect: `IllegalStateException` → `InvalidConnectionStateException`
+      - read 전용 `2a38`에 notification: 내부 클래스 `BleDeviceEngineImpl$IllegalCharacteristicProperty`(메시지 null) → `IllegalCharacteristicPropertyException: Characteristic 00002a38-… does not support NOTIFY/INDICATE (properties 0x2)`
+      - 상대 기기 블루투스 꺼짐(스택 로그 `onConnectionStateChange 19 -> 0`): notification 에러가 `DisconnectedException`(status 없음, 메시지 null) → `DisconnectedException: Disconnected (status 19, 0x13)`, `status=19`
+      - 수정 전에는 위 예외가 모두 공통 타입이 없었고, 수정 후에는 모두 `BleException`이었습니다.
 - [ ] **[구조] 테스트 부재** — 예제 테스트만 있습니다. 순수 로직(`BleScanFilter`, `ScanInfo` 파싱, `BleScanOptionsConverter`, `collectListLastSortedIndex`) 단위 테스트, mock `BluetoothGatt`로 engine 상태 전이 테스트(Robolectric/MockK), `VirtualDevice` 기반 통합 테스트를 추가해야 합니다. 이를 위해 `BleDeviceEngineImpl`의 GATT 의존성을 주입 가능하게 만들어야 합니다.
 - [ ] **[구조] BLE와 Classic(SPP) 책임 분리** — `BleSppSocket`은 BLE가 아니라 RFCOMM인데 같은 상태 머신(`stateRelay`)을 공유합니다. 별도 클래스나 모듈로 분리하는 것을 검토합니다.
 
