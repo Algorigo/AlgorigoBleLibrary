@@ -569,7 +569,14 @@
       - 수정 후 `close()` 없이: GC 후 5개 → 블루투스를 껐다 켠 뒤 **0개**(receiver가 스스로 해제).
       - 수정 후 `close()` 호출: 바로 **0개**.
       - 회귀: 살아 있는 매니저로 M446K에 연결한 상태에서 블루투스를 끄면 기존처럼 CONNECTED → DISCONNECTED로 정리됐습니다.
-- [ ] **[버그] `getDevice()`가 가상 기기보다 실제 엔진을 먼저 조회함 (실기기)** — `BleManager.kt:88-91`, `impl/BleManagerEngineImpl.kt:125-140`
+- [x] **[버그] `getDevice()`가 가상 기기보다 실제 엔진을 먼저 조회함 (실기기)** — `BleManager.kt:88-91`, `impl/BleManagerEngineImpl.kt:125-140`
+  - ✅ 해결 (`feature/get_virtual_device_first`)
+    - `getDevice`, `getBondedDevice`, `getConnectedDevice`가 가상 기기를 먼저 조회합니다. 등록된 가상 기기의 MAC이면 엔진을 조회하지 않습니다.
+    - 가상 기기는 MAC 대소문자를 구분하지 않고 찾습니다(내부 키를 대문자로 저장). 실제 기기 MAC 입력을 정규화하는 것은 P3 항목으로 남겨 두었습니다.
+    - 테스트: `BleManagerVirtualLookupTest`(4건, 실제처럼 대문자 MAC만 받는 `getRemoteDevice` mock). 수정 전 코드에서는 3건이 실패했습니다(유효한 MAC의 가상 기기 대신 실제 기기, 대문자로 조회하면 실제 기기, 연결된 가상 기기를 대소문자 다르게 조회하면 null). 나머지 1건은 다른 MAC은 실제 기기를 돌려주는지 확인합니다.
+    - 실기기 확인(Fold5, 가상 기기 `12:34:56:78:90:01`, `12:34:56:78:90:ab` 등록):
+      - 수정 전: `getDevice("…:01")`과 `getDevice("…:AB")`가 **실제 기기**(`virtual=false`)를 돌려줬고, 그 기기로 연결하면 5초 타임아웃. `getRemoteDevice error` 로그 2건.
+      - 수정 후: 세 조회 모두 가상 기기, `…:01` 연결 104ms 성공, 에러 로그 0건.
   - `BleManager.getDeviceInner()`는 `engine.getDevice()`를 먼저 호출하고, 결과가 없을 때만 `virtualDevices`를 봅니다.
   - 샘플 앱의 가상 MAC(`12:34:56:78:90:ab`)은 소문자라서 `getRemoteDevice()`가 `IllegalArgumentException`을 던집니다. 그래서 가상 기기를 조회할 때마다 에러 로그와 스택트레이스가 남습니다(실기기 확인).
   - 가상 MAC이 대문자(유효한 주소)라면 엔진이 실제 `BleDevice`를 만들어 반환하므로, **가상 기기 대신 존재하지 않는 실제 기기가 반환됩니다**. 이 경우는 코드로만 확인했습니다.

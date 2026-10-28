@@ -73,6 +73,7 @@ class BleManager(
     )
 
     private val engine: BleManagerEngine
+    // 키는 대문자 MAC. 가상 기기는 MAC 대소문자와 관계없이 찾는다
     private val virtualDevices: Map<String, BleDevice>
 
     init {
@@ -82,7 +83,7 @@ class BleManager(
         }
         this.virtualDevices = virtualDevices.associate {
             Pair(
-                it.first.deviceId,
+                it.first.deviceId.uppercase(),
                 this.engine.initVirtualDevice(it.first, it.second.apply { virtual = true })
             )
         }
@@ -109,12 +110,16 @@ class BleManager(
     }
     fun getDevice(macAddress: String) = getDeviceInner<BleDevice>(macAddress)
     fun <T : BleDevice> getDevice(macAddress: String, clazz: Class<T>) = getDeviceInner(macAddress, clazz)
+    // 가상 기기를 먼저 찾는다. 엔진을 먼저 조회하면 가상 기기의 MAC 이 유효한 주소일 때 존재하지 않는 실제 기기를 만들어 돌려주고,
+    // 유효하지 않은 주소(소문자 등)이면 조회할 때마다 getRemoteDevice 에러 로그가 남는다
+    private fun virtualDevice(macAddress: String) = virtualDevices[macAddress.uppercase()]
+
     private fun <T : BleDevice> getDeviceInner(macAddress: String, clazz: Class<T>? = null): T? {
-        return (engine.getDevice(macAddress, clazz) as? T)
-            ?: virtualDevices[macAddress] as? T
+        virtualDevice(macAddress)?.let { return it as? T }
+        return engine.getDevice(macAddress, clazz) as? T
     }
-    fun getBondedDevice(macAddress: String) = engine.getBondedDevice(macAddress)
-        ?: virtualDevices[macAddress]
+    fun getBondedDevice(macAddress: String) = virtualDevice(macAddress)
+        ?: engine.getBondedDevice(macAddress)
     fun getBondedDevices() = engine.getBondedDevices()
         .let { devices ->
             devices + virtualDevices.values.filter { virtual ->
@@ -122,8 +127,8 @@ class BleManager(
             }
         }
     fun getConnectedDevice(macAddress: String): BleDevice? {
+        virtualDevice(macAddress)?.let { return if (it.connected) it else null }
         return engine.getConnectedDevice(macAddress)
-            ?: virtualDevices[macAddress]?.let { if (it.connected) it else null }
     }
     fun getConnectedDevices(): List<BleDevice> {
         return engine.getConnectedDevices()
