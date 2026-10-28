@@ -846,7 +846,11 @@
     - ⚠️ 동작 변화: 로그 레벨을 DEBUG로 둔 앱에서는 notification 수신 로그가 더 이상 보이지 않습니다(VERBOSE로 두면 보임).
     - 테스트: `LazyLogTest`(2건: 로그가 꺼져 있으면 notification 100개에 기기 이름 조회 0번·로그 0건, DEBUG에서는 notification 로그가 없고 VERBOSE에서는 남음). 수정 전 코드로 실행하면 둘 다 실패합니다(이름 조회 100번, DEBUG에서 10번).
     - 실기기 확인(Fold5, M446K에 연결한 상태에서 엔진의 notification 콜백을 20바이트 값으로 1만 번 호출, 로그 레벨 INFO): 수정 전 506.5µs → 수정 후 2.1µs(notification 하나당). 같은 기기에서 `BluetoothDevice.name` 한 번이 약 330µs여서, 수정 전 비용의 대부분이 이름 조회 IPC였습니다.
-- [ ] **[구조]** `getDevice(mac)`에서 `getRemoteDevice`는 대문자 MAC만 허용합니다. 입력을 정규화해야 합니다.
+- [x] **[구조]** `getDevice(mac)`에서 `getRemoteDevice`는 대문자 MAC만 허용합니다. 입력을 정규화해야 합니다.
+  - ✅ 해결 (`feature/normalize_mac`): `BleManager.getDevice`/`getBondedDevice`/`getConnectedDevice`가 MAC을 `"AA:BB:CC:DD:EE:FF"` 형식으로 바꿔 조회합니다. 대소문자, 구분자(`:`, `-`, 없음), 앞뒤 공백과 관계없이 받습니다. MAC 형식이 아닌 문자열은 대문자로만 바꾸고, 엔진 조회에서 null이 됩니다(이전과 같이 예외 없음). 가상 기기 id도 같은 방식으로 정규화해서 찾습니다.
+    - 샘플 앱은 MAC 형식을 직접 바꾸던 코드(정규식, `String.split` 확장 함수)를 지우고 입력을 그대로 넘깁니다. 이전에는 소문자 `aa:bb:...` 입력이 정규식을 통과한 뒤 `getDevice`가 null을 돌려줘 `!!`에서 NPE가 났습니다.
+    - 테스트: `MacAddressNormalizationTest`(5건: 정규화 형식, 소문자·구분자 없는 주소로 같은 기기 조회, 잘못된 주소는 null, 본딩 기기 소문자 조회, 가상 기기 여러 형식 조회). adapter mock이 실제 Android처럼 대문자 `:` 형식만 받습니다.
+    - 실기기 확인(Fold5 → M446K): Android의 `getRemoteDevice("4f:34:2d:86:b3:97")`는 `IllegalArgumentException: ... is not a valid Bluetooth address`. 라이브러리의 `getDevice("4f:34:2d:86:b3:97")`와 `getDevice("4f342d86b397")`는 스캔으로 찾은 기기와 같은 객체를 돌려줬고, 그 기기로 연결과 read가 정상이었습니다. `getConnectedDevice("4f342d86b397")`도 연결된 기기를 찾았습니다.
 - [ ] **[구조]** `clazz.newInstance()`(`impl/BleManagerEngineImpl.kt:148`)는 deprecated이고, 사용하는 앱이 R8을 쓰면 no-arg 생성자가 제거될 수 있습니다. factory 람다 방식으로 바꾸거나 consumer proguard rule을 추가합니다.
 - [ ] **[배포]** Gradle에서 deprecated된 `buildDir`, `archivesBaseName`을 교체합니다.
 - [x] **[구조]** `ExampleInstrumentedTest`가 항상 실패합니다. 패키지명을 `com.algorigo.algorigoble2.test`로 기대하지만, 실제 namespace는 `com.algorigo.rx.algorigoble2`입니다. 이 때문에 `connectedDebugAndroidTest` 전체 실행이 실패하므로, 수정하거나 삭제해야 합니다(`algorigoble2/src/androidTest/.../ExampleInstrumentedTest.kt`).

@@ -126,7 +126,7 @@ class BleManager(
     init {
         this.virtualDevices = virtualDevices.associate {
             Pair(
-                it.first.deviceId.uppercase(),
+                normalizeMacAddress(it.first.deviceId),
                 this.engine.initVirtualDevice(it.first, it.second.apply { virtual = true })
             )
         }
@@ -151,18 +151,21 @@ class BleManager(
     fun scanObservable(): Observable<List<Pair<BleDevice, ScanInfo>>> {
         return scanObservable(delegate.getBleScanSettings(), *delegate.getBleScanFilters())
     }
+    // MAC 주소는 대소문자, 구분자(":", "-", 없음)와 관계없이 받는다. (Android 는 "AA:BB:CC:DD:EE:FF" 형식만 받는다)
+    // 형식이 맞지 않는 주소이면 null 이다.
+
     fun getDevice(macAddress: String) = getDeviceInner<BleDevice>(macAddress)
     fun <T : BleDevice> getDevice(macAddress: String, clazz: Class<T>) = getDeviceInner(macAddress, clazz)
     // 가상 기기를 먼저 찾는다. 엔진을 먼저 조회하면 가상 기기의 MAC 이 유효한 주소일 때 존재하지 않는 실제 기기를 만들어 돌려주고,
-    // 유효하지 않은 주소(소문자 등)이면 조회할 때마다 getRemoteDevice 에러 로그가 남는다
-    private fun virtualDevice(macAddress: String) = virtualDevices[macAddress.uppercase()]
+    // 유효하지 않은 주소이면 조회할 때마다 getRemoteDevice 에러 로그가 남는다
+    private fun virtualDevice(macAddress: String) = virtualDevices[normalizeMacAddress(macAddress)]
 
     private fun <T : BleDevice> getDeviceInner(macAddress: String, clazz: Class<T>? = null): T? {
         virtualDevice(macAddress)?.let { return it as? T }
-        return engine.getDevice(macAddress, clazz) as? T
+        return engine.getDevice(normalizeMacAddress(macAddress), clazz) as? T
     }
     fun getBondedDevice(macAddress: String) = virtualDevice(macAddress)
-        ?: engine.getBondedDevice(macAddress)
+        ?: engine.getBondedDevice(normalizeMacAddress(macAddress))
     fun getBondedDevices() = engine.getBondedDevices()
         .let { devices ->
             devices + virtualDevices.values.filter { virtual ->
@@ -171,7 +174,7 @@ class BleManager(
         }
     fun getConnectedDevice(macAddress: String): BleDevice? {
         virtualDevice(macAddress)?.let { return if (it.connected) it else null }
-        return engine.getConnectedDevice(macAddress)
+        return engine.getConnectedDevice(normalizeMacAddress(macAddress))
     }
     fun getConnectedDevices(): List<BleDevice> {
         return engine.getConnectedDevices()
@@ -216,6 +219,22 @@ class BleManager(
 
         fun getLogger(): Logger {
             return LogManager.getLogger(Ble)
+        }
+
+        private val MAC_HEX_DIGITS = Regex("[0-9A-Fa-f]{12}")
+
+        /**
+         * "aa:bb:cc:dd:ee:ff", "AABBCCDDEEFF", "aa-bb-cc-dd-ee-ff" 를 Android 가 받는 "AA:BB:CC:DD:EE:FF" 로 바꾼다.
+         * MAC 형식이 아니면 공백만 지우고 대문자로 바꾼다. (가상 기기의 id 등)
+         */
+        internal fun normalizeMacAddress(macAddress: String): String {
+            val trimmed = macAddress.trim()
+            val hex = trimmed.replace(":", "").replace("-", "")
+            return if (MAC_HEX_DIGITS.matches(hex)) {
+                hex.uppercase().chunked(2).joinToString(":")
+            } else {
+                trimmed.uppercase()
+            }
         }
 
         /**
