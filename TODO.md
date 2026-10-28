@@ -694,7 +694,13 @@
       | BALANCED | 30ms, latency 5 | 60.0ms |
       - 요청 자체는 2~11ms에 완료되지만, LOW_POWER → HIGH는 적용까지 6.6~8.5초가 걸렸습니다(긴 간격에서는 파라미터 갱신 절차도 느림). BALANCED/LOW_POWER로 바꿀 때는 0.3~0.5초였습니다.
       - 연결이 끊긴 뒤 요청: `DisconnectedException`.
-- [ ] **[기능] RSSI 읽기** — `readRemoteRssi()`. 콜백(`impl/BleDeviceEngineImpl.kt:171`)은 있지만 로그만 남깁니다.
+- [x] **[기능] RSSI 읽기** — `readRemoteRssi()`. 콜백(`impl/BleDeviceEngineImpl.kt:171`)은 있지만 로그만 남깁니다.
+  - ✅ 해결 (`feature/read_rssi`)
+    - `BleDevice.readRssiSingle()`을 추가했습니다. `gatt.readRemoteRssi()`를 호출하고 `onReadRemoteRssi` 콜백의 값(dBm)을 돌려줍니다.
+    - Android는 다른 GATT 요청이 처리 중이면 RSSI 읽기도 거절하므로, read/write와 같은 작업 큐에서 차례로 처리합니다. 연결 끊김(`DisconnectedException`), `operationTimeoutMillis` 타임아웃, 거절 시 재시도(5회/500ms)도 다른 작업과 같습니다. 실패 status는 `GattOperationFailedException("READ_RSSI", status)`입니다.
+    - 가상 기기는 연결돼 있으면 `VirtualDevice.readRssi()` 값을 돌려줍니다. 기본값은 가상 기기 스캔 결과와 같은 0이고, 하위 클래스에서 바꿀 수 있습니다(기존 하위 클래스는 수정할 필요 없음).
+    - 테스트: `ReadRssiTest`(6건: 콜백 값 전달, 실패 status, 거절 후 재시도, 처리 중인 read가 끝날 때까지 기다림, 읽는 중 연결 끊김은 끊긴 사유 포함 `DisconnectedException`, 연결 전 요청은 GATT 호출 없이 실패), `VirtualDeviceRssiTest`(2건).
+    - 실기기 확인(Fold5 → M446K): 연속 5회 읽기 3~13ms에 성공(-24dBm, 스캔 RSSI -39dBm). characteristic read 3건과 RSSI 읽기 3건을 동시에 요청해도 모두 성공했습니다(`[01, rssi -24, 재홍의 Jump3, rssi -22, 01, rssi -22]`, 268ms, 거절 없음). 연결이 끊긴 뒤 요청은 `DisconnectedException`.
 - [ ] **[기능] 자동 재연결 / `autoConnect` 옵션** — 현재 `autoConnect=false`로 고정되어 있고, 끊겼을 때 재연결하는 정책이 없습니다. status 133이면 재시도하는 옵션도 필요합니다.
   - (실기기) 이전 연결이 끊긴 직후(1~3초 이내)에 같은 기기로 다시 연결하면, 링크가 정리되는 도중이라 `connectCompletable()`이 `DisconnectedException`으로 실패하는 경우가 2회 있었습니다. 몇 초 뒤에 다시 시도하면 성공했습니다. 연결 재시도 정책을 정할 때 이 경우도 함께 고려해야 합니다.
 - [ ] **[기능] 일반 descriptor read/write API** — 현재는 CCCD 쓰기만 내부에서 사용합니다. `Type.READ_DESCRIPTOR`는 정의되어 있지만 쓰이지 않습니다.
