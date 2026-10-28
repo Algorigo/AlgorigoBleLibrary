@@ -20,11 +20,11 @@ internal class VirtualDeviceEngine(private val virtualDevice: VirtualDevice) : B
     override val bonded: Boolean
         get() = false
 
-    override fun bondCompletable(): Completable {
+    override fun bondCompletable(timeoutMillis: Long): Completable {
         return Completable.complete()
     }
 
-    override fun unbondCompletable(): Completable {
+    override fun unbondCompletable(timeoutMillis: Long): Completable {
         return Completable.complete()
     }
 

@@ -77,7 +77,11 @@ class BleManager(
     /** 작업에 필요한 런타임 권한이 없는 경우. [permissions]는 허용되지 않은 권한 이름이다. (예: android.permission.BLUETOOTH_CONNECT) */
     class PermissionDeniedException(val permissions: List<String>) :
         BleException("Permission denied: ${permissions.joinToString()}")
-    class BondFailedException @JvmOverloads constructor(message: String = "Bond failed") : BleException(message)
+    /**
+     * 본딩(페어링)이나 본딩 해제에 실패한 경우. [reason]은 Android 가 알려 준 실패 사유(숨겨진 BluetoothDevice.EXTRA_REASON)다.
+     * 예: 1 인증 실패, 2 상대 기기가 거절, 3 사용자가 취소, 4 상대 기기 응답 없음, 6 인증 시간 초과. 알 수 없으면 null 이다.
+     */
+    class BondFailedException @JvmOverloads constructor(message: String = "Bond failed", val reason: Int? = null) : BleException(message)
     /** 스캔을 시작하지 못한 경우. [errorCode]는 ScanCallback.SCAN_FAILED_* 값이다. */
     class ScanFailedException(val errorCode: Int) : BleException("Scan failed with error code $errorCode")
 

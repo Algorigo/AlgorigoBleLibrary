@@ -14,8 +14,8 @@ internal abstract class BleDeviceEngine() {
     abstract val deviceName: String?
     abstract val bonded: Boolean
 
-    abstract fun bondCompletable(): Completable
-    abstract fun unbondCompletable(): Completable
+    abstract fun bondCompletable(timeoutMillis: Long): Completable
+    abstract fun unbondCompletable(timeoutMillis: Long): Completable
 
     fun isConnected(): Boolean = getConnectionStateObservable().firstOrError().map { it == BleDevice.ConnectionState.CONNECTED }.blockingGet()
     abstract fun getConnectionStateObservable(): Observable<BleDevice.ConnectionState>

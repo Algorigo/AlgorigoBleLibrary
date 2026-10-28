@@ -27,8 +27,8 @@ class InitializableBleDeviceInitTimeoutTest {
         override val deviceId = "00:11:22:33:44:55"
         override val deviceName: String? = null
         override val bonded = false
-        override fun bondCompletable(): Completable = Completable.complete()
-        override fun unbondCompletable(): Completable = Completable.complete()
+        override fun bondCompletable(timeoutMillis: Long): Completable = Completable.complete()
+        override fun unbondCompletable(timeoutMillis: Long): Completable = Completable.complete()
         override fun getConnectionStateObservable(): Observable<BleDevice.ConnectionState> = state
         override fun connectCompletable(timeoutMillis: Long, autoConnect: Boolean): Completable = Completable.fromAction { state.accept(BleDevice.ConnectionState.CONNECTED) }
         override fun disconnect() {

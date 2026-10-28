@@ -10,10 +10,12 @@ import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.BluetoothStatusCodes
 import android.content.Context
+import android.content.IntentFilter
 import android.os.Build
 import androidx.annotation.ChecksSdkIntAtLeast
 import androidx.annotation.Keep
 import androidx.annotation.RequiresApi
+import androidx.core.content.IntentCompat
 import com.algorigo.algorigoble2.BleCharacteristic
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleDeviceEngine
@@ -21,11 +23,13 @@ import com.algorigo.algorigoble2.BleManager
 import com.algorigo.algorigoble2.BleService
 import com.algorigo.algorigoble2.BleSppSocket
 import com.algorigo.algorigoble2.logging.Ble
+import com.algorigo.algorigoble2.rx_util.RxBroadcastReceiver
 import com.algorigo.logger.L
 import com.jakewharton.rxrelay3.BehaviorRelay
 import com.jakewharton.rxrelay3.PublishRelay
 import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Flowable
+import io.reactivex.rxjava3.core.Maybe
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Single
 import io.reactivex.rxjava3.core.SingleEmitter
@@ -372,61 +376,87 @@ internal class BleDeviceEngineImpl(
             return "$name(${bluetoothDevice.address})"
         }
 
-    override fun bondCompletable(): Completable {
-        return Completable.defer {
-            BlePermissions.checkConnect(context, sdkInt)
-            if (bluetoothDevice.bondState == BluetoothDevice.BOND_BONDED) {
-                Completable.complete()
-            } else {
-                Observable.interval(1, TimeUnit.SECONDS)
-                    .doOnSubscribe {
-                        if (bluetoothDevice.bondState == BluetoothDevice.BOND_NONE &&
-                            !bluetoothDevice.createBond()) {
-                            throw BleManager.BondFailedException()
-                        }
+    override fun bondCompletable(timeoutMillis: Long): Completable = Completable.defer {
+        BlePermissions.checkConnect(context, sdkInt)
+        if (bluetoothDevice.bondState == BluetoothDevice.BOND_BONDED) {
+            return@defer Completable.complete()
+        }
+        val request = Observable.defer {
+            // 브로드캐스트를 구독한 뒤에 상태를 다시 확인하고 요청한다
+            when (bluetoothDevice.bondState) {
+                BluetoothDevice.BOND_BONDED -> Observable.just(BondStateChange(BluetoothDevice.BOND_BONDED, BluetoothDevice.BOND_BONDED, null))
+                BluetoothDevice.BOND_NONE -> {
+                    L.debug(Ble.Device.Default, "$logLabel : createBond")
+                    if (!bluetoothDevice.createBond()) {
+                        throw BleManager.BondFailedException("createBond was rejected")
                     }
-                    .map {
-                        when (bluetoothDevice.bondState) {
-                            BluetoothDevice.BOND_BONDED -> true
-                            BluetoothDevice.BOND_BONDING -> false
-                            BluetoothDevice.BOND_NONE -> throw BleManager.BondFailedException()
-                            else -> throw BleManager.BondFailedException("Unexpected bond state ${bluetoothDevice.bondState}")
-                        }
-                    }
-                    .filter { it }
-                    .firstOrError()
-                    .ignoreElement()
+                    // 다른 기기와 본딩 중이면 createBond 가 true 를 돌려줘도 시작되지 않고 브로드캐스트도 오지 않는다.
+                    // (시작되면 바로 BONDING 이 된다) 잠시 뒤에도 NONE 이면 시작되지 않은 것으로 본다
+                    Observable.timer(BOND_START_CHECK_MILLIS, TimeUnit.MILLISECONDS)
+                        .filter { bluetoothDevice.bondState == BluetoothDevice.BOND_NONE }
+                        .map { BondStateChange(BluetoothDevice.BOND_NONE, BluetoothDevice.BOND_NONE, null, started = false) }
+                }
+                // 이미 진행 중인 본딩의 결과를 기다린다
+                else -> Observable.empty()
             }
         }
+        bondStateChanges()
+            .mergeWith(request)
+            // 요청 직후에는 아직 BOND_NONE 일 수 있으므로, 진행 중(BONDING)이던 본딩이 NONE 으로 끝났거나 시작되지 않은 경우만 실패로 본다
+            .filter {
+                it.state == BluetoothDevice.BOND_BONDED || !it.started ||
+                        (it.state == BluetoothDevice.BOND_NONE && it.previousState == BluetoothDevice.BOND_BONDING)
+            }
+            .firstOrError()
+            .flatMapCompletable {
+                when {
+                    it.state == BluetoothDevice.BOND_BONDED -> Completable.complete()
+                    !it.started -> Completable.error(BleManager.BondFailedException("Bonding did not start (another bonding may be in progress)"))
+                    else -> Completable.error(BleManager.BondFailedException("Bond failed" + (it.reason?.let { reason -> " (reason $reason)" } ?: ""), it.reason))
+                }
+            }
+            .timeout(timeoutMillis, TimeUnit.MILLISECONDS, Completable.error(BleManager.OperationTimeoutException(OPERATION_BOND, timeoutMillis)))
     }
 
-    override fun unbondCompletable(): Completable {
-        return Completable.defer {
-            BlePermissions.checkConnect(context, sdkInt)
+    override fun unbondCompletable(timeoutMillis: Long): Completable = Completable.defer {
+        BlePermissions.checkConnect(context, sdkInt)
+        if (bluetoothDevice.bondState == BluetoothDevice.BOND_NONE) {
+            return@defer Completable.complete()
+        }
+        val request = Maybe.fromCallable<BondStateChange> {
             if (bluetoothDevice.bondState == BluetoothDevice.BOND_NONE) {
-                Completable.complete()
+                BondStateChange(BluetoothDevice.BOND_NONE, BluetoothDevice.BOND_NONE, null)
             } else {
-                Observable.interval(1, TimeUnit.SECONDS)
-                    .doOnSubscribe {
-                        if (bluetoothDevice.bondState == BluetoothDevice.BOND_BONDED &&
-                            !bluetoothDevice.deleteBond()) {
-                            throw BleManager.BondFailedException()
-                        }
-                    }
-                    .map {
-                        when (bluetoothDevice.bondState) {
-                            BluetoothDevice.BOND_BONDED -> throw BleManager.BondFailedException()
-                            BluetoothDevice.BOND_BONDING -> false
-                            BluetoothDevice.BOND_NONE -> true
-                            else -> throw BleManager.BondFailedException("Unexpected bond state ${bluetoothDevice.bondState}")
-                        }
-                    }
-                    .filter { it }
-                    .firstOrError()
-                    .ignoreElement()
+                L.debug(Ble.Device.Default, "$logLabel : removeBond")
+                if (!bluetoothDevice.deleteBond()) {
+                    throw BleManager.BondFailedException("removeBond was rejected")
+                }
+                null
             }
         }
+        bondStateChanges()
+            .mergeWith(request)
+            .filter { it.state == BluetoothDevice.BOND_NONE }
+            .firstOrError()
+            .ignoreElement()
+            .timeout(timeoutMillis, TimeUnit.MILLISECONDS, Completable.error(BleManager.OperationTimeoutException(OPERATION_UNBOND, timeoutMillis)))
     }
+
+    private class BondStateChange(val previousState: Int, val state: Int, val reason: Int?, val started: Boolean = true)
+
+    /** 이 기기의 본딩 상태 변화(ACTION_BOND_STATE_CHANGED). 구독하는 동안 receiver 를 등록한다. */
+    private fun bondStateChanges(): Observable<BondStateChange> =
+        RxBroadcastReceiver.broadCastReceiverObservable(context, IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED))
+            .filter { intent ->
+                IntentCompat.getParcelableExtra(intent, BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)?.address == bluetoothDevice.address
+            }
+            .map { intent ->
+                BondStateChange(
+                    intent.getIntExtra(BluetoothDevice.EXTRA_PREVIOUS_BOND_STATE, BluetoothDevice.ERROR),
+                    intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR),
+                    if (intent.hasExtra(EXTRA_UNBOND_REASON)) intent.getIntExtra(EXTRA_UNBOND_REASON, 0) else null,
+                ).also { L.debug(Ble.Device.Default, "$logLabel : bond state ${it.previousState} -> ${it.state}, reason ${it.reason}") }
+            }
 
     /**
      * 기기의 공개 연결 상태. GATT 상태가 DISCONNECTED 일 때만 SPP 연결 상태(SPP_CONNECTING/SPP_CONNECTED)를 보여 준다.
@@ -1060,6 +1090,11 @@ internal class BleDeviceEngineImpl(
         private const val OPERATION_READ_RSSI = "READ_RSSI"
         private const val OPERATION_GET_CHARACTERISTICS = "GET_CHARACTERISTICS"
         private const val OPERATION_GET_SERVICES = "GET_SERVICES"
+        private const val OPERATION_BOND = "BOND"
+        private const val OPERATION_UNBOND = "UNBOND"
+        private const val BOND_START_CHECK_MILLIS = 5_000L
+        // 숨겨진 BluetoothDevice.EXTRA_REASON. 본딩이 실패하거나 해제된 사유
+        private const val EXTRA_UNBOND_REASON = "android.bluetooth.device.extra.REASON"
     }
 }
 
@@ -1068,6 +1103,11 @@ internal fun ByteArray.toHexString(): String {
     return joinToString(separator = "") { String.format("%02x", it) }
 }
 
+// 공개 API 가 없어 숨겨진 removeBond() 를 부른다. 막힌 Android 버전에서는 크래시 대신 BondFailedException 으로 알린다
 internal fun BluetoothDevice.deleteBond(): Boolean {
-    return javaClass.getMethod("removeBond").invoke(this) as Boolean
+    return try {
+        javaClass.getMethod("removeBond").invoke(this) as Boolean
+    } catch (exception: ReflectiveOperationException) {
+        throw BleManager.BondFailedException("removeBond is not available: ${exception.cause ?: exception}")
+    }
 }
