@@ -7,9 +7,7 @@ import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattService
-import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
-import android.bluetooth.BluetoothSocket
 import android.bluetooth.BluetoothStatusCodes
 import android.content.Context
 import android.os.Build
@@ -30,7 +28,6 @@ import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Single
 import io.reactivex.rxjava3.core.SingleEmitter
 import io.reactivex.rxjava3.schedulers.Schedulers
-import java.io.IOException
 import java.util.*
 import java.util.concurrent.TimeUnit
 
@@ -52,8 +49,6 @@ internal class BleDeviceEngineImpl(
         // cause: 이 상태 때문에 끝나는 연결 시도/작업/notification 이 낼 에러. (null 이면 사유를 모르는 DisconnectedException)
         class DISCONNECTED(val cause: Throwable? = null) : State(BleDevice.ConnectionState.DISCONNECTED)
         class DISCONNECTING(val gatt: BluetoothGatt) : State(BleDevice.ConnectionState.DISCONNECTING)
-        class SPP_CONNECTING(val socket: BluetoothSocket) : State(BleDevice.ConnectionState.SPP_CONNECTING)
-        class SPP_CONNECTED(val socket: BleSppSocket) : State(BleDevice.ConnectionState.SPP_CONNECTED)
     }
 
     private enum class Type {
@@ -309,6 +304,8 @@ internal class BleDeviceEngineImpl(
     // (여러 스레드가 동시에 accept 하면 BehaviorRelay 는 관찰자에게 동시에, 순서가 뒤바뀐 채로 전달할 수 있다)
     // toSerialized() 는 다른 스레드가 전달 중이면 값을 큐에 넣고 바로 반환해서, 직후에 읽은 stateRelay.value 가 이전 값일 수 있으므로 쓰지 않는다
     private val stateLock = Any()
+    // Classic(RFCOMM/SPP) 연결. GATT 와 상태를 따로 두고, 같은 잠금으로 전환해서 공개 상태에서 순서가 섞이지 않게 한다
+    private val sppConnection = SppConnection(context, bluetoothDevice, stateLock) { logLabel }
     private val gattObservable: Observable<BluetoothGatt>
         get() = stateRelay.map {
             if (it is State.CONNECTED) {
@@ -413,8 +410,15 @@ internal class BleDeviceEngineImpl(
         }
     }
 
+    /**
+     * 기기의 공개 연결 상태. GATT 상태가 DISCONNECTED 일 때만 SPP 연결 상태(SPP_CONNECTING/SPP_CONNECTED)를 보여 준다.
+     * (둘은 동시에 연결되지 않는다) 두 상태는 같은 잠금(stateLock) 안에서 바뀌므로 바뀐 순서대로 전달된다.
+     */
     override fun getConnectionStateObservable(): Observable<BleDevice.ConnectionState> {
-        return stateRelay.map { it.connectionState }
+        return Observable.combineLatest(stateRelay, sppConnection.stateObservable) { gattState, sppState ->
+            if (gattState is State.DISCONNECTED) sppState.connectionState else gattState.connectionState
+        }
+            .distinctUntilChanged()
     }
 
     override fun connectCompletable(timeoutMillis: Long): Completable = Completable.defer {
@@ -464,6 +468,11 @@ internal class BleDeviceEngineImpl(
         val current = stateRelay.value!!
         if (current !is State.DISCONNECTED) {
             throw BleManager.InvalidConnectionStateException(current.connectionState, BleDevice.ConnectionState.DISCONNECTED)
+        }
+        // 같은 기기의 SPP 연결과는 동시에 쓰지 않는다
+        val spp = sppConnection.state
+        if (spp !is SppConnection.State.DISCONNECTED) {
+            throw BleManager.InvalidConnectionStateException(spp.connectionState, BleDevice.ConnectionState.DISCONNECTED)
         }
         start().also { setState(it) }
     }
@@ -519,17 +528,11 @@ internal class BleDeviceEngineImpl(
                 }
                 // 연결 시도 중이면 취소한다. 기다리던 connectCompletable 은 DisconnectedException 으로 끝난다
                 is State.CONNECTING -> cancelConnecting(state.gatt)
-                is State.SPP_CONNECTING -> {
-                    // 소켓을 닫으면 진행 중인 connect() 가 IOException 으로 끝나고, connectSppSocket 이 상태를 정리한다
-                    try {
-                        state.socket.close()
-                    } catch (exception: IOException) {
-                        L.error(Ble, "spp socket close error", exception)
+                is State.DISCONNECTED -> {
+                    // GATT 가 연결되지 않았으면 SPP 연결을 끊는다
+                    if (!sppConnection.disconnect()) {
+                        L.debug(Ble.Device.Default, "$logLabel : disconnect ignored, state is ${state.connectionState}")
                     }
-                }
-                is State.SPP_CONNECTED -> {
-                    state.socket.close()
-                    setState(State.DISCONNECTED())
                 }
                 else -> L.debug(Ble.Device.Default, "$logLabel : disconnect ignored, state is ${state?.connectionState}")
             }
@@ -769,60 +772,13 @@ internal class BleDeviceEngineImpl(
     }
 
     override fun connectSppSocket(uuid: UUID?): Observable<BleSppSocket> = Observable.defer {
-        var connecting: State.SPP_CONNECTING? = null
-        var socket: BleSppSocket? = null
-        Observable.create<BleSppSocket> { emitter ->
-            BlePermissions.checkConnect(context, sdkInt)
-            val aUuid = uuid ?: defaultSppUuid()
-            // 연결 중에 disconnect() 가 불리면 소켓을 닫아 connect() 를 중단할 수 있도록 상태에 소켓을 담는다
-            val state = startConnecting { State.SPP_CONNECTING(bluetoothDevice.createRfcommSocketToServiceRecord(aUuid)) }
-            connecting = state
-            BleSppSocket.unconnected(state.socket).also { theSocket ->
-                // 연결에 실패해도 doFinally 에서 소켓을 닫을 수 있도록 먼저 담는다
-                socket = theSocket
-                // 기기 검색이 진행 중이면 연결이 느려지거나 실패하므로 먼저 멈춘다
-                cancelDiscovery()
-                theSocket.connect()
-                setState(State.SPP_CONNECTED(theSocket))
-                // disconnect() 로 SPP 연결이 끊기면 스트림을 끝낸다
-                emitter.setDisposable(stateRelay.filter { it !is State.SPP_CONNECTED }.firstElement()
-                    .subscribe { emitter.tryOnError(BleManager.DisconnectedException()) })
-                emitter.onNext(theSocket)
+        BlePermissions.checkConnect(context, sdkInt)
+        sppConnection.connect(uuid) {
+            // sppConnection 이 stateLock 안에서 부른다. 같은 기기의 GATT 연결과는 동시에 쓰지 않는다
+            val gattState = stateRelay.value!!
+            if (gattState !is State.DISCONNECTED) {
+                throw BleManager.InvalidConnectionStateException(gattState.connectionState, BleDevice.ConnectionState.DISCONNECTED)
             }
-        }
-            .doFinally {
-                // 이 구독이 시작한 SPP 연결만 정리한다. (연결을 시작하지 못했다면 다른 연결의 상태를 건드리지 않는다)
-                synchronized(stateLock) {
-                    val current = stateRelay.value
-                    if ((current is State.SPP_CONNECTING && current === connecting) ||
-                        (current is State.SPP_CONNECTED && current.socket === socket)) {
-                        setState(State.DISCONNECTED())
-                    }
-                }
-                socket?.close()
-            }
-            .subscribeOn(Schedulers.io())
-    }
-
-    /**
-     * uuid 를 지정하지 않았을 때 쓸 RFCOMM 서비스 UUID. 기기가 알려 준 UUID 에 SPP 가 있으면 SPP, 없으면 첫 UUID,
-     * 기기의 UUID 를 모르면(SDP 를 한 적이 없으면 null) 표준 SPP UUID 를 쓴다.
-     */
-    private fun defaultSppUuid(): UUID {
-        val uuids = bluetoothDevice.uuids?.map { it.uuid }.orEmpty()
-        return when {
-            SPP_UUID in uuids -> SPP_UUID
-            uuids.isNotEmpty() -> uuids.first()
-            else -> SPP_UUID
-        }
-    }
-
-    private fun cancelDiscovery() {
-        try {
-            (context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter?.cancelDiscovery()
-        } catch (exception: SecurityException) {
-            // API 31+ 에서 BLUETOOTH_SCAN 권한이 없으면 검색을 멈출 수 없으므로 그대로 연결한다
-            L.warning(Ble.Device.Default, "$logLabel : cancelDiscovery is not permitted", exception)
         }
     }
 
@@ -963,11 +919,10 @@ internal class BleDeviceEngineImpl(
                     cancelConnecting(state.gatt, BleManager.BluetoothDisabledException())
                     null
                 }
-                is State.SPP_CONNECTING, is State.SPP_CONNECTED -> {
-                    disconnect()
+                else -> {
+                    sppConnection.disconnect()
                     null
                 }
-                else -> null
             }?.also { gatt ->
                 gatt.close()
                 // 진행 중이던 작업과 notification 은 BluetoothDisabledException 으로 끝난다
@@ -983,8 +938,6 @@ internal class BleDeviceEngineImpl(
         private val LOG_TAG = BleDeviceEngineImpl::class.java.simpleName
 
         private val CLIENT_CHARACTERISTIC_CONFIG_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
-        // Serial Port Profile
-        private val SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805f9b34fb")
         private const val MAX_RETRY_COUNT = 5
         private const val RETRY_DELAY_MILLIS = 500L
         // ATT transaction timeout(30초) + 여유

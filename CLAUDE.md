@@ -44,7 +44,7 @@ Public API / engine split: user-facing classes delegate everything to `internal`
 - `BluetoothGattCallback` results are pushed into `replyRelay` (read/write characteristic & descriptor replies, tagged by `Type` + UUID) and `notificationRelay`. GATT operations go through a per-device queue (`enqueue`), so only one is in flight; each is guarded by a disconnect check and `operationTimeoutMillis`. A GATT call that is rejected (returns false / non-SUCCESS) raises `BleManager.GattRequestRejectedException`, retried 5× at 500 ms.
 - `setupNotification` returns `Observable<Observable<ByteArray>>`: the outer emission means the CCCD descriptor write succeeded; disposing it disables the notification.
 - Services are read from the current `BluetoothGatt` on every lookup (no cache), so reconnects and `onServiceChanged` rediscovery are picked up.
-- SPP (RFCOMM) uses the same state relay (`SPP_CONNECTING`/`SPP_CONNECTED`) and requires the device to be GATT-disconnected.
+- SPP (RFCOMM) lives in `impl/SppConnection` with its own state; the engine merges it into the single public state (`SPP_CONNECTING`/`SPP_CONNECTED` only while GATT is `DISCONNECTED`). GATT and SPP on the same device are mutually exclusive, checked under the shared `stateLock`.
 - Bluetooth-off is detected by a broadcast receiver in `BleManagerEngineImpl`, which calls `onBluetoothDisabled()` on every cached device engine.
 
 ### Virtual devices
