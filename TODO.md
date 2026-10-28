@@ -581,7 +581,17 @@
   - 샘플 앱의 가상 MAC(`12:34:56:78:90:ab`)은 소문자라서 `getRemoteDevice()`가 `IllegalArgumentException`을 던집니다. 그래서 가상 기기를 조회할 때마다 에러 로그와 스택트레이스가 남습니다(실기기 확인).
   - 가상 MAC이 대문자(유효한 주소)라면 엔진이 실제 `BleDevice`를 만들어 반환하므로, **가상 기기 대신 존재하지 않는 실제 기기가 반환됩니다**. 이 경우는 코드로만 확인했습니다.
   - 제안: `virtualDevices`를 먼저 조회하고, MAC 비교는 대소문자를 무시하도록 정규화합니다.
-- [ ] **[샘플앱] DeviceActivity가 종료돼도 notification 구독을 해제하지 않음 (실기기)** — `app/.../DeviceActivity.kt:64-127`. `notificationDisposables`를 `onDestroy`에서 dispose하지 않아서, 화면을 닫은 뒤에도 연결이 끊길 때까지 구독이 살아 있습니다. read/write/특성 조회 구독도 Disposable을 관리하지 않습니다.
+- [x] **[샘플앱] DeviceActivity가 종료돼도 notification 구독을 해제하지 않음 (실기기)** — `app/.../DeviceActivity.kt:64-127`. `notificationDisposables`를 `onDestroy`에서 dispose하지 않아서, 화면을 닫은 뒤에도 연결이 끊길 때까지 구독이 살아 있습니다. read/write/특성 조회 구독도 Disposable을 관리하지 않습니다.
+  - ✅ 해결 (`feature/sample_device_activity_dispose`)
+    - `onDestroy`에서 notification 구독과 특성 조회/read/write 구독(`CompositeDisposable`)을 해제합니다.
+    - `notificationDisposables`를 main thread에서만 바꾸도록 `doFinally`를 `observeOn(mainThread)` 뒤로 옮겼습니다(이전에는 notification이 에러로 끝나면 binder/io 스레드에서 map을 바꿨음).
+    - 테스트용으로 `BluetoothService`가 가상 기기(`virtualBleDevice`)를 들고 있고, `VirtualBleDevice.notifying`으로 값을 보내고 있는지 알 수 있게 했습니다.
+    - 테스트: `app/src/androidTest/.../DeviceActivityDisposeTest`. 가상 기기에 연결하고 DeviceActivity에서 notification을 켠 뒤 화면을 닫아, 가상 기기가 보내기를 멈추는지 확인합니다.
+      - 수정 전(Fold5): `notification must stop after the activity is destroyed`로 실패(화면을 닫은 뒤에도 계속 보냄).
+      - 수정 후(Fold5): 통과.
+    - 실기기 확인(Fold5 샘플 앱 → M446K nRF `aaa1`, 임시 instrumentation으로 서비스의 `bleManager`로 연결한 뒤 DeviceActivity에서 notification을 켜고 화면을 닫음):
+      - 수정 전: 화면을 닫고 3초가 지나도 CCCD를 끄지 않았습니다(연결 CONNECTED 유지). 연결을 끊을 때에야 `setCharacteristicNotification : false`가 기록됐습니다.
+      - 수정 후: 화면을 닫은 지 0.3초 뒤 `setCharacteristicNotification : false`와 CCCD `0000` 쓰기가 기록됐고, 연결은 CONNECTED로 유지됐습니다.
 
 ### 구조 개선
 
