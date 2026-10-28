@@ -100,7 +100,7 @@ internal class VirtualDeviceEngine(private val virtualDevice: VirtualDevice) : B
     }
 
     override fun connectSppSocket(uuid: UUID?): Observable<BleSppSocket> {
-        return Observable.error(RuntimeException("Virtual device does not support spp socket"))
+        return Observable.error(UnsupportedOperationException("Virtual device does not support spp socket"))
     }
 
     override fun requestMtuSingle(mtu: Int): Single<Int> {

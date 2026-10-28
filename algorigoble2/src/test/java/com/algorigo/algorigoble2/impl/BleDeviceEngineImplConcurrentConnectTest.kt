@@ -3,6 +3,7 @@ package com.algorigo.algorigoble2.impl
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothSocket
 import com.algorigo.algorigoble2.BleDevice
+import com.algorigo.algorigoble2.BleManager
 import com.algorigo.algorigoble2.testutil.RxTestSchedulerRule
 import io.mockk.every
 import io.mockk.mockk
@@ -70,9 +71,9 @@ class BleDeviceEngineImplConcurrentConnectTest {
         }.map { it.get(5, TimeUnit.SECONDS) }
 
         assertEquals(1, connectGattCalls.get())
-        // 하나는 연결을 기다리고, 나머지는 이미 연결 중이라 IllegalStateException 으로 끝난다
+        // 하나는 연결을 기다리고, 나머지는 이미 연결 중이라 InvalidConnectionStateException 으로 끝난다
         assertEquals(1, observers.count { it.isWaiting() })
-        assertEquals(THREADS - 1, observers.count { it.failedWith(IllegalStateException::class.java) })
+        assertEquals(THREADS - 1, observers.count { it.failedWith(BleManager.InvalidConnectionStateException::class.java) })
         assertEquals(BleDevice.ConnectionState.CONNECTING, fixture.bleDevice.connectionState)
     }
 
@@ -93,7 +94,7 @@ class BleDeviceEngineImplConcurrentConnectTest {
         val observers: List<TestObserver<*>> = listOf(gattConnect.get(5, TimeUnit.SECONDS), sppConnect.get(5, TimeUnit.SECONDS))
 
         assertEquals("only one of connectGatt / RFCOMM socket must be created", 1, connectGattCalls.get() + rfcommCreated.get())
-        assertEquals(1, observers.count { it.failedWith(IllegalStateException::class.java) })
+        assertEquals(1, observers.count { it.failedWith(BleManager.InvalidConnectionStateException::class.java) })
     }
 
     @Test
@@ -102,7 +103,7 @@ class BleDeviceEngineImplConcurrentConnectTest {
         val rfcommCreated = stubSlowRfcommSocket()
 
         fixture.engine.connectSppSocket(SPP_UUID).test()
-            .assertError(IllegalStateException::class.java)
+            .assertError(BleManager.InvalidConnectionStateException::class.java)
 
         assertEquals(0, rfcommCreated.get())
         assertEquals(BleDevice.ConnectionState.CONNECTED, fixture.bleDevice.connectionState)

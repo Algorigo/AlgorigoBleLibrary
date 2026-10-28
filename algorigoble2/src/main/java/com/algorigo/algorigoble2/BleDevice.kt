@@ -74,7 +74,7 @@ open class BleDevice {
 
     /**
      * read/write/notification 설정/MTU 요청 등 GATT 작업 하나의 최대 대기 시간.
-     * 초과하면 [java.util.concurrent.TimeoutException], 작업 중 연결이 끊기면 [BleManager.DisconnectedException]으로 종료된다.
+     * 초과하면 [BleManager.OperationTimeoutException], 작업 중 연결이 끊기면 [BleManager.DisconnectedException]으로 종료된다.
      */
     var operationTimeoutMillis = DEFAULT_OPERATION_TIMEOUT_MILLIS
 
@@ -152,6 +152,8 @@ open class BleDevice {
         // 로그나 문자열 템플릿에서 쓰이므로 이름을 읽을 권한(API 31+ BLUETOOTH_CONNECT)이 없어도 예외를 내지 않는다
         val name = try {
             deviceName
+        } catch (e: BleManager.PermissionDeniedException) {
+            "(permission denied)"
         } catch (e: SecurityException) {
             "(permission denied)"
         }

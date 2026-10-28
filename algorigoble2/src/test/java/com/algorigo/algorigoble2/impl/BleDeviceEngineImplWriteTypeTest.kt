@@ -3,6 +3,7 @@ package com.algorigo.algorigoble2.impl
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCharacteristic
 import com.algorigo.algorigoble2.BleDevice
+import com.algorigo.algorigoble2.BleManager
 import com.algorigo.algorigoble2.testutil.RxTestSchedulerRule
 import io.mockk.verify
 import io.mockk.verifyOrder
@@ -94,11 +95,11 @@ class BleDeviceEngineImplWriteTypeTest {
     @Test
     fun unsupportedWriteType_failsWithoutGattCall() {
         fixture.bleDevice.writeCharacteristicSingle(WITH_RESPONSE_UUID, byteArrayOf(1), BleDevice.WriteType.WITHOUT_RESPONSE).test()
-            .assertError(BleDeviceEngineImpl.IllegalCharacteristicProperty::class.java)
+            .assertError(BleManager.IllegalCharacteristicPropertyException::class.java)
         fixture.bleDevice.writeCharacteristicSingle(WITHOUT_RESPONSE_UUID, byteArrayOf(1), BleDevice.WriteType.WITH_RESPONSE).test()
-            .assertError(BleDeviceEngineImpl.IllegalCharacteristicProperty::class.java)
+            .assertError(BleManager.IllegalCharacteristicPropertyException::class.java)
         fixture.bleDevice.writeCharacteristicSingle(READ_ONLY_UUID, byteArrayOf(1)).test()
-            .assertError(BleDeviceEngineImpl.IllegalCharacteristicProperty::class.java)
+            .assertError(BleManager.IllegalCharacteristicPropertyException::class.java)
 
         verify(exactly = 0) { fixture.gatt.writeCharacteristic(any()) }
     }

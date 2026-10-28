@@ -21,31 +21,51 @@ class BleManager(
     virtualDevices: Array<Pair<VirtualDevice, BleDevice>> = arrayOf()
 ) : Closeable {
 
-    class BondFailedException : Exception()
-    class DisconnectedException : Exception()
-    class ConnectFailedException(message: String) : Exception(message)
-    class MtuChangeFailedException(val status: Int) : Exception("MTU change failed with status $status")
+    // 라이브러리가 던지는 예외. 모두 [BleException]의 하위 타입이다
+
+    /**
+     * 연결이 끊겨서 작업이 끝난 경우. 연결 중에 끊긴 connectCompletable, 진행 중이던 작업, notification 스트림이 이 예외로 끝난다.
+     * [status]는 연결이 끊길 때 Android 가 알려 준 사유(onConnectionStateChange 의 status)다.
+     * 예: 8 연결 타임아웃(supervision timeout), 19 상대 기기가 끊음, 22 이 기기(호스트)가 끊음, 62 연결 수립 실패, 133 GATT_ERROR.
+     * 이 앱이 disconnect() 로 끊었거나 사유를 알 수 없으면 null 이다.
+     */
+    open class DisconnectedException @JvmOverloads constructor(val status: Int? = null, message: String? = null) :
+        BleException(message ?: ("Disconnected" + (status?.let { " (status $it, 0x${Integer.toHexString(it)})" } ?: "")))
+    /** 블루투스가 꺼져 있거나 꺼져서 연결/작업이 끝난 경우. 연결이 끊긴 경우의 하나이므로 [DisconnectedException]의 하위 타입이다. */
+    class BluetoothDisabledException : DisconnectedException(null, "Bluetooth is disabled")
+    /** 연결을 시작하지 못했거나 연결 과정(서비스 탐색 등)이 실패한 경우 */
+    class ConnectFailedException(message: String) : BleException(message)
+    /** 현재 연결 상태에서 할 수 없는 요청. 예: 이미 연결 중인데 connect, GATT 연결 중에 SPP 연결 */
+    class InvalidConnectionStateException(val state: BleDevice.ConnectionState, val expected: BleDevice.ConnectionState) :
+        BleException("Connection state is $state not $expected")
     /** GATT 콜백이 실패 status 를 돌려준 경우. [status]는 BluetoothGatt.GATT_* 값이다. (예: 0x05 인증 부족, 0x0F 암호화 부족) */
-    class GattOperationFailedException(val operation: String, val status: Int) :
-        Exception("$operation failed with GATT status $status (0x${Integer.toHexString(status)})")
-    /**
-     * 작업에 필요한 런타임 권한이 없는 경우. [permissions]는 허용되지 않은 권한 이름이다. (예: android.permission.BLUETOOTH_CONNECT)
-     * 플랫폼이 던지던 SecurityException 을 처리하던 코드도 그대로 동작하도록 SecurityException 을 상속한다.
-     */
-    class PermissionDeniedException(val permissions: List<String>) :
-        SecurityException("Permission denied: ${permissions.joinToString()}")
-    /**
-     * 연결된 기기에서 characteristic 을 찾지 못한 경우. [serviceUuid]가 null 이면 모든 서비스에서 찾았다.
-     * 이전에 던지던 IllegalStateException 을 처리하던 코드도 그대로 동작하도록 IllegalStateException 을 상속한다.
-     */
+    open class GattOperationFailedException(val operation: String, val status: Int) :
+        BleException("$operation failed with GATT status $status (0x${Integer.toHexString(status)})")
+    /** MTU 변경 요청이 실패 status 로 끝난 경우 */
+    class MtuChangeFailedException(status: Int) : GattOperationFailedException("REQUEST_MTU", status)
+    /** Android BluetoothGatt 가 요청을 받지 않은 경우. (이전 요청이 처리 중이거나 연결이 정리되는 중) 여러 번 다시 시도한 뒤에도 거절되면 난다. */
+    class GattRequestRejectedException(val operation: String) : BleException("$operation request was rejected by BluetoothGatt")
+    /** 작업이 정해진 시간 안에 끝나지 않은 경우. [operation]은 CONNECT, INITIALIZE, READ_CHARACTERISTIC 등이다. */
+    class OperationTimeoutException(val operation: String, val timeoutMillis: Long) :
+        BleException("$operation timed out after ${timeoutMillis}ms")
+    /** 연결된 기기에서 characteristic 을 찾지 못한 경우. [serviceUuid]가 null 이면 모든 서비스에서 찾았다. */
     class CharacteristicNotFoundException(val serviceUuid: UUID?, val characteristicUuid: UUID) :
-        IllegalStateException("Characteristic $characteristicUuid not found" + (serviceUuid?.let { " in service $it" } ?: ""))
-    /**
-     * characteristic 에 필요한 descriptor 가 없는 경우. 예를 들어 notification/indication 을 켜려는데 CCCD(0x2902)가 없을 때.
-     * 같은 종류인 [CharacteristicNotFoundException]과 같이 IllegalStateException 을 상속한다.
-     */
+        BleException("Characteristic $characteristicUuid not found" + (serviceUuid?.let { " in service $it" } ?: ""))
+    /** characteristic 에 필요한 descriptor 가 없는 경우. 예를 들어 notification/indication 을 켜려는데 CCCD(0x2902)가 없을 때. */
     class DescriptorNotFoundException(val characteristicUuid: UUID, val descriptorUuid: UUID) :
-        IllegalStateException("Descriptor $descriptorUuid not found in characteristic $characteristicUuid")
+        BleException("Descriptor $descriptorUuid not found in characteristic $characteristicUuid")
+    /** characteristic 이 요청한 작업을 지원하지 않는 경우. [properties]는 BluetoothGattCharacteristic.PROPERTY_* 의 조합이다. */
+    class IllegalCharacteristicPropertyException(val characteristicUuid: UUID, val properties: Int, val operation: String) :
+        BleException("Characteristic $characteristicUuid does not support $operation (properties 0x${Integer.toHexString(properties)})")
+    /** 이미 다른 종류로 구독 중인 characteristic 에 notification/indication 을 요청한 경우. 기존 구독은 유지된다. */
+    class NotificationTypeConflictException(val characteristicUuid: UUID, val existing: BleDevice.NotificationType, val requested: BleDevice.NotificationType) :
+        BleException("$characteristicUuid notification is already set up as $existing (requested $requested)")
+    /** 작업에 필요한 런타임 권한이 없는 경우. [permissions]는 허용되지 않은 권한 이름이다. (예: android.permission.BLUETOOTH_CONNECT) */
+    class PermissionDeniedException(val permissions: List<String>) :
+        BleException("Permission denied: ${permissions.joinToString()}")
+    class BondFailedException @JvmOverloads constructor(message: String = "Bond failed") : BleException(message)
+    /** 스캔을 시작하지 못한 경우. [errorCode]는 ScanCallback.SCAN_FAILED_* 값이다. */
+    class ScanFailedException(val errorCode: Int) : BleException("Scan failed with error code $errorCode")
 
     enum class Engine {
 //        RX_ANDROID_BLE,

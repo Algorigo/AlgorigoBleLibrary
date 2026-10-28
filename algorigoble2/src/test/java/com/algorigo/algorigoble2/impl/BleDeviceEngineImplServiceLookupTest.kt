@@ -61,11 +61,11 @@ class BleDeviceEngineImplServiceLookupTest {
         verify(exactly = 0) { fixture.gatt.writeCharacteristic(inFirst) }
     }
 
-    // 수정 전 코드에도 있는 API 로 확인한다: 메시지 없는 IllegalStateException() 이었다
+    // 수정 전에는 메시지 없는 IllegalStateException() 이었다
     @Test
     fun read_notFound_failsWithMessageNamingCharacteristic() {
         fixture.bleDevice.readCharacteristicSingle(MISSING_UUID).test()
-            .assertError { it is IllegalStateException && it.message?.contains(MISSING_UUID.toString()) == true }
+            .assertError { it is BleManager.CharacteristicNotFoundException && it.message?.contains(MISSING_UUID.toString()) == true }
     }
 
     @Test

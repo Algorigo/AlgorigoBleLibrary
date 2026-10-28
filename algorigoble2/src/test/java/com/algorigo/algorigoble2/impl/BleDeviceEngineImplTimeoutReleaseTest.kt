@@ -12,7 +12,6 @@ import org.junit.Rule
 import org.junit.Test
 import java.util.UUID
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
 
 /**
  * 작업이 타임아웃된 뒤에도 Android BluetoothGatt 가 busy 로 남아 다음 작업이 연달아 실패하던 문제 테스트.
@@ -38,7 +37,7 @@ class BleDeviceEngineImplTimeoutReleaseTest {
     private fun timeOutStuckRead() {
         fixture.bleDevice.readCharacteristicSingle(STUCK_UUID).test().also {
             advance(BleDevice.DEFAULT_OPERATION_TIMEOUT_MILLIS)
-            it.assertError(TimeoutException::class.java)
+            it.assertError(BleManager.OperationTimeoutException::class.java)
         }
     }
 
@@ -47,7 +46,7 @@ class BleDeviceEngineImplTimeoutReleaseTest {
         val stuckRead = fixture.bleDevice.readCharacteristicSingle(STUCK_UUID).test()
         val normalRead = fixture.bleDevice.readCharacteristicSingle(NORMAL_UUID).test()
         advance(BleDevice.DEFAULT_OPERATION_TIMEOUT_MILLIS)
-        stuckRead.assertError(TimeoutException::class.java)
+        stuckRead.assertError(BleManager.OperationTimeoutException::class.java)
 
         advance(15_000)
         verify(exactly = 0) { fixture.gatt.readCharacteristic(normal) }
@@ -101,7 +100,7 @@ class BleDeviceEngineImplTimeoutReleaseTest {
         fixture.callback.onServiceChanged(fixture.gatt)
         val waitingRead = fixture.bleDevice.readCharacteristicSingle(STUCK_UUID).test()
         advance(BleDevice.DEFAULT_OPERATION_TIMEOUT_MILLIS)
-        waitingRead.assertError(TimeoutException::class.java)
+        waitingRead.assertError(BleManager.OperationTimeoutException::class.java)
         verify(exactly = 0) { fixture.gatt.readCharacteristic(any()) }
 
         fixture.bleDevice.readCharacteristicSingle(NORMAL_UUID).test()
@@ -115,7 +114,7 @@ class BleDeviceEngineImplTimeoutReleaseTest {
         every { fixture.gatt.readCharacteristic(stuck) } returns false
         val rejected = fixture.bleDevice.readCharacteristicSingle(STUCK_UUID).test()
         advance(500L * 5)
-        rejected.assertError(BleDeviceEngineImpl.CommunicationFailedException::class.java)
+        rejected.assertError(BleManager.GattRequestRejectedException::class.java)
 
         fixture.bleDevice.readCharacteristicSingle(NORMAL_UUID).test()
 
@@ -127,7 +126,7 @@ class BleDeviceEngineImplTimeoutReleaseTest {
         fixture.bleDevice.operationTimeoutMillis = 1
         fixture.bleDevice.readCharacteristicSingle(STUCK_UUID).test().also {
             advance(1)
-            it.assertError(TimeoutException::class.java)
+            it.assertError(BleManager.OperationTimeoutException::class.java)
         }
         fixture.bleDevice.operationTimeoutMillis = BleDevice.DEFAULT_OPERATION_TIMEOUT_MILLIS
         val normalRead = fixture.bleDevice.readCharacteristicSingle(NORMAL_UUID).test()

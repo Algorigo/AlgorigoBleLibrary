@@ -13,11 +13,10 @@ import org.junit.Rule
 import org.junit.Test
 import java.util.UUID
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
 
 /**
  * GATT 작업이 콜백을 기다리다 영원히 끝나지 않는 문제(P0)에 대한 테스트.
- * 작업 도중 연결이 끊기면 DisconnectedException, 응답이 없으면 operationTimeoutMillis 후 TimeoutException 으로 끝나야 한다.
+ * 작업 도중 연결이 끊기면 DisconnectedException, 응답이 없으면 operationTimeoutMillis 후 OperationTimeoutException 으로 끝나야 한다.
  */
 class BleDeviceEngineImplOperationGuardTest {
 
@@ -111,7 +110,7 @@ class BleDeviceEngineImplOperationGuardTest {
 
         rxRule.testScheduler.advanceTimeBy(BleDevice.DEFAULT_OPERATION_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
 
-        observer.assertError(TimeoutException::class.java)
+        observer.assertError(BleManager.OperationTimeoutException::class.java)
     }
 
     @Test
@@ -153,7 +152,7 @@ class BleDeviceEngineImplOperationGuardTest {
         assertNotComplete().assertNoErrors()
 
         rxRule.testScheduler.advanceTimeBy(1, TimeUnit.MILLISECONDS)
-        assertError(TimeoutException::class.java)
+        assertError(BleManager.OperationTimeoutException::class.java)
     }
 
     companion object {

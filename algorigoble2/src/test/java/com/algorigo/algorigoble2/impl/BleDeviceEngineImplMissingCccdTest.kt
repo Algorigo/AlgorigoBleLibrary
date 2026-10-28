@@ -58,7 +58,7 @@ class BleDeviceEngineImplMissingCccdTest {
         val (fixture, characteristic) = connectedFixture(Build.VERSION_CODES.TIRAMISU, BluetoothGattCharacteristic.PROPERTY_READ, withCccd = true)
 
         fixture.bleDevice.setupNotification(BleDevice.NotificationType.NOTIFICATION, UUID_INDICATE).test()
-            .assertError(BleDeviceEngineImpl.IllegalCharacteristicProperty::class.java)
+            .assertError(BleManager.IllegalCharacteristicPropertyException::class.java)
         verify(exactly = 0) { fixture.gatt.setCharacteristicNotification(characteristic, any()) }
     }
 

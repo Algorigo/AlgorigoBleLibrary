@@ -98,8 +98,9 @@ internal class GattTestFixture(val bleDevice: BleDevice = BleDevice(), sdkInt: I
         callback.onServicesDiscovered(targetGatt, status)
     }
 
-    fun disconnectFromRemote(targetGatt: BluetoothGatt = gatt) {
-        callback.onConnectionStateChange(targetGatt, BluetoothGatt.GATT_SUCCESS, BluetoothProfile.STATE_DISCONNECTED)
+    /** 연결이 끊겼다는 콜백을 보낸다. [status]는 끊긴 사유(예: 8 연결 타임아웃, 19 상대 기기가 끊음) */
+    fun disconnectFromRemote(targetGatt: BluetoothGatt = gatt, status: Int = BluetoothGatt.GATT_SUCCESS) {
+        callback.onConnectionStateChange(targetGatt, status, BluetoothProfile.STATE_DISCONNECTED)
     }
 
     /**
