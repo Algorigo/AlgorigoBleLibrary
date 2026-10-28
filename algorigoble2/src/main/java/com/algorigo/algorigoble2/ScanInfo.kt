@@ -4,6 +4,7 @@ import android.bluetooth.le.ScanRecord
 import android.bluetooth.le.ScanResult
 import android.os.Build
 import android.util.SparseArray
+import androidx.annotation.ChecksSdkIntAtLeast
 import java.util.UUID
 
 /**
@@ -35,13 +36,17 @@ data class ScanInfo @JvmOverloads constructor(
         serviceUuids = scanResult.scanRecord?.serviceUuids?.map { it.uuid },
         serviceData = scanResult.scanRecord?.serviceData?.mapKeys { it.key.uuid },
         txPower = scanResult.txPower(sdkInt),
-        isConnectable = if (sdkInt >= Build.VERSION_CODES.O) scanResult.isConnectable else null,
+        isConnectable = if (isAtLeast(sdkInt, Build.VERSION_CODES.O)) scanResult.isConnectable else null,
         timestampNanos = scanResult.timestampNanos,
     )
 }
 
+// sdkInt 는 Build.VERSION.SDK_INT 이다. (테스트에서만 다른 값을 넣는다)
+@ChecksSdkIntAtLeast(parameter = 1)
+private fun isAtLeast(sdkInt: Int, api: Int) = sdkInt >= api
+
 private fun ScanRecord.getAdvertisingData(sdkInt: Int): Map<Int, ByteArray> {
-    return if (sdkInt >= Build.VERSION_CODES.TIRAMISU) {
+    return if (isAtLeast(sdkInt, Build.VERSION_CODES.TIRAMISU)) {
         advertisingDataMap
     } else {
         // API 32 이하에는 advertisingDataMap 이 없으므로 원본 바이트를 직접 파싱한다
@@ -49,11 +54,10 @@ private fun ScanRecord.getAdvertisingData(sdkInt: Int): Map<Int, ByteArray> {
     }
 }
 
-@Suppress("NewApi") // sdkInt 로 확인한다
 private fun ScanResult.txPower(sdkInt: Int): Int? {
     // 광고에 TX Power Level 이 없으면 Integer.MIN_VALUE
     scanRecord?.txPowerLevel?.takeIf { it != Int.MIN_VALUE }?.let { return it }
-    if (sdkInt >= Build.VERSION_CODES.O && txPower != ScanResult.TX_POWER_NOT_PRESENT) {
+    if (isAtLeast(sdkInt, Build.VERSION_CODES.O) && txPower != ScanResult.TX_POWER_NOT_PRESENT) {
         return txPower
     }
     return null
