@@ -271,8 +271,9 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
      * (기기가 만들어질 때마다 DISCONNECTED 가 전달되면 스캔 중에 의미 없는 이벤트가 쏟아진다)
      */
     private fun subscribeConnectionState(device: BleDevice, onChanged: (BleDevice.ConnectionState) -> Unit = {}) {
-        // 구독은 기기 안의 relay 가 들고 있으므로 기기가 GC 되면 함께 사라진다
-        device.getConnectionStateObservable()
+        // 구독은 기기 안의 relay 가 들고 있으므로 기기가 GC 되면 함께 사라진다.
+        // 기기마다 callback 스레드를 붙잡지 않도록 내부 스트림을 쓰고, 사용자에게는 BleManager 에서 callback 스레드로 넘긴다
+        device.connectionStateObservableInternal()
             .skip(1)
             .subscribe({
                 onChanged(it)

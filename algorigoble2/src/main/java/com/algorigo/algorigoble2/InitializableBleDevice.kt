@@ -14,9 +14,10 @@ abstract class InitializableBleDevice : BleDevice() {
         accept(false)
     }
 
-    final override fun getConnectionStateObservable(): Observable<ConnectionState> {
+    // 초기화 중이면 GATT 가 연결돼 있어도 INITIALIZING 으로 보고한다. (공개 스트림은 BleDevice 가 callback 스레드로 넘긴다)
+    final override fun connectionStateObservableInternal(): Observable<ConnectionState> {
         return Observable.combineLatest(
-            super.getConnectionStateObservable(),
+            super.connectionStateObservableInternal(),
             initializeRelay
         ) { connectionState, initialized ->
             if (connectionState == ConnectionState.CONNECTED && !initialized) {
@@ -38,6 +39,8 @@ abstract class InitializableBleDevice : BleDevice() {
     final override fun connectCompletable(timeoutMillis: Long): Completable {
         return super.connectCompletable(timeoutMillis)
             .concatWith(getInitializeCompletable())
+            // 초기화가 다른 scheduler(timer 등)에서 끝나도 결과는 callback 스레드로 전달한다
+            .deliverToCallback()
     }
 
     private fun getInitializeCompletable(): Completable {
