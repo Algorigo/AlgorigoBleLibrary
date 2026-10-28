@@ -235,7 +235,13 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
             removeReleasedDevices()
 
             return if (clazz != null) {
-                clazz.newInstance()
+                // 인자 없는 생성자로 만든다. (Class.newInstance 는 deprecated. 앱의 R8 이 생성자를 지우지 않도록 consumer-rules.pro 에서 남긴다)
+                val constructor = try {
+                    clazz.getDeclaredConstructor()
+                } catch (exception: NoSuchMethodException) {
+                    throw IllegalArgumentException("${clazz.name} needs a no-arg constructor to be created by getDevice(macAddress, Class)", exception)
+                }
+                constructor.newInstance()
             } else {
                 bleDeviceDelegate.createBleDevice(bluetoothDevice, scanRecord)
             }

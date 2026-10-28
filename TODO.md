@@ -851,7 +851,15 @@
     - 샘플 앱은 MAC 형식을 직접 바꾸던 코드(정규식, `String.split` 확장 함수)를 지우고 입력을 그대로 넘깁니다. 이전에는 소문자 `aa:bb:...` 입력이 정규식을 통과한 뒤 `getDevice`가 null을 돌려줘 `!!`에서 NPE가 났습니다.
     - 테스트: `MacAddressNormalizationTest`(5건: 정규화 형식, 소문자·구분자 없는 주소로 같은 기기 조회, 잘못된 주소는 null, 본딩 기기 소문자 조회, 가상 기기 여러 형식 조회). adapter mock이 실제 Android처럼 대문자 `:` 형식만 받습니다.
     - 실기기 확인(Fold5 → M446K): Android의 `getRemoteDevice("4f:34:2d:86:b3:97")`는 `IllegalArgumentException: ... is not a valid Bluetooth address`. 라이브러리의 `getDevice("4f:34:2d:86:b3:97")`와 `getDevice("4f342d86b397")`는 스캔으로 찾은 기기와 같은 객체를 돌려줬고, 그 기기로 연결과 read가 정상이었습니다. `getConnectedDevice("4f342d86b397")`도 연결된 기기를 찾았습니다.
-- [ ] **[구조]** `clazz.newInstance()`(`impl/BleManagerEngineImpl.kt:148`)는 deprecated이고, 사용하는 앱이 R8을 쓰면 no-arg 생성자가 제거될 수 있습니다. factory 람다 방식으로 바꾸거나 consumer proguard rule을 추가합니다.
+- [x] **[구조]** `clazz.newInstance()`(`impl/BleManagerEngineImpl.kt:148`)는 deprecated이고, 사용하는 앱이 R8을 쓰면 no-arg 생성자가 제거될 수 있습니다. factory 람다 방식으로 바꾸거나 consumer proguard rule을 추가합니다.
+  - ✅ 해결 (`feature/device_constructor_keep`): 공개 API를 바꾸지 않도록 consumer proguard rule을 추가했습니다.
+    - `consumer-rules.pro`(비어 있었음)에 `BleDevice` 하위 클래스의 인자 없는 생성자를 남기는 `-keepclassmembers` 규칙을 넣었습니다. release AAR의 `proguard.txt`에 들어가서 사용하는 앱의 R8에 적용됩니다.
+    - deprecated `Class.newInstance()` 대신 `getDeclaredConstructor().newInstance()`를 씁니다. 인자 없는 생성자가 없는 클래스를 넘기면 원인을 담은 `IllegalArgumentException`입니다(호출 실수).
+    - CLAUDE.md의 설명을 고쳤습니다.
+    - 테스트: `GetDeviceByClassTest`(2건: 하위 클래스를 만들고 같은 기기는 캐시된 객체, 인자 없는 생성자가 없으면 `IllegalArgumentException`).
+    - 실기기 확인(Fold5, AGP 8.6.1의 R8 full mode): 샘플 앱에 리플렉션으로만 만드는 임시 하위 클래스(`ReflectOnlyDevice`)와 `getDevice(mac, ReflectOnlyDevice::class.java)` 호출을 넣고 minify한 release APK로 확인했습니다(확인 후 되돌림).
+      - 규칙 전: dex에서 이 클래스의 생성자가 지워졌고(Direct methods 없음), 앱에서 호출하면 `InstantiationException: java.lang.Class<n0.p> cannot be instantiated`로 크래시가 났습니다.
+      - 규칙 후: dex에 `<init>()V`가 남았고, 같은 호출이 `p null(AA:BB:CC:DD:EE:01)` 기기를 정상으로 만들었습니다. (입력은 `aabbccddee01`로, 앞 항목의 MAC 정규화도 release 빌드에서 동작)
 - [ ] **[배포]** Gradle에서 deprecated된 `buildDir`, `archivesBaseName`을 교체합니다.
 - [x] **[구조]** `ExampleInstrumentedTest`가 항상 실패합니다. 패키지명을 `com.algorigo.algorigoble2.test`로 기대하지만, 실제 namespace는 `com.algorigo.rx.algorigoble2`입니다. 이 때문에 `connectedDebugAndroidTest` 전체 실행이 실패하므로, 수정하거나 삭제해야 합니다(`algorigoble2/src/androidTest/.../ExampleInstrumentedTest.kt`).
   - ✅ 해결 (`feature/test_coverage`): P2 "테스트 부재" 항목에서 라이브러리의 `ExampleInstrumentedTest`와 `ExampleUnitTest`를 지웠습니다. Fold5와 M446K에서 `:algorigoble2:connectedDebugAndroidTest`가 통과합니다.
