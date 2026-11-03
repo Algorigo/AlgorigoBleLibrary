@@ -1,4 +1,4 @@
-version: 2
+version: 2.1
 jobs:
   build:
     docker:
@@ -86,7 +86,6 @@ jobs:
               # --verbose 는 Authorization 헤더(토큰)를 로그에 출력하므로 사용하지 않고, 실패 시 응답 본문과 함께 job 을 실패시킨다.
               curl --fail-with-body --request POST --header "Authorization: Bearer ${MAVEN_CENTRAL_TOKEN}" --form bundle=@staging-deploy.zip https://central.sonatype.com/api/v1/publisher/upload
 workflows:
-  version: 2
   build_deploy:
     jobs:
     - build:
