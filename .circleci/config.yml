@@ -3,6 +3,16 @@ jobs:
   build:
     docker:
       - image: cimg/android:2024.01
+    # medium(4GB) 컨테이너에서는 Gradle daemon(-Xmx2048m, metaspace 무제한)과 같은 heap 설정을 상속한
+    # Kotlin compile daemon 이 함께 떠서 메모리 한도를 넘고, OOM killer 가 daemon 을 죽인다
+    # ("Gradle build daemon disappeared unexpectedly").
+    # Kotlin 은 Gradle daemon 안에서 컴파일하게 해 JVM 하나를 없애고, heap/metaspace/worker 수를 제한한다.
+    # GRADLE_OPTS 의 값은 프로젝트와 ~/.gradle 의 gradle.properties 보다 우선한다.
+    environment: &gradle_env
+      GRADLE_OPTS: >-
+        -Dorg.gradle.jvmargs="-Xmx2g -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
+        -Dorg.gradle.workers.max=2
+        -Dorg.gradle.project.kotlin.compiler.execution.strategy=in-process
     steps:
     - checkout
     - run:
@@ -48,6 +58,7 @@ jobs:
   deploy:
     docker:
       - image: cimg/android:2024.01
+    environment: *gradle_env
     working_directory: ~/code
     steps:
       - attach_workspace:
@@ -64,6 +75,7 @@ jobs:
   deploy_to_maven_central:
     docker:
       - image: cimg/android:2024.01
+    environment: *gradle_env
     working_directory: ~/code
     steps:
       - attach_workspace:
