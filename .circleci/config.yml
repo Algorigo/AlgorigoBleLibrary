@@ -8,11 +8,19 @@ jobs:
     # ("Gradle build daemon disappeared unexpectedly").
     # Kotlin 은 Gradle daemon 안에서 컴파일하게 해 JVM 하나를 없애고, heap/metaspace/worker 수를 제한한다.
     # GRADLE_OPTS 의 값은 프로젝트와 ~/.gradle 의 gradle.properties 보다 우선한다.
+    #
+    # -Xmx2g 로도 daemon 이 계속 죽어서 더 줄였다. clean build 실측: live heap 최대 ~0.6GB, metaspace ~400MB 인데
+    # G1 은 heap 을 -Xmx 근처까지 commit 하므로 2g 는 daemon 하나가 2.5GB 이상을 차지할 수 있다.
+    # 여기에 test JVM(기본 heap 512m), aapt2, JVM native 메모리가 더해진다.
+    # - -Xmx1536m: live heap 대비 2배 이상 여유가 있고, Full GC 없이 빌드 시간도 거의 같다.
+    # - ActiveProcessorCount=2: 컨테이너에서 JVM 이 호스트 CPU 수를 보면 JIT/GC 스레드와 스레드풀이 그만큼 늘어나므로 고정한다.
+    # - MALLOC_ARENA_MAX=2: glibc 가 스레드마다 malloc arena 를 만들어 native 메모리가 불어나는 것을 막는다(aapt2 포함 모든 프로세스).
     environment: &gradle_env
       GRADLE_OPTS: >-
-        -Dorg.gradle.jvmargs="-Xmx2g -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
+        -Dorg.gradle.jvmargs="-Xmx1536m -XX:MaxMetaspaceSize=768m -XX:ActiveProcessorCount=2 -Dfile.encoding=UTF-8"
         -Dorg.gradle.workers.max=2
         -Dorg.gradle.project.kotlin.compiler.execution.strategy=in-process
+      MALLOC_ARENA_MAX: "2"
     steps:
     - checkout
     - run:
@@ -34,6 +42,17 @@ jobs:
           ./gradlew build
         no_output_timeout: 30m
         name: 'Run: ./gradlew build'
+    - run:
+        # 빌드가 실패해도 실행해서 메모리 한도/최대 사용량/OOM kill 횟수를 남긴다 (cgroup v2, v1 중 있는 쪽).
+        # memory.events 의 oom_kill 이 0 보다 크면 OOM killer 가 프로세스를 죽인 것이다.
+        name: Container memory usage
+        when: always
+        command: |
+          for f in /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory.peak /sys/fs/cgroup/memory.events \
+                   /sys/fs/cgroup/memory/memory.limit_in_bytes /sys/fs/cgroup/memory/memory.max_usage_in_bytes \
+                   /sys/fs/cgroup/memory/memory.failcnt; do
+            if [ -r "$f" ]; then echo "== $f"; cat "$f"; fi
+          done
     - save_cache:
         key: gradle-v1a-{{ arch }}-{{ checksum "./tmp_gradle_cache_seed" }}
         name: Save gradle cache
