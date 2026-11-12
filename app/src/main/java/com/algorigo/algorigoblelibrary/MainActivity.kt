@@ -1,18 +1,18 @@
 package com.algorigo.algorigoblelibrary
 
-import android.Manifest
 import android.annotation.SuppressLint
-import android.bluetooth.BluetoothAdapter
 import android.content.Intent
-import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.Toast
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.recyclerview.widget.RecyclerView
 import com.algorigo.algorigoble2.BleDevice
+import com.algorigo.algorigoble2.BleManager
 import com.algorigo.algorigoble2.BleScanFilter
 import com.algorigo.algorigoble2.BleScanSettings
 import com.algorigo.algorigoble2.ScanInfo
@@ -94,6 +94,7 @@ class MainActivity : RequestPermissionActivity() {
 
     private var disposable: Disposable? = null
     private var connectionStateDisposable: Disposable? = null
+    private var connectDisposable: Disposable? = null
 
     private lateinit var macAddressEditText: EditText
     private lateinit var macAddressButton: Button
@@ -104,6 +105,7 @@ class MainActivity : RequestPermissionActivity() {
     private val socketDisposables = mutableMapOf<String, Disposable>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         Intent(this, BluetoothService::class.java).also {
             startService(it)
@@ -135,14 +137,18 @@ class MainActivity : RequestPermissionActivity() {
         connectionStateDisposable?.dispose()
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        connectDisposable?.dispose()
+    }
+
     private fun requestGPSEnabledObservable(): Observable<Boolean> {
         return showDialogCompletable(getString(R.string.title_ask_to_enable_gps), getString(R.string.message_ask_to_enable_gps))
             .andThen(openGPSSettingsAndResultObservable())
     }
 
     private fun requestBluetoothEnabled() {
-        val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
-        enableBluetoothRequest.launch(enableBtIntent)
+        enableBluetoothRequest.launch(BleManager.createEnableBluetoothIntent())
     }
 
     private fun requestBluetoothEnabledObservable(): Observable<Boolean> {
@@ -167,6 +173,7 @@ class MainActivity : RequestPermissionActivity() {
 
     private fun initView() {
         setContentView(R.layout.activity_main)
+        findViewById<View>(R.id.main).applySystemBarsPadding()
 
         macAddressEditText = findViewById(R.id.mac_address_edittext)
         macAddressButton = findViewById(R.id.mac_address_btn)
@@ -176,29 +183,27 @@ class MainActivity : RequestPermissionActivity() {
 
         macAddressButton.setOnClickListener {
             macAddressEditText.text.toString().also { str ->
-                Rx2ServiceBindingFactory.bind<BluetoothService.BluetoothBinder>(this, Intent(this, BluetoothService::class.java))
+                connectDisposable = Rx2ServiceBindingFactory.bind<BluetoothService.BluetoothBinder>(this, Intent(this, BluetoothService::class.java))
                     .map { binder ->
-                        val macAddress =
-                            when {
-                                Regex("[0-9A-Fa-f]{12}").matches(str) -> {
-                                    str.split(2).joinToString(":")
-                                }
-                                Regex("[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}").matches(str) -> {
-                                    str
-                                }
-                                else -> {
-                                    throw IllegalArgumentException("mac address pattern wrong")
-                                }
-                            }
-                        binder.getService().bleManager.getDevice(macAddress)!!
+                        // 라이브러리가 대소문자와 구분자 형식을 맞춘다. 형식이 맞지 않으면 null
+                        binder.getService().bleManager.getDevice(str)
+                            ?: throw IllegalArgumentException("mac address pattern wrong")
                     }
                     .firstOrError()
                     .flatMapCompletable { it.connectCompletable() }
+                    // 연결 타임아웃은 computation 스레드에서 오므로 Toast 를 띄우기 전에 main thread 로 옮긴다
+                    .observeOn(AndroidSchedulers.mainThread())
+                    .doOnSubscribe {
+                        macAddressButton.isEnabled = false
+                    }
+                    .doFinally {
+                        macAddressButton.isEnabled = true
+                    }
                     .subscribe({
                         Log.e(TAG, "device connected")
                     }, {
                         Log.e(TAG, "", it)
-                        Toast.makeText(this, it.localizedMessage, Toast.LENGTH_LONG).show()
+                        Toast.makeText(this, it.localizedMessage ?: it.javaClass.simpleName, Toast.LENGTH_LONG).show()
                     })
             }
         }
@@ -291,19 +296,8 @@ class MainActivity : RequestPermissionActivity() {
             })
     }
 
-    private fun getPermissions(): Array<String> {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            arrayOf(
-                Manifest.permission.BLUETOOTH_SCAN,
-                Manifest.permission.BLUETOOTH_CONNECT,
-            )
-        } else {
-            arrayOf(
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION,
-            )
-        }
-    }
+    // 이 기기(Android 버전)에서 스캔과 연결에 필요한 권한
+    private fun getPermissions(): Array<String> = BleManager.getRequiredPermissions().toTypedArray()
 
     private fun notifyDataSetChanged() {
         adapter.notifyDataSetChanged()
@@ -311,14 +305,5 @@ class MainActivity : RequestPermissionActivity() {
 
     companion object {
         private val TAG = MainActivity::class.java.simpleName
-    }
-}
-
-fun String.split(size: Int): Array<String> {
-    if (this.count() % size != 0) {
-        throw IllegalStateException()
-    }
-    return Array(this.count() / size) {
-        substring(it*2, it*2+2)
     }
 }

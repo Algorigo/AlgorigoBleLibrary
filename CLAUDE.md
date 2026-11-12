@@ -1,0 +1,64 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project
+
+Android BLE library built on RxJava3 (`com.algorigo.rx:algorigoble2`), published to Maven Central. Two Gradle modules:
+- `algorigoble2/` — the library (minSdk 24, compile/target 35, Java/JVM 11, Kotlin 2.0)
+- `app/` — sample/test app that depends on `project(':algorigoble2')`; use it to exercise library changes on a real device
+
+## Commands
+
+```bash
+./gradlew build                                   # what CI runs (assemble + unit tests + lint)
+./gradlew :algorigoble2:assembleRelease           # build the AAR
+./gradlew :app:installDebug                       # install the sample app on a connected device
+./gradlew :algorigoble2:testDebugUnitTest         # JVM unit tests
+./gradlew :algorigoble2:testDebugUnitTest --tests "*BleDeviceEngineImplConnectTest"   # single test class
+./gradlew :algorigoble2:connectedDebugAndroidTest # instrumented tests (device required)
+./gradlew lint
+```
+
+### Tests
+- JVM unit tests (`algorigoble2/src/test`, MockK + `unitTests.returnDefaultValues`, so `Build.VERSION.SDK_INT` is 0): engine behavior is driven through `impl/GattTestFixture` (mock `BluetoothDevice`/`BluetoothGatt`, captured `BluetoothGattCallback`, `sdkInt` injection for API-33 paths) and `testutil/RxTestSchedulerRule` (computation → `TestScheduler`, io → trampoline). `virtual/VirtualDeviceIntegrationTest` exercises `BleManager` + `VirtualDevice` end to end. Create objects that grab schedulers at construction (e.g. `VirtualDevice`) after the rule has started (`@Before`).
+- Instrumented tests (`src/androidTest`, device required): Android framework builders that are stubs on the JVM (`BleScanOptionsConverterInstrumentedTest`) and logging/kotlin-reflect runtime checks. The sample app has its own instrumented tests (`app/src/androidTest`).
+- Real BLE behavior still needs hardware; verify fixes with the `app` module or temporary probes on a phone.
+
+### Build configuration gotchas
+- The library version is set in `algorigoble2/build.gradle` (`versionStr`). On any branch whose name doesn't contain `master`, the version becomes `<versionStr>-<user.name>-SNAPSHOT` and the publishing block references `NEXUS_SNAPSHOT_REPOSITORY_URL` / `nexusUsername` / `nexusPassword`. These come from `~/.gradle/gradle.properties` (CI downloads it); without them Gradle configuration fails on non-master branches.
+- `publish` uploads the pre-built `build/outputs/aar/algorigoble2-release.aar`, so assemble must run first. On master it publishes to `build/staging-deploy`, which CI zips and uploads to the Sonatype Central API.
+- When adding a library dependency that consumers need, check whether it must also be declared in the POM (there's history of adding deps to the pom manually).
+
+### Branching / CI (CircleCI, `.circleci/config.yml`)
+Git-flow with `v2/` prefixes: `v2/develop` (integration), `v2/master` (release, PR base), `v2/release/*`, `v2/hotfix/*`, `v2/feature/*`. `build` runs on all of these; `release/*` and `hotfix/*` publish SNAPSHOTs to Nexus; `v2/master` publishes to Maven Central. Commit messages are typically written in Korean.
+
+## Architecture
+
+Public API / engine split: user-facing classes delegate everything to `internal` abstract engines, so the platform implementation and the virtual (fake) implementation are interchangeable.
+
+- `BleManager` → `BleManagerEngine` (impl: `impl/BleManagerEngineImpl`). Handles scanning, device lookup/caching, bonded/connected device lists, and a global connection-state stream. The deprecated `Engine` enum and the constructor taking it are a vestige of a removed RxAndroidBle backend; there is only one engine.
+- `BleDevice` → `BleDeviceEngine` (impl: `impl/BleDeviceEngineImpl`, wraps `BluetoothGatt`). `BleDevice` is `open` and meant to be subclassed by consumers for device-specific protocols; the engine is injected after construction via `initEngine()`, so subclasses need a no-arg constructor and must not touch `deviceId`/`engine` in their constructor.
+- `BleManager.BleDeviceDelegate.createBleDevice()` decides which `BleDevice` subclass to instantiate for a scanned device (return `null` to ignore it). `getDevice(mac, Class)` instead instantiates via the no-arg constructor (reflection; `consumer-rules.pro` keeps those constructors from consumers' R8). `BleManagerEngineImpl.deviceMap` caches one `BleDevice` per `BluetoothDevice`.
+- `InitializableBleDevice` adds a post-connect `initializeCompletable()` step; until it completes, its connection state reports `INITIALIZING` even though GATT is connected, and a failed init disconnects.
+- Connect retry (`connectRetryCount`) and auto-reconnect (`autoReconnect`) live in `BleDevice`, not the engine, so every attempt goes through `connectOnce()` — the per-attempt hook that `InitializableBleDevice` overrides to re-run init. Engines report disconnects with `bleDevice.notifyDisconnected()` (calls `onDisconnected()` and may schedule a reconnect) and `BleManagerEngineImpl` reports Bluetooth-on with `notifyBluetoothEnabled()`. Library code that only needs to drop the link (e.g. failed init) should call `engine.disconnect()`; public `disconnect()` also cancels auto-reconnect.
+
+### BleDeviceEngineImpl internals
+- Connection state lives in a `BehaviorRelay<State>`; `State.CONNECTED` carries the `BluetoothGatt`. `CONNECTED` is only emitted after `onServicesDiscovered`, not on the raw GATT connect.
+- `BluetoothGattCallback` results are pushed into `replyRelay` (read/write characteristic & descriptor replies, tagged by `Type` + UUID) and `notificationRelay`. GATT operations go through a per-device queue (`enqueue`), so only one is in flight; each is guarded by a disconnect check and `operationTimeoutMillis`. A GATT call that is rejected (returns false / non-SUCCESS) raises `BleManager.GattRequestRejectedException`, retried 5× at 500 ms.
+- `setupNotification` returns `Observable<Observable<ByteArray>>`: the outer emission means the CCCD descriptor write succeeded; disposing it disables the notification.
+- Services are read from the current `BluetoothGatt` on every lookup (no cache), so reconnects and `onServiceChanged` rediscovery are picked up.
+- SPP (RFCOMM) lives in `impl/SppConnection` with its own state; the engine merges it into the single public state (`SPP_CONNECTING`/`SPP_CONNECTED` only while GATT is `DISCONNECTED`). GATT and SPP on the same device are mutually exclusive, checked under the shared `stateLock`.
+- Bluetooth-off is detected by a broadcast receiver in `BleManagerEngineImpl`, which calls `onBluetoothDisabled()` on every cached device engine.
+
+### Virtual devices
+`virtual/VirtualDevice` + `VirtualDeviceEngine` let you simulate a peripheral without hardware. Pass `Pair(VirtualDevice, BleDevice)` into the `BleManager` constructor; the virtual devices are merged into scan results, `getDevice`, and bonded/connected lists. See `app/.../VirtualBleDevice.kt` for an example.
+
+### Exceptions
+Every failure the library raises is a `BleException` (`BleException.kt`, abstract on purpose so new subtypes don't break callers' `when`). Concrete types live in `BleManager` (`DisconnectedException(status)` carrying the disconnect reason from `onConnectionStateChange`, `BluetoothDisabledException`, `OperationTimeoutException(operation)`, `GattOperationFailedException(operation, status)`, `CharacteristicNotFoundException`, `PermissionDeniedException`, ...) plus `exception/SystemServiceException` for scan prerequisites. Engine `State.DISCONNECTED(cause)` carries the error that in-flight operations/notifications should fail with. Caller mistakes (bad arguments) stay as standard `IllegalArgumentException`; SPP socket I/O stays `IOException`.
+
+### Callback threading
+Public results (`BleDevice` / `BleManager.getConnectionStateObservable()` Observables, Singles, Completables) are handed off with `deliverToCallback()` (`CallbackScheduler.kt`, `Schedulers.io()`, `delayError` for streams), so user code never runs on the GATT binder thread or inside the engine's state lock. Library-internal code must subscribe to the raw streams instead (`BleDeviceEngine.getConnectionStateObservable()`, `BleDevice.connectionStateObservableInternal()`), otherwise every cached device would pin an io thread. Scan results stay on the main thread (Android default). Tests control delivery via `CallbackScheduler.override`.
+
+### Logging
+Uses `com.algorigo.library:algorigo-logger` (`L.debug/info/error(tag, ...)`) with the tag hierarchy in `logging/Tags.kt` (`Ble`, `Ble.Engine.Default`, `Ble.Device.Default`, ...). Prefer these over `android.util.Log`. For logs on hot paths (per notification / per GATT op) use `logDebug`/`logVerbose` from `logging/LazyLog.kt`, which skip building the message (and the `device.name` IPC in `logLabel`) when the level is off. The library never adds handlers; apps attach `AndroidHandler` to `BleManager.getLogger()` and should call `LogManager.removeRootAndroidHandler()`, otherwise Android's default root handler prints NOTICE+ records a second time.

@@ -11,10 +11,18 @@ internal abstract class BleManagerEngine(protected val bleDeviceDelegate: BleMan
 
     abstract fun scanObservable(scanSettings: BleScanSettings, vararg scanFilters: BleScanFilter): Observable<List<Pair<BleDevice, ScanInfo>>>
 
+    abstract val isBluetoothEnabled: Boolean
+
+    /** 현재 상태를 먼저 내보내고 바뀔 때마다 내보낸다. 에러로 끝나지 않는다. */
+    abstract fun getScanAvailabilityObservable(): Observable<ScanAvailability>
+
     abstract fun getDevices(): Collection<BleDevice>
     abstract fun getBondedDevices(): List<BleDevice>
     abstract fun getConnectedDevices(): List<BleDevice>
     abstract fun initVirtualDevice(deviceId: VirtualDevice, bleDevice: BleDevice): BleDevice
+
+    /** 시스템에 등록한 receiver 등을 해제하고 연결된 기기를 끊는다. 여러 번 불러도 된다. */
+    abstract fun close()
 
     open fun <T : BleDevice> getDevice(macAddress: String, clazz: Class<T>? = null): BleDevice? {
         return getDevices()

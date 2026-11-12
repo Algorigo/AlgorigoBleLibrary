@@ -8,7 +8,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import androidx.recyclerview.widget.RecyclerView
-import com.algorigo.algorigoble2.BleCharacterisic
+import com.algorigo.algorigoble2.BleCharacteristic
 import java.util.*
 
 class CharacteristicAdapter(private val callback: DeviceActivity) : RecyclerView.Adapter<CharacteristicAdapter.CharacteristicViewHolder>() {
@@ -28,7 +28,7 @@ class CharacteristicAdapter(private val callback: DeviceActivity) : RecyclerView
         private val writeCharacteristicBtn: Button = itemView.findViewById(R.id.write_characteristic_btn)
         private val notifyBtn: Button = itemView.findViewById(R.id.notify_btn)
 
-        fun setCharacteristic(index: Int, characteristic: BleCharacterisic) {
+        fun setCharacteristic(index: Int, characteristic: BleCharacteristic) {
             itemView.setBackgroundColor(getColor(index))
 
             uuidEditText.setText(characteristic.uuid.toString())
@@ -55,7 +55,7 @@ class CharacteristicAdapter(private val callback: DeviceActivity) : RecyclerView
         }
     }
 
-    var characteristics = mutableListOf<BleCharacterisic>()
+    var characteristics = mutableListOf<BleCharacteristic>()
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CharacteristicViewHolder {
         return LayoutInflater.from(parent.context).inflate(R.layout.item_characteristic, parent, false).let {

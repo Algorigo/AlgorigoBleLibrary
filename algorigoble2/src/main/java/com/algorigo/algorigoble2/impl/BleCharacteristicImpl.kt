@@ -1,10 +1,10 @@
 package com.algorigo.algorigoble2.impl
 
 import android.bluetooth.BluetoothGattCharacteristic
-import com.algorigo.algorigoble2.BleCharacterisic
+import com.algorigo.algorigoble2.BleCharacteristic
 import java.util.*
 
-class BleCharacteristicImpl(private val bluetoothGattCharacteristic: BluetoothGattCharacteristic) : BleCharacterisic() {
+internal class BleCharacteristicImpl(private val bluetoothGattCharacteristic: BluetoothGattCharacteristic) : BleCharacteristic() {
     override val uuid: UUID
         get() = bluetoothGattCharacteristic.uuid
 
@@ -15,4 +15,13 @@ class BleCharacteristicImpl(private val bluetoothGattCharacteristic: BluetoothGa
 
     override fun isNotifyAvailable() = bluetoothGattCharacteristic.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0 ||
             bluetoothGattCharacteristic.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0
+
+    override val serviceUuid: UUID?
+        get() = bluetoothGattCharacteristic.service?.uuid
+
+    override val properties: Int
+        get() = bluetoothGattCharacteristic.properties
+
+    override val descriptorUuids: List<UUID>
+        get() = bluetoothGattCharacteristic.descriptors.map { it.uuid }
 }

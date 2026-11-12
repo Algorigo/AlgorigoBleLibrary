@@ -1,0 +1,895 @@
+# TODO
+
+`algorigoble2` 라이브러리 정적 분석 결과입니다. (기준 커밋 `6670eb9`, `stash@{0}`의 WIP 변경은 포함하지 않음)
+이후 실기기 테스트(SM-F946N, Android 16, 2026-10-14)에서 발견한 항목을 추가했고, 해당 항목에는 **(실기기)** 표시를 붙였습니다.
+
+- 소스 경로는 `algorigoble2/src/main/java/com/algorigo/algorigoble2/` 기준이며, 라인 번호는 위 커밋 기준입니다. 실기기 테스트로 추가한 항목은 추가 시점의 `v2/develop` 기준입니다.
+- 태그: `[버그]` 잠재적 버그 · `[구조]` 구조 개선 · `[기능]` 빠진 BLE 기능 · `[배포]` 빌드/배포 · `[샘플앱]` `app` 모듈(샘플 앱) 문제
+- 우선순위
+  - **P0**: 기능이 아예 동작하지 않거나, 크래시/배포 실패로 이어지는 문제
+  - **P1**: 일반적인 사용 중에도 오동작할 가능성이 높은 문제
+  - **P2**: 특정 조건에서 발생하는 문제, 중요한 구조 개선, 자주 쓰이는 누락 기능
+  - **P3**: 정리, 편의 기능, 장기 과제
+
+---
+
+## P0 — 즉시 수정
+
+- [x] **[버그] `setMtuCompletable()`이 `requestMtu()`를 호출하지 않음** — `impl/BleDeviceEngineImpl.kt:517-526`
+  - ✅ 해결 (`feature/fix_set_mtu`)
+    - `BleDevice.requestMtuSingle(mtu): Single<Int>`를 추가했습니다. `requestMtu()`를 호출한 뒤 `onMtuChanged`를 기다려서 **협상된 MTU**를 반환합니다.
+    - `onMtuChanged`의 status가 실패이면 `BleManager.MtuChangeFailedException(status)`이 나고, `requestMtu()`가 false를 반환하면 기존 작업과 같은 방식으로 재시도합니다.
+    - `setMtuCompletable()`은 `requestMtuSingle().ignoreElement()`로 유지하여 호환성을 지켰습니다. engine 추상 메서드는 `setMtuCompletable` → `requestMtuSingle`로 변경했습니다.
+    - `VirtualDeviceEngine`은 연결 상태일 때 23~517 범위로 보정한 값을 반환합니다.
+    - 테스트: `BleDeviceEngineImplMtuTest`, `VirtualDeviceEngineMtuTest`. 테스트 인프라(MockK, `unitTests.returnDefaultValues`, `GattTestFixture`, `RxTestSchedulerRule`)도 이 브랜치에서 추가했습니다.
+    - MTU 요청에 타임아웃이 없던 문제는 아래 "작업 무한 대기" 항목(`feature/fix_gatt_operation_hang`)에서 함께 해결했습니다.
+    - 실기기 확인(Fold5 → S23 nRF Connect GATT 서버): `configureMTU(517)` → `onConfigureMTU(517, 0)`을 받은 뒤 517을 반환했습니다. 247을 요청해도 링크의 실제 MTU인 517을 반환했습니다. 이미 교환된 링크라서 요청값과 협상값이 다를 수 있습니다.
+  - 문제: `getGattSingle().map { Single... }.ignoreElement()` 구조라서 안쪽 `Single`이 구독되지 않습니다. 결과적으로 MTU 요청은 보내지지 않고 Completable만 바로 완료됩니다. (최근 커밋 `9f18f3d`에서 추가된 기능)
+  - 제안: `flatMap`으로 바꾸고, `onMtuChanged` 콜백을 relay로 받아서 **협상된 MTU 값을 `Single<Int>`로 반환**해야 합니다. 현재 `onMtuChanged`(176)는 로그만 남깁니다. Android 14 이상에서는 요청 값과 상관없이 517로 협상을 시도하므로, 실제 협상된 값을 반환하는 것이 중요합니다.
+
+- [x] **[버그] read/write/descriptor 작업이 무한 대기할 수 있음** — `impl/BleDeviceEngineImpl.kt:324-355, 357-401, 467-496`
+  - ✅ 해결 (`feature/fix_gatt_operation_hang`)
+    - `BleDeviceEngineImpl`에 `guardOperation()`을 추가하여 read/write characteristic, CCCD descriptor write(`setupNotification`), MTU 요청에 적용했습니다.
+      - 작업 도중 연결이 끊기면 `BleManager.DisconnectedException`, `BleDevice.operationTimeoutMillis`(기본 `DEFAULT_OPERATION_TIMEOUT_MILLIS` = 10초)를 넘기면 `TimeoutException`으로 종료됩니다.
+      - 연결 끊김 감지를 먼저 구독하므로, 이미 끊긴 상태에서는 GATT 호출 없이 바로 실패합니다.
+    - `setupNotification`에서는 descriptor write에만 타임아웃이 적용됩니다. 설정이 끝난 뒤의 notification 스트림은 시간이 지나도 끊기지 않습니다.
+    - 그 결과 `InitializableBleDevice.initializeCompletable()` 안의 작업이 응답을 받지 못해도 `connectCompletable()`이 에러로 끝나고 연결이 해제됩니다.
+    - JVM 테스트에서 `BluetoothGattDescriptor.*_VALUE` static 필드가 null이 되는 문제 때문에, CCCD 값(`0x0001`/`0x0002`/`0x0000`)을 라이브러리 안에 상수로 정의했습니다. Bluetooth 스펙 정의값이므로 실기기 동작은 동일합니다.
+    - 테스트: `BleDeviceEngineImplOperationGuardTest`, `InitializableBleDeviceOperationGuardTest`. guard를 비활성화하면 버그 시나리오 테스트 10개가 실패하는 것을 확인했습니다.
+    - 실기기 확인(Fold5 → S23 nRF Connect GATT 서버):
+      - `operationTimeoutMillis=1`로 read하면 `TimeoutException`이 나고, 다음 작업은 정상 동작했습니다.
+      - 연결이 끊긴 뒤 read는 GATT 호출 없이 1ms 만에 `DisconnectedException`으로 끝났습니다.
+      - 연결이 끊기면 진행 중인 notification 스트림도 `DisconnectedException`으로 종료됐습니다.
+      - 그 밖에 read/write/notify/indicate가 모두 정상 동작했습니다.
+  - 문제: GATT 호출 후 `replyRelay`에서 응답이 오기를 기다리는데, **타임아웃이 없고 연결 끊김도 감지하지 않습니다**. `getGattSingle()`은 `firstOrError()`이므로 이후의 상태 변화는 보지 않습니다.
+  - 영향: 작업 도중 연결이 끊기거나 콜백이 유실되면 Single이 영원히 끝나지 않습니다. `InitializableBleDevice.initializeCompletable()` 안에서 이런 일이 생기면 `connectCompletable()`도 끝나지 않습니다.
+  - 제안: 작업마다 타임아웃을 두고, `stateRelay`에서 CONNECTED가 아닌 상태가 오면 `DisconnectedException`이 나도록 merge합니다.
+
+- [x] **[버그] 블루투스가 꺼진 상태에서 connect를 호출하면 CONNECTING 상태에 영구히 머무름** — `impl/BleDeviceEngineImpl.kt:264-292`
+  - ✅ 해결 (`feature/fix_connect_stuck_connecting`)
+    - `connectGatt()`가 null을 반환하면 상태를 CONNECTING으로 바꾸기 전에 `BleManager.ConnectFailedException`으로 실패합니다. 상태는 DISCONNECTED로 유지되므로 다시 연결할 수 있습니다.
+    - 연결이 완료되기 전에 구독이 dispose되면(연결 취소) `gatt.disconnect()/close()`를 호출하고, DISCONNECTED와 `onDisconnected()`를 알립니다. 연결이 완료된 뒤의 dispose는 무시하여 기존 동작을 유지합니다.
+    - 타임아웃과 취소의 정리 로직을 `cancelConnecting()`으로 통합했습니다. 정리는 해당 구독이 직접 `connectGatt`로 만든 gatt가 있을 때만 수행합니다.
+    - connect 로그에서 아직 할당되지 않은 `gatt` 대신 `bluetoothDevice`의 이름과 주소를 출력하도록 수정했습니다.
+    - 테스트: `BleDeviceEngineImplConnectTest`. 수정 전 코드로 실행하면 null 반환 2건과 취소 1건이 실패하는 것을 확인했습니다.
+    - 실기기 확인(SM-F946N, Android 16):
+      - BT OFF 상태에서는 `connectGatt()`가 실제로 null을 반환하고, 즉시 `ConnectFailedException`이 납니다. 다시 시도해도 같은 결과여서 상태가 갇히지 않는 것을 확인했습니다.
+      - 존재하지 않는 MAC으로 연결하면 10초 뒤 `TimeoutException`이 나고, `cancelOpen()` → `close()`로 정리됩니다.
+  - 문제: BT가 꺼져 있으면 `connectGatt()`가 `null`을 반환합니다. 하지만 상태는 `CONNECTING`으로 바뀌고, 타임아웃이 나도 `gatt?.also { ... }`가 실행되지 않아서 `DISCONNECTED`로 되돌아가지 않습니다.
+  - 영향: 앱을 재시작하기 전까지 해당 기기의 connect는 모두 `IllegalStateException("Connection state is CONNECTING ...")`로 실패합니다.
+  - 제안: `connectGatt()`가 null을 반환하면 즉시 에러를 내고 상태를 복구합니다. 타임아웃 처리 블록에서는 gatt가 null이어도 상태를 복구합니다. 구독자가 dispose했을 때(연결 취소)도 `doOnDispose`로 `disconnect()/close()`를 처리합니다. 지금은 취소한 뒤에도 연결이 뒤늦게 성공할 수 있습니다.
+
+- [x] **[버그] 스캔 중 블루투스를 끄면 앱이 크래시날 가능성이 높음** — `impl/BleScanner.kt:66-77`
+  - ✅ 해결 (`feature/fix_scan_crash_on_bluetooth_off`)
+    - `stopScan()`은 scanner가 null이면 건너뛰고, `stopScan`이 던지는 예외(`IllegalStateException` 등)는 warning 로그만 남기고 무시합니다. 그래서 `doFinally`에서 `RxJavaPlugins.onError`로 예외가 새어 나가지 않습니다.
+    - `startScan()`은 scanner가 null이면 NPE 대신 `SystemServiceException.BluetoothUnavailableException`으로 실패합니다.
+    - 테스트: `BleScannerTest`. 수정 전 코드에서는 NPE와 `IllegalStateException`이 `RxJavaPlugins.onError`로 전달되어 테스트가 실패하는 것을 확인했습니다.
+    - 실기기 확인(SM-F946N, Android 16): 스캔 중 BT를 꺼도 크래시가 나지 않고, BT를 다시 켜면 샘플 앱의 재시도 로직으로 스캔이 재개됩니다. 다만 이 기기에서는 `stopScan()`이 예외 없이 끝나서 NPE 경로 자체는 재현되지 않았습니다. 이 경로는 타이밍과 OS 버전에 따라 달라집니다.
+  - 문제: BT가 `STATE_TURNING_OFF`가 되면 `bluetoothAdapter.bluetoothLeScanner`가 `null`을 반환하는데, `doFinally`에서 호출하는 `stopScan()`이 NPE를 냅니다. `doFinally`에서 던진 예외는 `RxJavaPlugins.onError`로 전달되므로, 앱이 `RxJavaPlugins.setErrorHandler`를 설정하지 않았다면 크래시가 납니다.
+  - 제안: `startScan/stopScan`에서 scanner null 체크를 하고 try/catch로 감쌉니다. `startScan`의 `doOnSubscribe`에서도 null이면 명확한 에러를 냅니다.
+
+- [x] **[배포] 배포되는 POM에 의존성이 하나도 없음** — `algorigoble2/build.gradle:53, 131-145`
+  - ✅ 해결 (`feature/fix_pom_dependencies`)
+    - 수동 `artifact(aar)` 대신 `from components.release`로 publication을 구성했습니다. AGP가 component를 afterEvaluate 시점에 만들기 때문에 publication/signing은 `afterEvaluate`로 감쌌습니다. publish가 `bundleReleaseAar`에 자동으로 의존하므로, 미리 assemble하지 않아도 됩니다.
+    - `android.publishing.singleVariant("release") { withSourcesJar(); withJavadocJar() }`를 추가하여 Central 요건인 `-sources.jar`와 `-javadoc.jar`를 함께 배포합니다.
+    - 공개 API에 노출되는 의존성을 `api`로 바꿨습니다. `io.reactivex.rxjava3:rxjava:3.1.5`(기존 전이 의존성으로 해석되던 버전과 동일)와 `algorigo-logger`가 해당됩니다.
+    - 결과 POM: 이전 0개 → compile 3개(logger, rxjava, kotlin-stdlib) + runtime 5개(core-ktx, rxkotlin, rxandroid, rxrelay, gson)
+    - 회귀 방지: `verifyPublicationPom` 태스크를 `check`에 연결했습니다. 선언된 `api`/`implementation` 의존성이 POM에 올바른 scope로 있는지 `./gradlew build`(CI)에서 검사합니다. `from components.release`를 제거하면 실패하는 것을 확인했습니다.
+    - 남은 확인 사항: 실제 Central 업로드는 CI의 `v2/master`에서만 가능해서 검증하지 못했습니다. 2.7.0이 정상 배포되었는지도 별도 확인이 필요합니다.
+  - 문제: publication이 `artifact("...aar")`로 AAR만 수동 첨부하고 있어서 POM에 dependency가 생성되지 않습니다. 예전에는 `pom.withXml`로 일부를 수동 추가했지만, `190f597`(revert)에서 이 코드도 함께 제거되었습니다.
+  - 영향: Maven Central에서 받아 쓰는 앱이 RxJava/RxKotlin/RxRelay/algorigo-logger를 직접 추가하지 않으면 런타임에 `NoClassDefFoundError`가 납니다. 샘플 앱(`app/build.gradle:49-54`)은 이 라이브러리들을 직접 추가하고 있어서 문제가 드러나지 않습니다.
+  - 제안: `android { publishing { singleVariant("release") { withSourcesJar(); withJavadocJar() } } }`와 `from components.release`를 사용합니다. 공개 API에 노출되는 의존성(RxJava `Observable/Completable/Single`, 공개 `Ble` Tag가 상속하는 `algorigo-logger`)은 `implementation` 대신 `api`로 선언합니다.
+  - 참고: Central Portal 검증 요건상 `-sources.jar`와 `-javadoc.jar`도 필요합니다. 현재 설정으로 2.7.0이 실제로 배포되었는지 확인이 필요합니다.
+
+- [x] **[배포] CircleCI의 Maven Central 업로드 토큰이 치환되지 않음** — `.circleci/config.yml:89`
+  - ✅ 해결 (`feature/fix_ci_maven_central_token`)
+    - Authorization 헤더를 큰따옴표(`"Authorization: Bearer ${MAVEN_CENTRAL_TOKEN}"`)로 바꿔서 환경변수가 치환되도록 했습니다.
+    - `--verbose`를 제거했습니다. 토큰이 치환되면 verbose 출력이 Authorization 헤더를 CI 로그에 그대로 남기기 때문입니다.
+    - `--fail-with-body`를 추가했습니다. 업로드가 실패하면(HTTP 4xx/5xx) 응답 본문을 출력하고 job을 실패시킵니다. curl 7.76 이상이 필요하며, `cimg/android:2024.01`(Ubuntu 22.04 기반, curl 7.81)에서 지원되는 것으로 알고 있으나 실제 CI에서 확인이 필요합니다.
+    - 검증: YAML 파싱과 job/workflow 구조가 변경 전과 같은지 확인했습니다. 업로드 step의 curl 명령을 stub curl과 더미 토큰으로 실행해 보니, 수정 전에는 `Bearer $MAVEN_CENTRAL_TOKEN` 문자열이 그대로 전달되고 수정 후에는 실제 값으로 치환되었습니다.
+    - 남은 확인 사항: 실제 업로드는 `v2/master` CI에서만 확인할 수 있습니다. Central Portal API는 `Bearer` 뒤에 **user token의 `base64(username:password)`**를 요구하므로, CircleCI의 `MAVEN_CENTRAL_TOKEN` 값이 이 형식인지 확인이 필요합니다.
+  - 문제: `--header 'Authorization: Bearer $MAVEN_CENTRAL_TOKEN'`가 작은따옴표로 감싸져 있어서 환경변수가 치환되지 않고 문자열 그대로 전송됩니다. 그래서 인증에 실패합니다.
+  - 제안: 큰따옴표로 바꿉니다: `--header "Authorization: Bearer ${MAVEN_CENTRAL_TOKEN}"`. `--fail` 옵션도 추가해서 업로드가 실패하면 job이 실패하도록 합니다.
+
+- [x] **[버그/배포] kotlin-reflect가 없는 앱에서 로그 태그를 처음 사용하는 순간 크래시남 (실기기)** — `logging/Tags.kt`, `algorigoble2/build.gradle`
+  - ✅ 해결 (`feature/fix_kotlin_reflect_crash`) — 이 저장소에서 할 수 있는 우회 수정입니다.
+    - `algorigoble2`에 `implementation "org.jetbrains.kotlin:kotlin-reflect:$kotlin_version"`(2.0.0)을 추가했습니다. POM에 runtime 의존성으로 들어가므로, 사용하는 앱이 kotlin-reflect를 직접 추가하지 않아도 됩니다. 샘플 앱도 `app/build.gradle` 수정 없이 전이 의존성으로 받는 것을 확인했습니다.
+    - logger 최신 버전(1.2.4~1.2.6)도 확인했는데, POM 의존성이 0개이고 `KClass.objectInstance`를 그대로 사용해서 버전을 올려도 해결되지 않습니다.
+    - 회귀 방지: instrumented test `LoggingTagInstrumentedTest`를 추가했습니다. MockK가 없는 라이브러리의 실제 runtime classpath에서 모든 `Ble.*` 태그 초기화와 `BleManager.getDevice()`(가상 기기)를 검사합니다.
+      - 수정 전에는 2건 모두 `KotlinReflectionNotSupportedError`/`NoClassDefFoundError`로 실패했고, 수정 후에는 2/2 통과했습니다(SM-F946N).
+      - 실행: `ANDROID_SERIAL=<기기> ./gradlew :algorigoble2:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.algorigo.algorigoble2.LoggingTagInstrumentedTest`. CI(`./gradlew build`)는 기기가 필요한 이 테스트를 실행하지 않습니다.
+    - 실기기 확인: 수정 전에 크래시가 나던 시나리오(가상 기기 connect → DeviceActivity read)를 재현해 보니, `I Ble.Device: connected` 로그가 정상 출력되고 크래시 없이 동작했습니다.
+    - 참고: kotlin-reflect는 약 3MB입니다. R8을 쓰는 앱에서는 사용하지 않는 부분이 대부분 제거됩니다.
+    - 남은 작업: algorigo-logger에서 reflection을 제거하거나(`Class.getField("INSTANCE")` 등) kotlin-reflect를 선언하고, POM 의존성을 바로잡아야 합니다. logger가 수정되면 이 우회 의존성은 제거할 수 있습니다.
+  - 문제: `algorigo-logger`의 `Tag`는 생성될 때 부모 태그를 `Class.forName(바깥 클래스).kotlin.objectInstance`로 찾습니다. 이 코드는 **kotlin-reflect가 필요**한데, logger의 POM에 의존성이 0개라서 kotlin-reflect가 함께 들어오지 않습니다. 1.2.3~1.2.6 모두 같은 상태입니다.
+    - 그 결과 `Ble.Device`, `Ble.Engine.Default` 같은 중첩 태그가 처음 초기화될 때 `KotlinReflectionNotSupportedError`가 납니다. 최상위 태그인 `Ble`는 부모를 찾지 않으므로 괜찮습니다.
+  - 영향(실기기 재현):
+    - 가상 기기 connect가 성공하면 `BleDevice.connect()`의 로그에서 Error가 나고, `UndeliverableException`으로 **프로세스가 죽습니다**.
+    - `BleManager.getDevice(mac)`는 항상 같은 Error로 실패해서 MAC 연결이 불가능합니다.
+    - GATT 콜백 로그(바인더 스레드)와 P0-4의 `stopScan` catch 블록의 로그도 같은 경로를 탑니다. Error는 `catch (Exception)`에 잡히지 않습니다.
+  - 단위 테스트는 MockK가 kotlin-reflect를 테스트 classpath에 넣기 때문에 이 문제를 잡지 못합니다.
+  - 제안: 근본 수정은 algorigo-logger에서 해야 합니다(reflection 제거 또는 kotlin-reflect 의존성 선언, POM 수정). 이 저장소에서는 `kotlin-reflect`를 runtime 의존성으로 추가해서 사용하는 앱이 자동으로 받도록 합니다. 회귀 방지를 위해 실제 앱 classpath(MockK 없음)에서 동작하는 instrumented test를 추가합니다.
+
+---
+
+## P1 — 높음
+
+- [x] **[버그] GATT 콜백의 `status`를 무시함** — `impl/BleDeviceEngineImpl.kt:89-154`
+  - ✅ 해결 (`feature/handle_gatt_status`)
+    - 공개 예외 `BleManager.GattOperationFailedException(operation, status)`를 추가했습니다. `operation`은 `READ_CHARACTERISTIC`/`WRITE_CHARACTERISTIC`/`WRITE_DESCRIPTOR`/`DISCOVER_SERVICES`입니다.
+    - `ReplyData`에 콜백 status를 포함했습니다. read, write, descriptor write(notification 설정)는 status가 실패이면 값 대신 이 예외로 실패합니다. 실패한 작업 뒤의 큐 작업은 정상적으로 이어서 실행됩니다.
+    - **첫 서비스 탐색 실패:** 서비스 없이 CONNECTED로 만들지 않습니다. gatt를 `disconnect()/close()`하고, `connectCompletable()`은 `GattOperationFailedException("DISCOVER_SERVICES", status)`로 실패합니다.
+      - 이를 위해 `State.DISCONNECTED`에 `cause`를 추가했습니다. 에러가 전달되는 시점에 이미 DISCONNECTED 상태이므로, `onError`에서 바로 다시 연결할 수 있습니다.
+    - **재탐색(`onServiceChanged`) 실패:** 연결을 유지하고 경고 로그만 남깁니다. 서비스 목록이 비면 이후 작업은 characteristic을 찾지 못해 실패합니다.
+    - 테스트: `BleDeviceEngineImplGattStatusTest`(7건). 수정 전 엔진에서는 6건이 실패했습니다. 나머지 1건(재탐색 실패 시 연결 유지)은 기존 동작을 보존하는지 확인하는 테스트입니다.
+    - 실기기 확인(Fold5 → S23 시스템 GATT의 readable characteristic 35개 읽기): 수정 전과 후의 결과가 같았습니다(정상 read 30건 성공). 즉 status 0인 정상 응답은 영향을 받지 않습니다.
+      - 빈 값(0바이트)으로 읽힌 characteristic도 실제로 status 0이었습니다.
+      - 다만 S23 시스템 GATT는 실패 status를 돌려주는 characteristic이 없어서, **실패 status 경로 자체는 실기기에서 확인하지 못했습니다**. nRF Connect 서버 등 실패 응답을 만들 수 있는 peripheral로 재검증이 필요합니다.
+      - (`feature/write_type` 실기기 테스트 중 추가 확인) nRF Connect Sample configuration의 HR Control Point(`2a39`)에 정의되지 않은 값 `0x02`를 써도 서버가 받아들였습니다(성공 응답). 즉 nRF 샘플 서버로도 실패 status를 만들 수 없었습니다. 실패 응답을 설정할 수 있는 peripheral(예: nRF52 DK 펌웨어)이 필요합니다.
+    - 남은 작업: 연결 중 끊김(`onConnectionStateChange`)의 status(예: 133, 8)는 아직 `DisconnectedException`에 담기지 않습니다. 이 부분은 P2 "예외 계층 정리" 항목에서 처리합니다.
+  - read/write/descriptor 콜백이 `status != GATT_SUCCESS`인 경우에도 성공으로 처리합니다. 예를 들어 인증이 부족해서 read가 실패해도 이전 값이 성공으로 반환됩니다.
+  - `onServicesDiscovered`도 실패한 경우에 `CONNECTED`로 전환합니다. 이 경우 서비스가 비어 있어서 이후의 모든 작업이 `IllegalStateException`으로 실패합니다.
+  - 제안: `ReplyData`에 status를 포함하고, 실패하면 `GattException(status)`로 에러를 냅니다. discovery가 실패하면 연결을 실패로 처리합니다.
+  - (실기기) indicate 전용 `aaa2`에 NOTIFICATION CCCD(`0x0100`)를 쓰면 라이브러리는 성공으로 보고합니다. 서버의 응답 status는 로그에 남지 않아서 실제로 거부됐는지는 확인하지 못했습니다. status 실패를 의도적으로 만들 수 있는 peripheral로 재검증이 필요합니다.
+
+- [x] **[버그] 재연결한 뒤에도 이전 연결의 서비스 캐시를 사용함** — `impl/BleDeviceEngineImpl.kt:193, 438-449`
+  - ✅ 해결 (`feature/fix_stale_service_cache`)
+    - `serviceSingle` 캐시를 제거했습니다. 서비스 목록과 characteristic은 항상 **현재 연결된 `BluetoothGatt`**에서 읽습니다. 그래서 재연결 후 이전(닫힌) gatt의 characteristic 객체를 쓰지 않습니다.
+    - `onServiceChanged`(API 31+)를 처리합니다. 현재 연결된 gatt이면 `discoverServices()`를 다시 호출합니다. Android는 `discoverServices()` 호출 즉시 서비스 목록을 비우기 때문에, 재탐색이 끝날 때까지(`onServicesDiscovered`) read/write/notification 설정/`getCharacteristicsSingle()`이 기다립니다. `discoverServices()`가 false를 반환하면 대기하지 않습니다.
+    - 재탐색으로 `onServicesDiscovered`가 다시 와도 CONNECTED를 다시 내보내지 않습니다. 다시 내보내면 `setupNotification`이 재구독되어 CCCD를 한 번 더 쓰기 때문입니다.
+    - `getCharacteristicsSingle()`에도 `guardOperation()`(타임아웃, 연결 끊김 감지)을 적용했습니다.
+    - 테스트: `BleDeviceEngineImplServiceCacheTest`(8건). 수정 전 코드에서는 재연결 후 이전 목록, 이전 characteristic 사용, 재탐색 없음, CONNECTED 중복, CCCD 중복 쓰기, 재탐색 중 작업 진행 등 6건이 실패했습니다.
+      - `GattTestFixture`의 mock gatt를 실제처럼 바꿨습니다. `discoverServices()`를 호출하면 목록이 비워지고, `onServicesDiscovered` 시점에 서버 DB가 반영됩니다.
+    - 실기기 확인(Fold5 샘플 앱 ↔ S23 nRF Connect GATT 서버):
+      - 연결을 유지한 채 S23 서버를 켜자 `onServiceChanged` → `discoverServices()` → `onServicesDiscovered`가 이어졌고, 앱을 재시작하지 않고 화면을 다시 열어도 `aaa1`/`aaa2`/`2a37` 등이 나타났습니다. 새로 나타난 `aaa1` read도 정상 동작했습니다.
+      - 연결을 끊고 S23 서버를 끈 뒤 **같은 프로세스에서 재연결**하자, 사라진 서비스가 목록에서도 사라졌습니다. 수정 전에는 이전 목록이 남아 있었습니다.
+    - 남은 제한 사항:
+      - API 30 이하에는 `onServiceChanged` 콜백이 없어서, 연결 중의 서비스 변경은 재연결해야 반영됩니다.
+      - 서비스 변경 전에 설정한 notification 구독은 자동으로 다시 설정하지 않습니다. 핸들이 바뀌는 경우(DFU 등)에는 앱이 다시 구독해야 합니다.
+      - 서비스 변경을 앱에 알리는 공개 API는 없습니다.
+  - `serviceSingle`은 한 번 설정되면 초기화되지 않습니다. 그래서 재연결 후에도 닫힌 이전 `BluetoothGatt`의 characteristic 객체를 새 gatt에서 사용합니다. 펌웨어 업데이트(DFU) 등으로 핸들이 바뀌면 다른 characteristic에 접근하거나 작업이 실패합니다.
+  - 제안: DISCONNECTED가 되면 `serviceSingle = null`로 초기화합니다. `onServiceChanged`(API 31+)에서도 다시 discovery를 수행합니다.
+  - (실기기, nRF Connect GATT 서버) 연결 중에 S23(서버)의 GATT DB가 바뀌었습니다.
+    - Fold5 OS는 `onServiceChanged`를 받고 서비스를 다시 탐색했지만, 라이브러리는 이 콜백을 처리하지 않습니다.
+    - 그래서 연결이 유지되는 동안은 물론, **같은 프로세스에서 끊었다 다시 연결한 뒤에도**(OS가 `onSearchComplete`로 새 목록을 받았는데도) `getCharacteristicsSingle()`이 이전 목록을 반환했습니다. 앱 프로세스를 재시작해야 새 서비스가 보였습니다.
+    - 참고: bonded 기기는 robust caching(Database Hash)으로 해시가 같으면 OS가 탐색을 생략합니다. 이것은 정상적인 OS 동작입니다.
+
+- [x] **[버그] 같은 characteristic을 여러 곳에서 notification 구독하면, 하나만 해제해도 전부 끊김** — `impl/BleDeviceEngineImpl.kt:403-433`
+  - ✅ 해결 (`feature/share_notification_subscription`)
+    - 같은 characteristic UUID의 notification 구독은 설정 하나를 공유합니다(`SharedNotification`, `replay(1).refCount()`).
+      - 첫 구독자가 `setCharacteristicNotification(true)`와 CCCD 활성화를 하고, **마지막 구독자가 해제할 때만** CCCD를 비활성화합니다.
+      - 나중에 구독한 쪽은 CCCD를 다시 쓰지 않고 설정 완료 결과를 바로 받습니다. 설정이 끝나기 전에 구독한 경우에도 같은 설정을 공유합니다.
+    - 구독 중인 characteristic에 다른 `NotificationType`(NOTIFICATION/INDICATION)을 요청하면, 기존 구독자의 CCCD 값이 바뀌지 않도록 `IllegalStateException`으로 실패합니다. 모든 구독이 해제된 뒤에는 다른 타입을 쓸 수 있습니다.
+    - 연결이 끊기면 모든 구독자가 `DisconnectedException`을 받고, 재연결 후 새로 구독하면 새 gatt에서 다시 설정합니다.
+    - 테스트: `BleDeviceEngineImplNotificationSharingTest`(8건). 수정 전 엔진에서는 5건이 실패했고, 나머지 3건(전부 해제 후 재구독, 해제 후 타입 변경, 재연결 후 재설정)은 기존 동작을 보존하는지 확인하는 테스트입니다.
+    - 실기기 확인(Fold5 → S23 nRF Connect GATT 서버 `aaa1`): A와 B가 같은 characteristic을 구독한 뒤 A만 해제하고, S23에서 notification을 보냈습니다.
+      - 수정 전: CCCD 활성화를 2번 썼고, A를 해제하는 즉시 `setCharacteristicNotification(false)`와 CCCD `0000`이 쓰였습니다. 그 뒤 S23이 보낸 `0x78`을 **B는 받지 못했습니다**(120초 대기).
+      - 수정 후: CCCD 활성화(`0100`)는 1번이었고 A를 해제해도 비활성화하지 않았습니다. S23이 보낸 `0x91`을 **B가 수신했고**, B를 해제할 때 CCCD `0000`이 1번 쓰였습니다.
+  - 구독할 때마다 CCCD를 활성화하고, 하나라도 dispose되면 `doFinally`에서 CCCD를 비활성화합니다. 그래서 나머지 구독자는 에러 없이 데이터만 받지 못하게 됩니다.
+  - `VirtualDevice`(`virtual/VirtualDevice.kt:23`)에는 참조 카운트가 구현되어 있어서 실기기와 동작이 다릅니다.
+  - 제안: characteristic별로 공유 Observable(`share()`/`refCount()`)을 사용하거나 참조 카운트를 관리합니다.
+
+- [x] **[구조/버그] GATT 작업 큐가 없음 (busy 상태는 재시도로만 처리)** — `impl/BleDeviceEngineImpl.kt:345-353, 391-399, 485-493`
+  - ✅ 해결 (`feature/gatt_operation_queue`)
+    - 기기별 직렬 GATT 작업 큐를 도입했습니다(`enqueue()`/`QueuedOperation`, `PublishRelay` + `concatMapCompletable`).
+      - read, write, descriptor write(notification 설정/해제), MTU 요청을 하나씩 실행합니다.
+      - 앞 작업이 콜백을 받거나 타임아웃/연결 끊김으로 끝나야 다음 작업이 시작됩니다.
+    - 타임아웃과 연결 끊김 감지(`guardOperation`)는 큐에서 기다리는 시간이 아니라 **작업이 실제로 시작된 시점부터** 적용됩니다. 연결이 끊기면 대기 중이던 작업도 GATT 호출 없이 바로 `DisconnectedException`으로 끝납니다.
+    - 취소 처리:
+      - 시작 전에 dispose된 작업은 GATT 호출 없이 건너뜁니다.
+      - 실행 중에 dispose돼도 콜백(또는 타임아웃)이 올 때까지 다음 작업을 시작하지 않습니다. Android의 "한 번에 하나" 제약을 지키기 위해서입니다.
+    - write-without-response도 `onCharacteristicWrite`를 기다린 뒤 완료합니다. 반환값은 빈 배열 대신 쓴 값입니다.
+    - 재시도는 `retryOnCommunicationFailure()`(최대 5회, 500ms)로 통합했습니다. 재시도를 모두 소진하면 `NoSuchElementException` 대신 **`CommunicationFailedException`**으로 실패합니다.
+    - 테스트: `BleDeviceEngineImplOperationQueueTest`(8건). 수정 전 엔진에서는 8건 모두 실패하는 것을 확인했습니다.
+    - 실기기 비교(Fold5 → S23 시스템 GATT characteristic `2a00`/`2a01`/`2b3a`/`2b2a` 읽기 전용):
+
+      | 시나리오 | 수정 전 | 수정 후 |
+      |---|---|---|
+      | read 20개 동시 실행(3회) | 5/20 성공, 15건 `NoSuchElementException`, 2.54s | **20/20 성공, 1.23s** |
+      | read 20개 순차 실행 | 20/20, 1.20s | 20/20, 1.21s |
+      | MTU + read 8개 동시 실행 | 6/9 성공, 2.56s | **9/9 성공, 0.48s** |
+
+      수정 후 실행에서는 `prior command is not finished`(busy) 경고와 재시도가 0건이었습니다.
+    - 남은 작업:
+      - 응답은 여전히 `uuid + type`으로 매칭합니다. 큐 덕분에 동시에 진행되는 작업은 하나뿐이지만, 타임아웃된 작업의 콜백이 늦게 도착하면 다음 작업은 busy로 재시도합니다.
+      - GATT status 처리는 별도 P1 항목입니다.
+      - `onServiceChanged`의 `discoverServices()`는 큐 밖에서 실행됩니다. 작업은 재탐색이 끝날 때까지 기다립니다.
+  - Android는 GATT 작업을 한 번에 하나만 처리할 수 있습니다. 지금은 GATT 호출이 `false`를 반환하면 500ms 간격으로 최대 5회 재시도하는 방식입니다. 부하가 걸리면 실패하고 지연도 큽니다.
+  - 재시도를 모두 소진하면 `retryWhen`의 handler가 complete되어 `CommunicationFailedException` 대신 **`NoSuchElementException`**이 나옵니다.
+  - 응답을 `uuid + type`으로만 매칭합니다. 그래서 이전 작업의 늦게 도착한 콜백(예: write-no-response의 `onCharacteristicWrite`)이 다음에 같은 UUID로 보낸 write의 응답으로 잘못 매칭될 수 있습니다.
+  - 제안: 기기별 직렬 작업 큐(작업 1개 → 콜백 → 다음 작업)를 도입합니다. 타임아웃, 응답 매칭, 재시도를 큐에서 일괄 처리합니다.
+  - (실기기) 다음 두 경우를 확인했습니다.
+    - notification 해제와 다른 설정의 CCCD 쓰기가 겹치자 `writeDescriptor() - prior command is not finished`가 발생했고, 500ms 재시도로 복구됐습니다.
+    - `operationTimeoutMillis=1`로 타임아웃시킨 직후 다음 read는 이전 요청이 아직 진행 중이라 busy가 되어 579ms(재시도 1회)가 걸렸습니다.
+
+- [x] **[버그] `connectGatt`에 transport를 지정하지 않음** — `impl/BleDeviceEngineImpl.kt:271`
+  - ✅ 해결 (`feature/connect_gatt_transport_le`)
+    - `connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)`로 LE transport를 명시합니다.
+    - 테스트: `BleDeviceEngineImplTransportTest`. 수정 전 코드에서는 3인자 `connectGatt`(AUTO)가 호출되어 실패했습니다. `GattTestFixture`는 3인자와 4인자 overload를 모두 stub하여 기존 테스트가 영향을 받지 않게 했습니다.
+    - 실기기 확인(Fold5 → S23, Device Name read):
+      - Fold5 `dumpsys bluetooth_manager`에 기록된 이 앱의 GATT client transport가 수정 전 **`transport: AUTO`**에서 수정 후 **`transport: LE`**로 바뀌었습니다. 연결과 read는 양쪽 모두 정상이었습니다.
+      - 참고: S23(듀얼모드)은 AUTO여도 Android가 LE를 선택했습니다(`btif_gattc_open_impl: Transport=BT_TRANSPORT_LE, device type=DUAL`). 그래서 이 기기로는 BR/EDR 시도로 인한 133 실패 자체를 재현하지 못했습니다.
+  - 듀얼모드 기기에서 BR/EDR로 연결을 시도하다가 status 133으로 실패하는 대표적인 원인입니다. minSdk가 24이므로 `connectGatt(context, autoConnect, callback, BluetoothDevice.TRANSPORT_LE)`를 바로 사용할 수 있습니다.
+
+- [x] **[버그] `deviceMap`이 thread-safe하지 않음** — `impl/BleManagerEngineImpl.kt:35, 143-153`
+  - ✅ 해결 (`feature/thread_safe_device_map`)
+    - `deviceMap`을 `ConcurrentHashMap`으로 바꿨습니다. `getBleDevice()`처럼 이미 있는 기기를 찾는 경로는 잠금 없이 조회합니다.
+    - `createBleDevice()`는 `synchronized(deviceMap)` 안에서 같은 기기가 이미 있는지 다시 확인한 뒤 만듭니다. 그래서 같은 기기에 대해 delegate가 한 번만 호출됩니다. `getOrPut`은 원자적이지 않고, `computeIfAbsent`는 사용자 코드인 delegate를 map 내부 잠금 안에서 실행하게 됩니다(delegate가 다시 `getDevice()`로 map을 수정하면 문제가 됨). 그래서 둘 다 쓰지 않고 재진입 가능한 `synchronized`를 사용했습니다.
+    - 함께 발견한 문제: 수정 전에는 `initEngine()`보다 먼저 map에 넣었기 때문에, 다른 스레드가 engine이 붙지 않은 `BleDevice`를 받아 `deviceId`, `connectionState` 등에 접근하면 `UninitializedPropertyAccessException`이 났습니다. 이제 engine 초기화와 상태 구독을 마친 뒤 map에 넣습니다.
+    - `getDevices()`는 live view 대신 snapshot(`toList()`)을 돌려줍니다.
+    - 테스트: `BleManagerEngineImplDeviceMapTest`(2건). 수정 전 코드에서 2건 모두 실패했습니다(3회 반복 모두).
+      - 8개 스레드의 동시 `getDevice(같은 MAC)`: 수정 전에는 서로 다른 인스턴스를 받았습니다.
+      - 기기 추가 중 `getDevices()`/`getConnectedDevices()` 반복: 수정 전에는 `UninitializedPropertyAccessException`이 났습니다. 생성 순서만 고치고 map을 `mutableMapOf()`로 되돌리면 `ConcurrentModificationException`이 나는 것도 확인했습니다.
+    - 실기기 확인(Fold5, 연결 없음. 임시 instrumented test로 `BleManagerEngineImpl` 직접 사용):
+      - 동시 `getDevice(S23 MAC)` 8건 × 5라운드(delegate 50ms 지연): 수정 전에는 매 라운드 **서로 다른 인스턴스 8개, delegate 호출 8회**였고 map에는 마지막 1개만 남았습니다(나머지 7개는 map에 없는 별도 engine을 가짐). 수정 후에는 매 라운드 인스턴스 1개, delegate 호출 1회였습니다.
+      - 실제 스캔 8초 동안 다른 스레드에서 `getDevices()`/`getConnectedDevices()` 반복: 수정 전에는 약 11,000회 반복 중 **`UninitializedPropertyAccessException` 244건, `ConcurrentModificationException` 19건**이 났습니다(스캔 기기 92개). 수정 후에는 11,095회 반복에서 오류가 없었습니다(스캔 기기 67개).
+  - 스캔 콜백 스레드와 앱 스레드에서 동시에 `getBleDevice()`가 호출되면, 같은 기기에 대해 `BleDevice`(와 engine)가 두 개 만들어질 수 있습니다. 그러면 GATT 연결이 중복되고 상태가 서로 어긋납니다.
+  - 제안: `ConcurrentHashMap.getOrPut` 또는 `synchronized`를 사용합니다.
+
+- [x] **[버그] `ConnectionState` enum의 `status`가 `var`이어서 전역 상태가 바뀜** — `BleDevice.kt:11`, `InitializableBleDevice.kt:21-22`
+  - ✅ 해결 (`feature/fix_connection_state_mutation`)
+    - `ConnectionState.status`를 `val`로 바꿔서 enum 싱글턴을 수정할 수 없게 했습니다.
+    - `ConnectionState.INITIALIZING`을 추가했습니다(오타 `INITIALING`도 수정). 기존 값의 ordinal이 바뀌지 않도록 enum 끝에 추가했습니다.
+    - `InitializableBleDevice`는 GATT 연결 후 `initializeCompletable()`을 진행하는 동안 `INITIALIZING`을 내보냅니다. 상태 스트림에 `distinctUntilChanged()`를 적용해서 같은 상태가 연달아 나오지 않게 했습니다.
+    - ⚠️ 동작/API 변경:
+      - 초기화 중 상태가 `CONNECTING`(status "INITIALING")에서 `INITIALIZING`으로 바뀝니다. `when`으로 상태를 분기하는 앱은 `INITIALIZING`도 처리해야 합니다.
+      - `status`에 값을 대입하던 코드는 컴파일되지 않습니다.
+      - 샘플 앱 `BleRecyclerAdapter`는 `INITIALIZING`을 `CONNECTING`처럼 표시하도록 수정했습니다.
+    - 테스트:
+      - `ConnectionStateGlobalMutationTest`(2건, 기존 API만 사용): 수정 전 코드에서 2건 모두 실패했습니다. 다른 기기의 CONNECTING status가 `"INITIALING"`으로 바뀌는 것과 상태 중복(`CONNECTING, CONNECTING`, `DISCONNECTED, DISCONNECTED`)이 재현됐습니다.
+      - `InitializableBleDeviceStateTest`(4건): INITIALIZING 상태, 상태 순서, 초기화 실패, 재연결을 검증합니다.
+    - 실기기 확인(Fold5 → S23, 초기화에서 1초 대기 후 Device Name read):
+      - 수정 전: 초기화 중 상태가 `CONNECTING(INITIALING)`이었고, 초기화 후 전역 `ConnectionState.CONNECTING.status`가 **`"INITIALING"`으로 바뀌어 있었습니다**. `DISCONNECTED`가 2번 나왔습니다.
+      - 수정 후: `DISCONNECTED → CONNECTING → INITIALIZING → CONNECTED → DISCONNECTING → DISCONNECTED` 순서로 중복 없이 나왔고, 전역 `CONNECTING.status`는 `"CONNECTING"`으로 유지됐습니다.
+  - `ConnectionState.CONNECTING.apply { status = "INITIALING" }`가 enum 싱글턴 자체를 수정합니다. 그래서 이후 **모든 기기**의 CONNECTING 상태가 `"INITIALING"`으로 표시됩니다.
+  - 제안: `status`를 `val`로 바꾸고 `INITIALIZING` 상태를 별도로 추가합니다(오타 `INITIALING`도 수정). `distinctUntilChanged()`도 적용합니다.
+
+- [x] **[버그] `disconnect()`가 CONNECTED 상태에서만 동작함** — `impl/BleDeviceEngineImpl.kt:303-312`
+  - ✅ 해결 (`feature/disconnect_all_states`)
+    - 상태별로 처리합니다. CONNECTING/DISCONNECTING/SPP 상태가 진행 중인 gatt나 소켓을 담도록 바꿨습니다.
+
+      | 상태 | 동작 |
+      |---|---|
+      | CONNECTED | **DISCONNECTING**을 내보낸 뒤 `gatt.disconnect()`. 콜백이 오면 close와 DISCONNECTED. 콜백이 5초 안에 오지 않으면 강제로 정리 |
+      | CONNECTING | 연결을 즉시 취소(`cancelConnecting`). 기다리던 `connectCompletable()`은 `DisconnectedException` |
+      | SPP_CONNECTING | 소켓을 닫아서 진행 중인 `connect()`를 중단 |
+      | SPP_CONNECTED | 소켓을 닫고 DISCONNECTED. `connectSppSocket()` 스트림은 `DisconnectedException` |
+      | DISCONNECTED / DISCONNECTING | 아무것도 하지 않음(두 번 호출해도 안전) |
+
+    - DISCONNECTING이 되는 즉시 진행 중인 작업과 notification은 콜백을 기다리지 않고 `DisconnectedException`으로 끝납니다.
+    - 연결 취소/타임아웃으로 이미 정리된 gatt에 늦게 도착한 `onServicesDiscovered`는 무시합니다. 이전에는 닫힌 gatt로 CONNECTED가 될 수 있었습니다.
+    - `InitializableBleDevice`가 초기화 실패 시 `disconnect()`를 두 번 호출해도 두 번째 호출은 무시됩니다.
+    - 테스트: `BleDeviceEngineImplDisconnectTest`(10건). 수정 전 엔진에서는 9건이 실패했고, 나머지 1건(끊긴 상태에서 호출하면 아무것도 하지 않음)은 기존 동작 보존 테스트입니다.
+    - 실기기 확인(Fold5 → S23 시스템 GATT, 읽기만 수행):
+      - **연결 중 취소**(`connectCompletable()` 직후 `disconnect()`):
+        - 수정 전: 무시되어 261ms에 연결이 완료됐고, 2초 뒤에도 연결 상태였습니다.
+        - 수정 후: 4ms 만에 DISCONNECTED가 되고 `connectCompletable()`은 `DisconnectedException`으로 끝났습니다. 2초 뒤에도 연결되지 않았고, Android 로그에서 `connect()` → `cancelOpen()` → `close()`를 확인했습니다.
+      - **read 진행 중 연결 해제**:
+        - 수정 전: DISCONNECTING 없이 콜백 후 DISCONNECTED로 바뀌었고, read는 18ms에 `DisconnectedException`으로 끝났습니다.
+        - 수정 후: 즉시 DISCONNECTING이 되면서 read가 21ms에 `DisconnectedException`으로 끝났고, 이어서 콜백으로 DISCONNECTED가 됐습니다.
+      - SPP는 S23에 RFCOMM 서버가 없어서 단위 테스트로만 확인했습니다.
+  - CONNECTING 중에는 연결을 취소할 수 없고 로그만 남습니다. `State.DISCONNECTING`(42)은 정의만 되어 있고 사용되지 않습니다. SPP_CONNECTED 상태에서 호출해도 소켓을 닫지 않습니다.
+  - 제안: 상태별로 처리합니다. CONNECTING이면 `disconnect()+close()`, SPP면 소켓을 닫습니다. 처리 중에는 DISCONNECTING 상태를 내보냅니다.
+
+- [x] **[샘플앱] edge-to-edge 미대응으로 주요 UI가 시스템 바에 가려짐 (실기기)** — `app/src/main/res/layout/*.xml`, 각 Activity
+  - ✅ 해결 (`feature/sample_edge_to_edge`)
+    - `View.applySystemBarsPadding()`(`EdgeToEdgeExtension.kt`)을 추가했습니다. 시스템 바, 디스플레이 컷아웃, 키보드(IME) inset을 레이아웃 루트의 padding으로 적용합니다.
+    - 4개 Activity(Start, Main, Device, Test)에서 `enableEdgeToEdge()`를 호출하고 루트 뷰(`R.id.main`)에 위 함수를 적용했습니다. Android 15 미만에서도 같은 방식으로 동작하도록 `enableEdgeToEdge()`를 명시적으로 호출합니다. `activity_main.xml`, `activity_device.xml` 루트에 `android:id="@+id/main"`을 추가했고, `StartActivity`에서 쓰지 않던 import를 정리했습니다.
+    - 액션바 테마(`DarkActionBar`)는 그대로 둡니다. 실기기에서 확인해 보니 AppCompat이 루트 뷰에 넘겨주는 상단 inset은 상태바와 액션바를 합친 값(Fold5 커버 화면 기준 85 + 147 = 232px)이었습니다. 그래서 루트에 inset을 적용하는 것만으로 콘텐츠가 액션바 아래에서 시작합니다.
+    - 테스트: `app/src/androidTest/.../EdgeToEdgeLayoutTest`(3건, Start/Main/Device). 화면을 띄운 뒤 루트 아래 보이는 뷰가 상태바, 액션바, 내비게이션 바/키보드, 좌우 바 영역과 겹치지 않는지 검사합니다. 수정 전 코드에서도 컴파일되도록 루트는 `android.R.id.content`의 첫 자식으로 찾습니다.
+      - 수정 전(Fold5): 3건 모두 실패. 예: `mac_address_edittext [0,0][904,159] is covered by status bar/action bar`, `mac_address_btn ... covered by action bar`, `stop_btn [0,2190][904,2316] is covered by navigation bar`, `main_button [0,0][904,126] ...`, `result_text_view [0,0][904,39] ...`
+      - 수정 후(Fold5): 3건 모두 통과.
+      - 실행: `./gradlew :app:installDebug :app:installDebugAndroidTest` 후 `adb shell am instrument -w -e class com.algorigo.algorigoblelibrary.EdgeToEdgeLayoutTest com.algorigo.algorigoblelibrary.test/androidx.test.runner.AndroidJUnitRunner`. `./gradlew :app:connectedDebugAndroidTest`로도 실행할 수 있지만, 끝나면 샘플 앱을 삭제하므로 앱 권한과 데이터가 사라집니다.
+    - 실기기 확인(Fold5 커버 화면 904x2316, Android 16, 직접 터치로 조작):
+      - 시작 화면: MAIN/TEST 버튼이 액션바 아래(`y=232~`)에 나오고, **터치로 MAIN을 눌러 Main 화면으로 이동**했습니다(수정 전에는 키보드 포커스로만 가능했음).
+      - Main 화면: MAC 입력칸과 CONNECT DEVICE가 액션바 아래에, START/STOP SCAN이 내비게이션 바 위(`~2190`)에 표시됩니다. 키보드를 띄우면 START/STOP SCAN이 키보드 위(`y=1201~1453`)로 올라옵니다.
+      - Device 화면(가상 기기 연결 후 선택): 결과 표시줄이 액션바 바로 아래(`y=232~271`)에 보이고, READ 결과 `read complete : 0x00`을 화면에서 확인했습니다.
+      - Test 화면: 두 목록이 액션바와 내비게이션 바 사이(`232~2190`)에 배치됩니다.
+      - 펼친 화면(가로 방향, 컷아웃)은 원격으로 기기를 펼칠 수 없어서 확인하지 못했습니다. 좌우 inset과 컷아웃도 padding에 포함되도록 처리했습니다.
+  - targetSdk 35에서는 Android 15 이상에서 edge-to-edge가 강제되는데, 레이아웃이 시스템 바 inset을 처리하지 않습니다.
+  - 시작 화면: MAIN/TEST 버튼이 상태바와 액션바 뒤에 있어서 **터치로 누를 수 없습니다**. 실기기 테스트에서는 키보드 포커스로 우회했습니다.
+  - Main 화면: MAC 입력칸과 CONNECT DEVICE는 상태바/액션바에, STOP SCAN은 내비게이션 바에 가려집니다.
+  - Device 화면: 결과 표시(`result_text_view`)와 READ 버튼이 가려져서 결과를 화면에서 볼 수 없습니다.
+  - 제안: 루트 뷰에 `ViewCompat.setOnApplyWindowInsetsListener`로 `systemBars` inset을 padding으로 적용하거나, `fitsSystemWindows`를 사용합니다. `StartActivity`에서 import만 하고 쓰지 않는 `enableEdgeToEdge`/`WindowInsetsCompat`를 정리하면서 함께 적용합니다.
+
+- [x] **[샘플앱] Connect Device 실패 시 백그라운드 스레드에서 Toast를 띄워 크래시남 (실기기)** — `app/.../MainActivity.kt:177-205`
+  - ✅ 해결 (`feature/fix_connect_device_toast_crash`)
+    - `subscribe` 전에 `observeOn(AndroidSchedulers.mainThread())`를 추가해서 `onError`(Toast)가 main thread에서 실행되게 했습니다.
+    - 반환된 Disposable을 `connectDisposable`로 보관하고 `onDestroy()`에서 dispose합니다. 화면을 나가면 진행 중인 연결 시도도 취소됩니다.
+    - 연결 중에는 Connect Device 버튼을 비활성화하고, 성공하거나 실패하면 다시 활성화합니다(중복 클릭 방지, 기존 START SCAN 버튼과 같은 방식).
+    - 메시지가 없는 예외(예: `getDevice()`가 null일 때 `!!`에서 나는 NPE)는 Toast에 예외 클래스 이름을 표시합니다.
+    - 테스트: `app/src/androidTest/.../ConnectDeviceFailureTest`. 문서용 MAC 주소(`00:00:5E:00:53:01`, RFC 7042)로 연결해서 10초 타임아웃을 일으킨 뒤, 화면이 RESUMED인지와 버튼이 비활성화됐다가 다시 활성화되는지 확인합니다.
+      - 수정 전(Fold5): `RxComputationThreadPool-1`에서 `FATAL EXCEPTION: Can't toast on a thread that has not called Looper.prepare()`가 나서 실패했습니다(`Process crashed`). 원인 오류는 연결 타임아웃 `TimeoutException`이었습니다.
+      - 수정 후(Fold5): 통과(11초). `onError`가 main thread에서 호출됐습니다.
+    - 실기기 확인(Fold5, 직접 조작):
+      - 도달할 수 없는 MAC: 연결 중 버튼 비활성화 → 10초 후 Toast `The source did not signal an event for 10000 milliseconds and has been terminated.` 표시, 버튼 다시 활성화, 크래시 없음.
+      - 잘못된 형식(`hello`): Toast `mac address pattern wrong`, 버튼 다시 활성화.
+      - 가상 기기(`12:34:56:78:90:ab`): `device connected`, 버튼 다시 활성화.
+      - 연결 중 뒤로 가기: `onDestroy()`에서 dispose되어 `cancel connecting`이 기록됐고, 이후 Toast, 오류, 크래시가 없었습니다.
+  - MAC 연결 체인에 `observeOn(AndroidSchedulers.mainThread())`가 없습니다. 그래서 연결 타임아웃(`TimeoutException`)의 `onError`가 Rx computation 스레드에서 `Toast.makeText()`를 호출하고, `Can't toast on a thread that has not called Looper.prepare()`로 프로세스가 죽습니다.
+  - 제안: `subscribe` 전에 `observeOn(AndroidSchedulers.mainThread())`를 추가하고, 반환된 Disposable을 관리합니다.
+
+---
+
+## P2 — 중간
+
+### 잠재적 버그
+
+- [x] **[버그] 쓰기 타입 문제** — `impl/BleDeviceEngineImpl.kt:357-401`
+  - ✅ 해결 (`feature/write_type`)
+    - `BleDevice.WriteType`(`DEFAULT`/`WITH_RESPONSE`/`WITHOUT_RESPONSE`)를 추가했습니다. `writeCharacteristicSingle(uuid, bytes, writeType = DEFAULT)`이고, `@JvmOverloads`로 기존 2인자 시그니처의 바이너리 호환을 유지합니다.
+      - `DEFAULT`: WRITE를 지원하면 응답 있는 쓰기, WRITE NO RESPONSE만 지원하면 응답 없는 쓰기를 합니다. 기존 코드가 의도했던 동작입니다.
+      - 명시한 타입을 characteristic이 지원하지 않으면 GATT 호출 없이 `IllegalCharacteristicProperty`로 실패합니다.
+    - 쓰기 전에 `characteristic.writeType`을 **매번 지정**합니다. 지정하지 않으면 Android 기본값(WRITE NO RESPONSE 속성이 있으면 NO_RESPONSE)이 적용되던 것이 원인이었습니다. 큐로 직렬화되므로 공유 characteristic 객체의 writeType을 바꿔도 안전합니다.
+    - ⚠️ 동작 변경: WRITE와 WRITE NO RESPONSE를 모두 가진 characteristic의 기본 쓰기가 실제로 응답을 기다리게 됩니다(더 느리지만 확실함). 처리량이 필요하면 `WITHOUT_RESPONSE`를 명시해야 합니다.
+    - `VirtualDeviceEngine`은 쓰기 타입을 구분하지 않습니다(`VirtualDevice` API 변경 없음).
+    - 테스트: `BleDeviceEngineImplWriteTypeTest`(6건). writeType 지정을 빼면(수정 전 동작) 5건이 실패하고, 나머지 1건은 미지원 타입 검증입니다.
+    - 실기기 확인(Fold5 → S23 nRF Connect GATT 서버, 각 5회, 스택 로그의 write 요청 → 완료 시간):
+
+      | 쓰기 | 수정 전 | 수정 후 |
+      |---|---|---|
+      | `aaa2`(WRITE+WNR) 기본 | **0~1ms**(Write Command), 라이브러리 7~16ms | **81~104ms**(Write Request), 라이브러리 90~124ms |
+      | `aaa2` `WITHOUT_RESPONSE` | – | 0~1ms, 라이브러리 7~19ms |
+      | `aaa2` `WITH_RESPONSE` | – | 53~86ms, 라이브러리 64~99ms |
+      | `2a39`(WRITE 전용) 기본 | 57~139ms | 78~87ms(변화 없음) |
+      | `2a39` `WITHOUT_RESPONSE` | – | GATT 호출 없이 `IllegalCharacteristicProperty`(4ms) |
+  - `WRITE | WRITE_NO_RESPONSE` 속성을 둘 다 가진 characteristic은 Android 기본 `writeType`이 NO_RESPONSE입니다. 그래서 응답을 기다리는 분기로 들어가도 실제로는 응답 없이 전송됩니다. 사용자가 쓰기 타입을 선택할 수도 없습니다.
+  - ~~NO_RESPONSE 분기는 `onCharacteristicWrite`를 기다리지 않고 바로 반환합니다. 그래서 연속으로 쓰면 다음 write가 busy가 되고 500ms씩 재시도하므로 처리량이 크게 떨어집니다.~~ → `feature/gatt_operation_queue`에서 해결했습니다. 이제 `onCharacteristicWrite`를 기다리고 큐로 직렬화합니다. 쓰기 타입을 선택하는 기능은 여전히 남아 있습니다.
+  - (실기기) 블루투스 스택 로그의 write 요청 → 완료 시간으로 비교했습니다.
+    - WRITE 전용 `2a39`는 52ms가 걸렸습니다(Write Response 대기).
+    - WRITE+WRITE NO RESPONSE를 가진 `aaa2`는 라이브러리가 응답형 분기로 처리했지만 0ms 만에 완료됐습니다. 즉 실제로는 **Write Command**로 전송됐습니다.
+- [x] **[버그/구조] API 33에서 deprecated된 GATT API 사용** — `impl/BleDeviceEngineImpl.kt:97-154, 366, 377, 476`
+  - ✅ 해결 (`feature/value_based_gatt_api`)
+    - API 33 이상에서는 `writeCharacteristic(char, value, writeType)`, `writeDescriptor(desc, value)`로 값을 인자로 넘기고, 값을 인자로 받는 콜백(`onCharacteristicRead/Changed(…, value)`, `onDescriptorRead(…, value)`)에서 값을 받습니다. 공유된 `characteristic.value`/`descriptor.value`를 읽거나 쓰지 않습니다.
+    - 이중 전달 방지: 새 콜백에서 `super`를 호출하지 않고, deprecated 콜백은 API 33 이상에서 아무것도 하지 않습니다. (프레임워크가 기본 구현을 통해 deprecated 콜백을 부르더라도 무시됨)
+    - 쓰기 결과(`writeCharacteristicSingle`, CCCD 쓰기)는 콜백 시점의 `characteristic.value` 대신 **요청한 값**을 돌려줍니다. API 32 이하 경로도 같습니다. API 32 이하에서 쓰기 직전 `characteristic.value`를 설정하는 순간의 경쟁은 플랫폼 API 한계라 남아 있습니다.
+    - API 33 이상의 쓰기 호출은 `BluetoothStatusCodes`를 반환합니다. SUCCESS가 아니면(busy 201 등) 상태 코드를 로그로 남기고 기존과 같이 `CommunicationFailedException` 재시도로 처리합니다.
+    - 단위 테스트에서 두 경로를 확인할 수 있도록 `BleDeviceEngineImpl`에 `sdkInt`(기본값 `Build.VERSION.SDK_INT`)를 주입할 수 있게 했습니다. lint NewApi 검사는 `@ChecksSdkIntAtLeast`로 통과합니다.
+    - 테스트: `BleDeviceEngineImplValueGattApiTest`(7건). 수정 전 엔진에서는 6건이 실패했습니다(쓰기 결과가 notification 값으로 바뀜, API 33 쓰기/CCCD/busy 재시도 경로 없음, read/notification이 stale `characteristic.value`를 사용). 나머지 1건은 API 32 이하에서 기존 API를 계속 쓰는지 확인하는 보호 테스트입니다.
+    - 실기기 확인(Fold5 Android 17 → M446K nRF Connect GATT 서버). `aaa2`(INDICATE+WRITE)에 indication을 켜고 응답 있는 쓰기를 반복하는 동안, nRF 서버 화면에서 `aaa2` indication(빈 값)을 약 1초 간격으로 30번 보냈습니다.
+      - 수정 전: 45초 동안 쓰기 749회 중 **19회**가 요청한 값(`a500a7` 등) 대신 **빈 값**(그 사이 도착한 indication 값)을 반환했습니다.
+      - 수정 후: 100초 동안 쓰기 1661회, indication 30건 수신, 불일치 **0회**.
+      - 회귀 확인(2회 반복): MTU 요청(517), Device Name/`2a38` read, `aaa2` 기본·응답 없는 쓰기, `2a39`(WRITE 전용) 쓰기, `aaa1` notification CCCD 켜기/끄기 모두 정상이었습니다.
+  - `characteristic.value = ...` 후 `writeCharacteristic(characteristic)`을 호출하는 방식은 공유된 mutable 필드를 사용합니다. 같은 characteristic으로 notification이 들어오면 쓰려던 값이 덮어써질 수 있습니다(race).
+  - API 33 이상에서는 `writeCharacteristic(char, value, writeType)`, `writeDescriptor(desc, value)`와 값을 인자로 받는 새 콜백으로 분기합니다.
+  - ⚠️ 새 콜백 오버로드는 기본 구현이 deprecated 콜백을 호출합니다. 그래서 새 오버로드에서 `super`를 호출하면서 relay에도 emit하면 **이벤트가 두 번 전달됩니다**. `stash@{0}`의 WIP 코드가 이 구조이므로 적용하기 전에 수정이 필요합니다.
+- [x] **[버그] `discoverServices()` 반환값을 무시함** — `impl/BleDeviceEngineImpl.kt:78`. false를 반환하면 연결 타임아웃이 날 때까지 의미 없이 대기합니다.
+  - ✅ 해결 (`feature/handle_discover_services_failure`)
+    - `STATE_CONNECTED`에서 `discoverServices()`가 false를 반환하면, 상태가 그 gatt의 CONNECTING일 때 바로 연결 시도를 정리합니다(`cancelConnecting`: disconnect/close, DISCONNECTED). 기다리던 `connectCompletable`은 `ConnectFailedException("discoverServices returned false")`로 실패합니다.
+    - 다시 시도하지 않는 이유: Android `BluetoothGatt.discoverServices()`는 Bluetooth 서비스가 없거나 client 등록이 해제됐을 때(`mClientIf == 0`), 또는 RemoteException일 때만 false를 반환합니다. 모두 같은 gatt로 다시 시도해도 소용없는 경우입니다.
+    - 이미 정리된 이전 gatt의 늦은 콜백이면 현재 연결은 건드리지 않습니다.
+    - 테스트: `BleDeviceEngineImplDiscoverServicesTest`(2건).
+      - false 반환 시 바로 실패: 수정 전에는 타임아웃 시간을 진행하지 않으면 오류 없이 계속 기다려서 실패했습니다(`No errors`). 수정 후에는 바로 `ConnectFailedException`이 나고, DISCONNECTED, `gatt.close()` 1회, `onDisconnected()` 1회를 확인합니다.
+      - 이전 gatt의 콜백: 현재 CONNECTED 연결이 유지됩니다(이번 수정이 다른 연결을 끊지 않는지 확인하는 테스트).
+    - 실기기 확인(Fold5 → S23): 실기기에서는 `discoverServices()`가 false를 반환하게 만들 수 없어서 정상 경로 회귀만 확인했습니다. connect → Device Name read → characteristic 목록(41개) → disconnect를 3회 반복했고 모두 정상이었습니다.
+- [x] **[버그] `stateRelay`가 serialized되어 있지 않음** — `impl/BleDeviceEngineImpl.kt:182`. 바인더 스레드, Rx 스레드, 앱 스레드에서 동시에 `accept`되어 Rx 규약을 위반합니다. `toSerialized()`를 적용하거나 단일 스레드로 처리합니다.
+  - ✅ 해결 (`feature/serialize_state_transitions`)
+    - 모든 상태 전환은 `setState()`를 거치고, 전환과 그 조건 확인(현재 상태 읽기 → 바꾸기)은 하나의 잠금(`stateLock`) 안에서 처리합니다. 관찰자는 상태를 한 번에 하나씩, 바뀐 순서대로 받습니다. 앞 브랜치의 `connectLock`도 이 잠금으로 합쳤습니다(잠금이 두 개면 잠그는 순서가 엇갈려 교착될 수 있음).
+    - 적용한 곳: `onConnectionStateChange`, `onServicesDiscovered`(CONNECTING 확인 → CONNECTED), `startConnecting`, `cancelConnecting`, connect dispose, `disconnect()` 전체, 5초 fallback 타이머, SPP 연결/정리, `onBluetoothDisabled`.
+    - `toSerialized()`를 쓰지 않은 이유: 다른 스레드가 전달 중이면 값을 큐에 넣고 바로 반환합니다. 그래서 `accept` 직후에 읽은 `stateRelay.value`가 이전 값일 수 있는데, engine은 이런 읽기에 의존합니다(예: `startConnecting` 직후 구독).
+    - 함께 막은 경쟁: `onServicesDiscovered`가 CONNECTING을 확인한 직후 타임아웃 스레드가 gatt를 close하고 DISCONNECTED로 바꾸면, 그 뒤에 close된 gatt로 CONNECTED가 될 수 있었습니다. `disconnect()`가 CONNECTED를 읽은 직후 원격 끊김 콜백이 오는 경우도 같습니다. 이제 확인과 전환 사이에 다른 전환이 끼어들지 않습니다.
+    - ⚠️ 동작 변경: 상태 관찰자(연결 완료 뒤 이어지는 체인 포함)는 이 잠금을 잡은 스레드에서 실행됩니다. 관찰자가 오래 걸리면 다른 스레드의 상태 전환(`disconnect()` 호출 등)이 그만큼 기다립니다. 관찰자 안에서 **다음 상태 변화를 블로킹으로 기다리면**(예: DISCONNECTED 관찰자 안에서 `connectCompletable().blockingAwait()`) 멈춥니다. 이는 onNext를 직렬로 호출해야 한다는 Rx 규약상 원래 허용되지 않는 사용입니다.
+    - 테스트: `BleDeviceEngineImplStateSerializationTest`. `disconnect()`(앱 스레드)와 원격 끊김 콜백(바인더 스레드)을 동시에 일으키고, 상태를 받을 때마다 10ms씩 처리하는 관찰자로 20회 반복합니다.
+      - 수정 전: 3회 반복 모두 "관찰자가 상태를 동시에 받음"으로 실패했습니다. 순서 역전도 관찰됐습니다(20회 중 1회 `received=[CONNECTED, DISCONNECTED, DISCONNECTING]`인데 현재 상태는 DISCONNECTED → 앱은 계속 DISCONNECTING으로 판단).
+      - 수정 후: 3회 반복 모두 통과.
+    - 실기기 확인(Fold5 → S23): CONNECTED를 1.5초 동안 처리하는 관찰자를 붙이고, 다른 스레드가 상태 값이 CONNECTED가 되자마자 `disconnect()`를 호출합니다.
+      - 수정 전: **`overlapped=true`**. 바인더 스레드가 CONNECTED를 처리하는 도중에 `Thread-2`가 DISCONNECTING을 동시에 전달했습니다(`disconnect()`는 6ms 만에 반환).
+      - 수정 후: `overlapped=false`. `disconnect()`가 CONNECTED 전달이 끝날 때까지 기다렸다가(1507ms) DISCONNECTING을 전달했습니다. 순서는 `CONNECTING → CONNECTED → DISCONNECTING → DISCONNECTED`.
+      - 이어서 connect → Device Name read → disconnect를 5회 반복했고 모두 정상이었습니다(각 약 250ms. 첫 회는 1024~1970ms로 수정 전 592~1102ms와 비슷한 편차).
+- [x] **[버그] connect를 동시에 호출하면 `connectGatt`가 두 번 불릴 수 있음** — `impl/BleDeviceEngineImpl.kt:262-272`. `checkConnectionState`와 `CONNECTING`으로 전환하는 동작이 원자적이지 않아서, 먼저 만들어진 gatt가 close되지 않고 누수됩니다.
+  - ✅ 해결 (`feature/atomic_connect`)
+    - `startConnecting()`을 추가했습니다. DISCONNECTED인지 확인하고 → 연결을 시작하고(`connectGatt` / RFCOMM 소켓 생성) → 상태를 바꾸는 과정을 하나의 잠금(`connectLock`) 안에서 처리합니다. GATT 연결(`connectCompletable`)과 SPP 연결(`connectSppSocket`)이 모두 이 함수를 쓰므로, 동시에 호출해도 gatt/소켓은 하나만 만들어집니다. 나머지 호출은 기존처럼 `IllegalStateException`으로 바로 실패합니다.
+    - `connectCompletable`은 CONNECTING으로 바꾼 뒤에 상태를 구독합니다. 그래서 이후에 보이는 DISCONNECTED는 이번 연결 시도가 끝났다는 뜻이 되어, 기존의 `enumerated()` 인덱스 검사가 필요 없어졌습니다. dispose할 때는 상태가 **자기 gatt의** CONNECTING일 때만 연결을 취소합니다.
+    - 함께 발견한 문제: `connectSppSocket`의 `doFinally`는 상태가 DISCONNECTED가 아니면 무조건 DISCONNECTED로 바꿨습니다. 그래서 GATT가 연결된 상태에서 SPP 연결을 시도하면, 상태 확인이 실패하는데도 **GATT 연결 상태가 DISCONNECTED로 바뀌었습니다**(gatt는 열린 채로 남음). 이제는 이 구독이 시작한 SPP 연결(같은 SPP_CONNECTING 상태 또는 같은 소켓)일 때만 정리합니다.
+    - 오류 메시지는 `Connection state is CONNECTING not DISCONNECTED`처럼 상태 이름으로 표시합니다(기존에는 State 객체의 toString).
+    - 테스트: `BleDeviceEngineImplConcurrentConnectTest`(3건). 수정 전 코드에서는 3건 모두 실패했습니다(3회 반복 모두).
+      - 8개 스레드 동시 connect(`connectGatt` 50ms 지연): 수정 전 `connectGatt` 8회 → 수정 후 1회. 1건은 연결 대기, 7건은 `IllegalStateException`.
+      - GATT 연결과 SPP 연결을 동시에 시도: 수정 전에는 `connectGatt`와 RFCOMM 소켓이 둘 다 만들어짐 → 수정 후 하나만 만들어짐.
+      - GATT 연결 상태에서 SPP 연결 시도: 수정 전에는 상태가 DISCONNECTED로 바뀜 → 수정 후 CONNECTED가 유지되고 gatt를 close하지 않음.
+    - 실기기 확인(Fold5 → S23, 8개 스레드가 동시에 `connectCompletable`, 호스트에서 `dumpsys bluetooth_manager`의 Registered App > Client 목록으로 이 앱의 GATT client 수 확인):
+      - 수정 전: 8건 모두 OK로 끝났지만 **GATT client가 8개 등록**됐고, `disconnect()` 뒤에도 **7개가 close되지 않고 남았습니다**(프로세스가 끝나야 사라짐).
+      - 수정 후: OK 1건, `IllegalStateException` 7건. GATT client는 1개만 등록됐고 `disconnect()` 뒤 0개가 됐습니다. 이어서 재연결 → Device Name read → disconnect도 정상이었고 client는 다시 0개가 됐습니다.
+    - SPP 경로는 단위 테스트로만 확인했습니다(실기기 SPP 미검증).
+- [x] **[버그] `BleDevice.equals()`만 override하고 `hashCode()`는 override하지 않음** — `BleDevice.kt:90`. `HashSet`/`HashMap`/`distinct()`에서 같은 기기가 서로 다른 기기로 취급됩니다. 또 `initEngine()` 전에 `equals/toString`을 호출하면 `UninitializedPropertyAccessException`이 납니다.
+  - ✅ 해결 (`feature/ble_device_hashcode`)
+    - `hashCode()`를 `equals()`와 같은 기준(`deviceId`)으로 override했습니다. 하위 클래스와 `BleDevice`도 `deviceId`가 같으면 같은 기기입니다(기존 `equals` 기준 유지).
+    - `initEngine()` 전에는 예외 없이 동작합니다. `equals`는 자기 자신과만 같고, `hashCode`는 identity hash, `toString`은 `BleDevice(engine not initialized)`를 돌려줍니다.
+    - ⚠️ engine이 붙기 전에 hash 기반 컬렉션에 넣으면, 붙은 뒤 hash가 바뀌어 찾을 수 없습니다. 라이브러리가 돌려주는 기기는 항상 engine이 붙어 있으므로 일반적인 사용에서는 해당하지 않습니다.
+    - MAC 대소문자는 구분합니다(기존과 같음). 가상 기기 MAC 정규화는 아래 `getDevice()` 항목에서 다룹니다.
+    - 테스트: `BleDeviceEqualityTest`(5건). 수정 전 코드에서는 3건이 실패했습니다(같은 기기의 hashCode가 다름 2건, engine 초기화 전 `UninitializedPropertyAccessException`). 나머지 2건은 다른 기기 구분과 `toString` 형식을 확인하는 보호 테스트입니다.
+    - 실기기 확인(Fold5 → M446K nRF Connect 광고). `BleManager`를 두 개 만들어(샘플 앱 `BluetoothService`도 두 개를 만듦) 같은 기기의 `BleDevice`를 각각 얻었습니다(서로 다른 인스턴스).
+      - 수정 전: `equals=true`인데 hash가 달라(`225699326`/`182485343`) `hashSetOf` 크기 **2**, `distinct()` **2**, `hashMap[두 번째]`가 **null**. 초기화 전 기기의 `toString`/`equals`는 `UninitializedPropertyAccessException`.
+      - 수정 후: hash가 같고 `hashSetOf` 크기 1, `distinct()` 1, `hashMap[두 번째]`로 첫 번째 값을 찾음. 초기화 전 기기는 `BleDevice(engine not initialized)` / `false`.
+- [x] **[버그] `getConnectedDevices()`가 실제 연결 상태와 맞지 않음** — `impl/BleManagerEngineImpl.kt:120-122`. `bluetoothManager.getConnectedDevices(GATT)`는 시스템 전체(다른 앱, OS가 맺은 연결 포함)를 반환합니다. 그래서 `connected == false`인 `BleDevice`가 목록에 포함됩니다. 라이브러리 engine의 상태를 기준으로 필터링해야 합니다.
+  - ✅ 해결 (`feature/connected_devices_from_engine_state`)
+    - `getConnectedDevices()`는 이 라이브러리가 관리하는 기기(`deviceMap`) 중 `connected`(engine이 GATT CONNECTED)이거나 `SPP_CONNECTED`인 기기만 돌려줍니다. 시스템 목록을 쓰지 않으므로, 다른 앱이 연결한 기기 때문에 `BleDevice`를 새로 만들거나 delegate를 호출하지도 않습니다. `getConnectedDevice(mac)`도 이 목록을 사용합니다.
+    - ⚠️ 동작 변경: 다른 앱이나 OS가 연결한 기기는 더 이상 포함되지 않습니다. `InitializableBleDevice`는 기존 `connected` 기준과 같이 초기화 중(GATT 연결됨)에도 포함됩니다.
+    - 테스트: `BleManagerEngineImplConnectedDevicesTest`(2건). 수정 전 코드에서는 2건 모두 실패했습니다. 다른 앱이 연결한 기기가 `connected=false`인 채로 목록에 들어갔고, 그 기기의 `BleDevice`가 delegate로 만들어졌습니다.
+    - 실기기 확인(Fold5 → S23. 샘플 앱 프로세스가 임시 instrumentation test로 S23 연결을 40초 동안 유지하고, 그동안 별도 앱인 라이브러리 테스트 APK에서 호출. Fold5가 보안 잠금 상태라 화면 조작 없이 진행):
+      - 다른 앱만 연결: 수정 전 `[5D:81:16:EA:56:94(connected=false)]` → 수정 후 `[]` (시스템 GATT 목록에는 S23이 있음)
+      - 이 앱도 연결: 수정 전과 후 모두 `[5D:81:16:EA:56:94(connected=true)]`
+      - 이 앱이 연결 해제: 수정 전 `[...(connected=false)]` → 수정 후 `[]`
+- [x] **[버그] 스캔 결과가 계속 쌓이고 구독이 해제되지 않음(메모리 누수)** — `impl/BleManagerEngineImpl.kt:153-159`. 스캔된 모든 기기가 `deviceMap`에 영구히 남고, 기기마다 만든 connection-state 구독의 Disposable도 버려집니다. 기기가 많은 환경에서 장시간 스캔하면 계속 늘어납니다. 새 기기마다 초기 `DISCONNECTED` 이벤트도 `getConnectionStateObservable()`로 전달됩니다.
+  - ✅ 해결 (`feature/release_unused_devices`)
+    - `deviceMap`은 기기를 약한 참조(`DeviceEntry`: `WeakReference` + `ReferenceQueue`)로 들고 있습니다. 앱이 참조하는 동안에는 같은 인스턴스가 유지되고(`deviceMap` thread-safety 수정의 "기기당 하나" 보장 유지), 아무도 참조하지 않는 연결되지 않은 기기는 GC됩니다. GC된 항목은 다음 기기를 만들 때 map에서 지웁니다.
+    - 상태가 DISCONNECTED가 아닌 기기(CONNECTING/CONNECTED/DISCONNECTING/SPP)는 `DeviceEntry.active`로 강하게 참조합니다. 그래서 앱이 참조를 버려도 연결을 정리할 수 있습니다. 실제 앱에서는 연결된 `BluetoothGatt`의 콜백을 Bluetooth 서비스가 binder로 붙잡고 있어서 그 경로로도 유지되지만, 그 밖의 경우까지 확실히 유지하기 위한 장치입니다.
+    - 기기마다 만든 상태 구독은 기기 안의 relay가 들고 있으므로 기기가 GC되면 함께 사라집니다(별도로 dispose할 필요 없음).
+    - 기기를 만들 때의 처음 상태(DISCONNECTED)는 `BleManager.getConnectionStateObservable()`로 전달하지 않습니다(`skip(1)`). 상태 변화만 전달합니다. 가상 기기도 같습니다.
+    - ⚠️ 동작 변경: 앱이 참조하지 않는, 연결되지 않은 기기는 `getDevices()`(내부)와 스캔 이후 조회에서 사라질 수 있습니다. 같은 MAC으로 `getDevice()`를 다시 부르면 새 인스턴스가 만들어집니다(이전 인스턴스는 아무도 참조하지 않으므로 구분할 수 없음). 처음 DISCONNECTED 이벤트에 의존하던 코드는 더 이상 그 이벤트를 받지 않습니다.
+    - 테스트: `BleManagerEngineImplDeviceReleaseTest`(4건). 수정 전 코드에서는 3건이 실패했습니다(GC 후에도 남음, 연결 해제 후에도 남음, 처음 DISCONNECTED 전달). "참조 중인 기기는 GC 후에도 같은 인스턴스"는 기존 동작을 지키기 위한 테스트입니다. "연결된 기기는 앱 참조 없이도 유지"는 `active`를 설정하지 않게 바꾸면 실패하는 것을 확인했습니다. (TestScheduler는 취소된 타이머를 그 시각까지 큐에 남겨 두고 그 작업이 기기를 참조하므로, 테스트에서 시간을 진행해 큐를 비웁니다.)
+    - 실기기 확인(Fold5, 8초 실제 스캔 후 GC. 화면이 꺼지면 필터 없는 스캔이 멈추므로 화면만 깨운 상태에서 진행):
+      - 수정 전: 스캔 기기 116개 → 캐시 116개, 상태 이벤트 **116건(모두 처음 DISCONNECTED)**, GC 후에도 **116개**가 남음.
+      - 수정 후: 스캔 기기 79개 → 상태 이벤트 **0건**, GC 후 캐시 **1개**(프로브가 들고 있는 S23, 같은 인스턴스).
+      - S23 연결 후 프로브가 참조를 버리고 GC: 수정 전과 후 모두 연결된 기기 1개(같은 인스턴스)가 유지되고 Device Name read가 정상이었습니다. 연결부터 해제까지의 이벤트는 수정 후 4건(CONNECTING → CONNECTED → DISCONNECTING → DISCONNECTED)이었습니다.
+- [x] **[버그] API ≤ 30에서 위치 provider가 바뀌면 스캔이 중복 실행됨** — `impl/BleManagerEngineImpl.kt:84`. `combineLatest`가 `(true, true)`를 다시 내보내면 `flatMap`이 두 번째 스캔을 시작합니다. 그러면 두 스캔의 목록이 번갈아 전달됩니다. `distinctUntilChanged()`와 `switchMap`을 사용해야 합니다.
+  - ✅ 해결 (`feature/scan_restart_on_provider_change`)
+    - 스캔 가능 상태에 `distinctUntilChanged()`를 적용해서, 상태가 그대로인 broadcast로는 스캔을 다시 시작하지 않습니다. 스캔 시작은 `flatMap` 대신 `switchMap`으로 바꿔서, 상태가 다시 나오더라도 이전 스캔을 멈추고 하나만 유지합니다.
+    - 함께 수정: API 30에서는 위치 provider 변경 broadcast의 `EXTRA_PROVIDER_ENABLED`를 위치 사용 가능 여부로 썼습니다. 이 값은 **바뀐 provider 하나의 상태**라서, 다른 provider가 켜져 있어도 false가 되어 `LocationUnavailableException`으로 스캔이 끝날 수 있습니다. 이제 broadcast를 받을 때마다 `LocationManagerCompat.isLocationEnabled()`로 다시 읽습니다. (API 30 실기기가 없어 코드로만 확인)
+    - 테스트: `BleManagerEngineImplScanAvailabilityTest`(4건, 단위 테스트의 SDK_INT가 0이라 API 30 이하 경로를 탐). 수정 전 코드에서는 2건이 실패했습니다(위치가 켜진 채 provider가 바뀌면 `startScan` 2회). 나머지 2건은 위치가 꺼지거나 블루투스가 꺼지면 기존처럼 에러로 끝나고 스캔을 멈추는지 확인하는 보호 테스트입니다.
+    - 실기기 확인(Fold5 Android 17): API 31 이상은 위치 상태를 보지 않으므로 이 경로를 실기기에서 재현할 수는 없었고, 회귀만 확인했습니다. manufacturer data 필터 스캔 26초 동안 위치 끄기/켜기(`cmd location set-location-enabled`) → 블루투스 끄기를 했습니다. 스캔은 1번만 등록됐고(빈 목록 전달 1회), 위치 토글에는 영향이 없었으며, 블루투스를 끄자 `BluetoothUnavailableException`으로 끝나고 `stopScan`이 호출됐습니다.
+- [x] **[버그] `CALLBACK_TYPE_MATCH_LOST`를 처리하지 않음** — `impl/BleScanner.kt:20`. `callbackType`을 무시하므로, 사라진 기기도 발견된 기기로 목록에 추가됩니다.
+  - ✅ 해결 (`feature/scan_match_lost`)
+    - `BleScanner`가 스캔 결과와 함께 콜백 종류를 전달합니다(`ScanEvent.lost`). MATCH_LOST는 발견됐던 기기가 사라졌다는 알림이므로 rssi 필터와 관계없이 전달하고, 디버그 로그(`scan match lost`)를 남깁니다.
+    - 스캔 목록(`scanObservable`)은 기존처럼 처음 발견된 순서를 유지하고 같은 기기는 최신 `ScanInfo`로 바꿉니다. MATCH_LOST이면 그 기기를 **목록에서 뺍니다**. 다시 발견되면 목록 끝에 추가됩니다.
+    - 사라진 기기를 위해 `BleDevice`를 새로 만들지 않고(delegate 호출 없음), 목록이 바뀌지 않으면 내보내지 않습니다. 목록 상태는 구독마다 새로 만듭니다.
+    - 공개 함수 `collectListLastSortedIndex`는 호환성을 위해 남겨 두었고, 엔진은 더 이상 사용하지 않습니다. 이 과정에서 minSdk 24에서 실행되지 않던 API 24 미만 분기도 없어졌습니다.
+    - 테스트: `BleManagerEngineImplScanListTest`(4건), `BleScannerTest`에 MATCH_LOST 2건 추가. 수정 전 코드에서는 목록 테스트 3건이 실패했습니다(사라진 기기가 목록에 남음, 다시 발견돼도 순서 그대로, 모르는 기기의 MATCH_LOST로 `BleDevice` 생성). 나머지 1건은 순서 유지와 `ScanInfo` 갱신을 확인하는 보호 테스트입니다.
+    - 실기기 확인(Fold5 → M446K nRF 광고). `FIRST_MATCH_AND_MATCH_LOST` + manufacturer data 필터로 60초 스캔하면서, 시작 약 19초 뒤 nRF 광고를 끄고 49초 뒤 다시 켰습니다. (nRF는 광고를 다시 켤 때 새 랜덤 주소를 씀)
+      - 수정 전: 광고를 끈 약 6초 뒤 스택이 같은 주소로 lost 콜백을 보냈지만 목록에 그대로 남았습니다. 광고를 다시 켠 뒤에는 **사라진 주소와 새 주소 2개**가 목록에 있었습니다.
+      - 수정 후: 광고를 끈 약 6초 뒤 `scan match lost` 로그와 함께 **목록이 비었고**, 광고를 다시 켜자 새 주소 1개만 목록에 나타났습니다.
+- [x] **[버그] API 32 이하에서 `ScanInfo.advertisingDataMap`이 항상 비어 있음** — `ScanInfo.kt:20-27`. `bytes`를 읽기만 하고 파싱하지 않은 채 빈 map을 반환합니다. AD structure(length-type-value)를 직접 파싱해야 합니다.
+  - ✅ 해결 (`feature/parse_advertising_data`)
+    - API 32 이하에서는 `ScanRecord.bytes`를 AD structure(length 1바이트, type 1바이트, data)로 직접 파싱합니다(`parseAdvertisingData`, internal). API 33 이상은 기존처럼 플랫폼의 `advertisingDataMap`을 씁니다.
+    - 규칙은 API 33의 `ScanRecord.getAdvertisingDataMap()`과 맞췄습니다. 길이가 0이면(뒤쪽 0 padding) 끝내고, 광고 데이터와 scan response에 같은 type이 있으면 마지막 값을 씁니다. 길이가 남은 바이트를 넘는 잘못된 structure를 만나면 그 앞까지만 돌려줍니다.
+    - 테스트: `ScanInfoTest`(5건). 수정 전 코드에서는 `ScanInfo` 경로 테스트가 빈 map으로 실패했습니다(나머지 4건은 새 파서의 경계 조건 테스트라 수정 전 코드에는 해당 함수가 없음).
+    - 실기기 확인(Fold5 Android 17): API 32 이하 실기기가 없어서, 대신 실제로 수신한 광고 레코드에 대해 새 파서 결과와 플랫폼 `advertisingDataMap`을 비교했습니다. 필터 없이 10초 스캔한 **1443건(기기 98개, AD type 9종: 0x01/02/03/07/09/0a/16/21/ff)이 모두 일치**했습니다. M446K nRF 광고는 `{0x01=02, 0x09=재홍의 Jump3(UTF-8), 0xff=59000102030405}`로 파싱됐습니다.
+- [x] **[버그] `BleScanFilter.Builder` 검증이 파라미터가 아니라 이전 필드 값을 검사함** — `BleScanFilter.kt:59, 103, 134`. 그래서 mask와 data의 길이가 달라도 검증을 통과하고, 스캔을 시작할 때 Android `ScanFilter.Builder`에서 `IllegalArgumentException`이 납니다.
+  - ✅ 해결 (`feature/scan_filter_validation`)
+    - `setServiceUuid(uuid, mask)`, `setServiceData(uuid, data, mask)`, `setManufacturerData(id, data, mask)`가 **이번 호출의 인자**를 검사합니다. mask가 있는데 uuid/data가 없거나, data와 mask의 길이가 다르면 빌더에서 바로 `IllegalArgumentException`이 납니다.
+    - 함께 고쳐진 문제: 이전 호출의 잘못된 값을 검사했기 때문에, 잘못된 값을 설정한 뒤 올바른 값으로 다시 설정하면 오히려 실패했습니다.
+    - ⚠️ 동작 변경: uuid 없이 mask만 넘기는 `setServiceUuid(null, mask)`는 이제 실패합니다. 이전에는 통과했지만 스캔을 시작할 때 uuid가 없어서 필터가 조용히 빠졌습니다.
+    - 테스트: `BleScanFilterTest`(6건). 수정 전 코드에서는 5건이 실패했습니다. 나머지 1건은 올바른 mask가 저장되는지 확인하는 보호 테스트입니다.
+    - 실기기 확인(Fold5 → M446K nRF 광고, manufacturer data `0x0059 / 0102030405`):
+      - 길이가 다른 mask(data 5바이트, mask 2바이트): 수정 전에는 빌더를 통과하고 **스캔을 시작할 때** `IllegalArgumentException`. 수정 후에는 **빌더에서** 바로 같은 예외.
+      - 잘못된 값 뒤에 올바른 값(`0102000000` / mask `FFFF000000`) 다시 설정: 수정 전에는 **올바른 호출이 실패**. 수정 후에는 통과하고 이 prefix mask로 M446K를 434ms 만에 찾았습니다.
+      - 앞 2바이트가 다른 mask(`0103…`)는 수정 전후 모두 8초 동안 찾지 못했습니다(mask가 실제로 적용됨).
+- [x] **[버그] 런타임 권한을 확인하지 않음** — 전역 `@SuppressLint("MissingPermission")`. API 31 이상에서 `BLUETOOTH_SCAN/CONNECT`가 없으면 `deviceName`, `bonded`, `toString()`, 로그 출력에서도 `SecurityException`이 납니다. 작업 전에 권한을 확인하고 명확한 예외(`PermissionDeniedException`)를 내야 합니다.
+  - ✅ 해결 (`feature/runtime_permission_check`)
+    - `BleManager.PermissionDeniedException(permissions)`를 추가했습니다. `permissions`에 허용되지 않은 권한 이름이 들어 있습니다. 플랫폼 `SecurityException`을 처리하던 코드도 그대로 동작하도록 `SecurityException`을 상속합니다.
+    - 확인하는 곳(`impl/BlePermissions`)
+      - 스캔: API 31 이상 `BLUETOOTH_SCAN`, API 29~30 `ACCESS_FINE_LOCATION`, 그 이하 `ACCESS_COARSE_LOCATION` 또는 FINE. 스캔을 시작하기 전에 에러로 끝납니다.
+      - API 31 이상 `BLUETOOTH_CONNECT`: `connectCompletable`(상태를 바꾸기 전), `bondCompletable`/`unbondCompletable`, `connectSppSocket`, `getBondedDevices`, `deviceName`/`bonded` 프로퍼티.
+      - `BLUETOOTH`/`BLUETOOTH_ADMIN`은 API 30 이하에서 설치 시 부여되므로 확인하지 않습니다.
+    - 권한이 없어도 실패하지 않게 한 곳: `toString()`은 이름 자리에 `(permission denied)`를 표시하고, 라이브러리 로그는 이름을 `?`로 남깁니다. 기기 객체를 만드는 `getDevice(mac)`은 권한이 필요 없는데도 로그에서 이름을 읽다가 실패했으므로, 그 로그를 없앴습니다.
+    - ⚠️ 동작 변경: API 30 이하에서 위치 권한 없이 스캔하면, 이전에는 결과 없이 조용히 계속됐지만 이제 `PermissionDeniedException`으로 끝납니다. 예외 타입은 `SecurityException`에서 그 하위 타입으로 바뀝니다.
+    - 테스트: `PermissionCheckTest`(8건, 권한이 없을 때 플랫폼처럼 `SecurityException`을 던지도록 mock 구성). 수정 전 엔진에서는 6건이 실패했습니다(connect/bond/deviceName/bonded가 `SecurityException`, `toString`과 `getDevice`가 `SecurityException`, 위치 권한 없이 스캔 시작). 나머지 2건은 API별 권한 규칙과 API 30 이하에서 CONNECT 권한 없이 연결되는지 확인합니다.
+    - 실기기 확인(Fold5 Android 17, 테스트 APK에서 `pm revoke`로 권한 회수):
+      - `BLUETOOTH_SCAN` 없이 스캔: 수정 전 `SecurityException: Need android.permission.BLUETOOTH_SCAN permission for AttributionSource {…}` → 수정 후 `PermissionDeniedException: Permission denied: android.permission.BLUETOOTH_SCAN`.
+      - `BLUETOOTH_CONNECT` 없이(SCAN은 있음) 스캔으로 M446K를 찾은 뒤: 수정 전에는 `toString()`, `deviceName`, `bonded`, 다른 매니저의 `getDevice(mac)`, `getBondedDevices()`, `connectCompletable`, `bondCompletable` **모두** 플랫폼 `SecurityException`이었습니다. 수정 후에는 `toString()` = `BleDevice (permission denied)(5D:D3:…)`, `getDevice(mac)` 정상, 나머지는 `PermissionDeniedException(BLUETOOTH_CONNECT)`이고 연결 상태는 DISCONNECTED 그대로였습니다.
+      - 권한이 모두 있을 때 회귀(MTU, read, 응답 있는/없는 write, CCCD) 정상.
+      - 참고: CONNECT 권한 없이 캐시된 기기가 있는 상태에서 블루투스를 꺼도, 어댑터가 꺼지면 `BluetoothDevice.getName()`이 예외 대신 null을 돌려줘서 수정 전에도 크래시는 없었습니다.
+- [x] **[버그] characteristic을 UUID로만 찾음** — `impl/BleDeviceEngineImpl.kt:451-465`. 여러 서비스에 같은 UUID가 있으면 첫 번째 것이 선택됩니다. 찾지 못하면 메시지 없는 `IllegalStateException()`이 납니다. serviceUuid를 받는 오버로드와 `CharacteristicNotFoundException`을 추가해야 합니다.
+  - ✅ 해결 (`feature/characteristic_by_service`)
+    - `BleDevice`에 서비스를 지정하는 오버로드를 추가했습니다: `readCharacteristicSingle(serviceUuid, characteristicUuid)`, `writeCharacteristicSingle(serviceUuid, characteristicUuid, bytes, writeType = DEFAULT)`(`@JvmOverloads`), `setupNotification(type, serviceUuid, characteristicUuid)`. 기존 함수는 그대로이며 처음 찾은 characteristic을 씁니다. (engine 추상 메서드는 `serviceUuid: UUID?`를 받도록 바꿈. 가상 기기는 서비스를 구분하지 않음)
+    - 찾지 못하면 `BleManager.CharacteristicNotFoundException(serviceUuid, characteristicUuid)`로 실패합니다. 메시지에 UUID(와 서비스)가 들어가고, 기존 `IllegalStateException`을 잡던 코드와 호환되도록 `IllegalStateException`을 상속합니다.
+    - notification: 같은 characteristic인지 **서비스까지** 보고 설정을 공유합니다. 서비스를 지정하지 않은 구독은 현재 연결에서 처음 찾은 서비스로 정하므로, 같은 characteristic을 서비스 지정/미지정으로 구독해도 CCCD 설정을 공유합니다. 수신한 notification은 설정한 characteristic의 서비스와 같을 때만 전달합니다(다른 서비스의 같은 UUID notification은 전달하지 않음).
+    - 테스트: `BleDeviceEngineImplServiceLookupTest`(7건). 수정 전 API로 확인할 수 있는 2건 중 "찾지 못하면 UUID가 담긴 메시지" 테스트가 실패했습니다(메시지 null). "서비스 미지정 시 첫 번째 것" 테스트는 기존 동작 보호용입니다. 나머지 5건은 새 오버로드와 notification 구분 테스트입니다.
+    - 실기기 확인(Fold5 → M446K nRF Connect). nRF GATT 서버에 서비스 `0000bbb0-…-aabbccddeeff`를 추가하고, 그 안에 Heart Rate 서비스와 같은 UUID의 `2a38`(Read+Notify, 값 `05`)을 넣었습니다. (Heart Rate의 `2a38`은 Read 전용, 값 `01`)
+      - 수정 전: `2a38` characteristic 2개 중 항상 Heart Rate 것만 선택돼 read는 `01`, notification 설정은 `IllegalCharacteristicProperty`(notify 속성 없음)로 실패했습니다. 두 번째 서비스의 `2a38`에는 접근할 방법이 없었습니다. 없는 UUID read는 `IllegalStateException: null`.
+      - 수정 후: 기존 API는 그대로(`01`, notification 실패). `read(HR, 2a38)` = `01`, `read(bbb0, 2a38)` = `05`, `setupNotification(bbb0, 2a38)` 성공(CCCD 쓰기 status 0). `read(bbb0, aaa1)`은 `CharacteristicNotFoundException: Characteristic 0000aaa1-… not found in service 0000bbb0-…`, 없는 UUID는 `Characteristic 0000ffff-… not found`.
+- [x] **[버그] CCCD descriptor가 없으면 NPE** — `impl/BleDeviceEngineImpl.kt:475`. 원인을 알기 어려운 에러가 나옵니다.
+  - ✅ 해결 (`feature/missing_cccd`)
+    - notification/indication을 켜기 전에 NOTIFY/INDICATE 속성과 CCCD(0x2902)가 있는지 확인합니다. CCCD가 없으면 `BleManager.DescriptorNotFoundException(characteristicUuid, descriptorUuid)`로 실패합니다(`CharacteristicNotFoundException`과 같이 `IllegalStateException` 상속).
+    - 켤 수 없는 characteristic이면 `setCharacteristicNotification`을 호출하지 않습니다. 이전에는 켰다가 정리하면서 끄고, 끄기 위한 descriptor 쓰기도 실패해서 `DISABLE_NOTIFICATION_VALUE error` 로그가 남았습니다. (속성이 없는 경우의 `IllegalCharacteristicProperty`도 같은 방식으로 미리 확인)
+    - 참고: 앞의 "deprecated GATT API" 수정 이후 API 33 이상에서는 NPE 대신 플랫폼의 `IllegalArgumentException: descriptor must not be null`이 났습니다. API 32 이하는 NPE.
+    - 테스트: `BleDeviceEngineImplMissingCccdTest`(3건). 수정 전 엔진에서는 3건 모두 실패했습니다(API 32 이하 NPE, API 33 mock에서는 응답을 기다리며 멈춤, 속성이 없을 때 `setCharacteristicNotification` 호출).
+    - 실기기 확인(Fold5 → M446K). M446K에는 CCCD가 없는 indicate characteristic이 실제로 2개 있었습니다: Generic Attribute의 Service Changed(`1801/2a05`)와 Samsung 서비스의 `594a36e6-…`(descriptor는 `3952`만 있음).
+      - 수정 전: 두 characteristic 모두 `IllegalArgumentException: descriptor must not be null`. 그 전에 `setCharacteristicNotification(true/false)`가 호출되고 `DISABLE_NOTIFICATION_VALUE error`가 3번 기록됐습니다.
+      - 수정 후: 두 characteristic 모두 2~4ms 만에 `DescriptorNotFoundException: Descriptor 00002902-… not found in characteristic …`이고, `setCharacteristicNotification`은 호출되지 않았습니다. 이어서 `aaa1` notification 설정은 정상이었습니다.
+- [x] **[버그] `onBluetoothDisabled()`가 CONNECTED 상태만 처리함** — `impl/BleDeviceEngineImpl.kt:528-537`. CONNECTING이나 SPP 상태인 기기는 정리되지 않습니다.
+  - ✅ 해결 (`feature/bluetooth_off_all_states`)
+    - `onBluetoothDisabled()`가 상태별로 기다리지 않고 바로 정리합니다(`stateLock` 안에서).
+      - CONNECTED / DISCONNECTING: gatt close → DISCONNECTED → `onDisconnected()`. DISCONNECTING은 `disconnect()`의 5초 fallback을 기다리지 않습니다(타이머는 상태가 바뀌었으므로 아무것도 하지 않음).
+      - CONNECTING: `cancelConnecting()`. 기다리던 `connectCompletable`은 연결 타임아웃 전에 바로 `ConnectFailedException("bluetooth is disabled")`로 실패합니다.
+      - SPP_CONNECTING / SPP_CONNECTED: `disconnect()`와 같이 소켓을 닫습니다.
+      - DISCONNECTED: 아무것도 하지 않습니다.
+    - 테스트: `BleDeviceEngineImplBluetoothOffTest`(6건). 수정 전 코드에서는 CONNECTING(오류 없이 계속 대기), DISCONNECTING(DISCONNECTING 유지), SPP_CONNECTED·SPP_CONNECTING(소켓을 닫지 않음) 4건이 실패했습니다. CONNECTED와 DISCONNECTED 2건은 기존 동작이 바뀌지 않는지 확인합니다.
+    - 실기기 확인(Fold5, 호스트에서 `cmd bluetooth_manager disable/enable`로 블루투스를 끄고 켬. 확인 전 Fold5에 연결된 기기가 없음을 확인함):
+      - 연결 중(도달할 수 없는 주소 `00:00:5E:00:53:01`로 CONNECTING)에 블루투스를 끔: Android는 연결 콜백을 보내지 않았습니다. 수정 전에는 블루투스를 끈 지 **18초 뒤에** 20초 연결 타임아웃(`TimeoutException`)으로 끝났고, 수정 후에는 **664ms 뒤에** `ConnectFailedException(bluetooth is disabled)`으로 끝났습니다(호스트 감지 지연 포함).
+      - S23에 연결(CONNECTED)된 상태에서 블루투스를 끔: 수정 전과 후 모두 DISCONNECTED가 됐습니다.
+      - 블루투스를 다시 켜고 3초 뒤 S23 재연결: 수정 전 실행에서는 status 133으로 실패했고, 수정 후 실행에서는 성공했습니다. 블루투스를 켠 직후의 스택 타이밍 문제로 보이며 이번 수정과는 관계없습니다.
+      - DISCONNECTING 구간은 너무 짧아(약 100ms) 실기기에서 맞추지 못했고, SPP는 실기기로 확인하지 못했습니다.
+  - (실기기) 연결되지 않은 기기마다 `DisconnectedException` 스택트레이스를 로그로 남깁니다. 테스트에서는 BT를 한 번 끌 때 캐시된 기기 57개에 대해 57개의 스택트레이스가 출력되었습니다. 아래 "스캔 결과가 계속 쌓이는" 문제와 함께 처리해야 합니다.
+- [x] **[버그] SPP 관련 문제** — `impl/BleDeviceEngineImpl.kt:503`, `BleSppSocket.kt:16, 28, 40`
+  - ✅ 해결 (`feature/spp_fixes`)
+    - uuid를 지정하지 않은 `connectSppSocket()`: 기기 UUID 중 SPP(`00001101-…`)가 있으면 SPP, 없으면 기존처럼 첫 UUID, 기기 UUID를 모르면(`uuids`가 null, SDP를 한 적 없음) 표준 SPP UUID를 씁니다. ⚠️ 기기 UUID에 SPP가 있지만 첫 번째가 아니면, 이전에는 첫 UUID를 썼고 이제는 SPP를 씁니다.
+    - `readSingle`: `read()`가 실제로 읽은 길이를 확인합니다. 크기를 지정하면 다 채울 때까지 읽고, `-1`(받은 만큼)이면 읽은 만큼만 돌려줍니다. 스트림이 닫혀 -1을 받으면 `IOException`. 인자 검증 오타(`size < -2`)를 `size < -1`로 고쳤습니다.
+    - 연결: 엔진은 연결하지 않은 `BleSppSocket`을 만든 뒤, 기기 검색을 멈추고(`cancelDiscovery()`, API 31+에서 SCAN 권한이 없으면 건너뜀) 연결합니다. 연결에 실패하면 RFCOMM 소켓을 닫습니다(이전에는 생성자에서 실패하면 소켓이 닫히지 않았음). 공개 생성자 `BleSppSocket(socket)`은 호환을 위해 기존처럼 만들면서 연결하고, 실패하면 소켓을 닫습니다.
+    - 테스트: `SppSocketTest`(8건). 수정 전 코드에서는 8건 모두 실패했습니다.
+    - 실기기 확인(Fold5). Fold5와 M446K는 페어링돼 있지 않아서, 사용자 기기에 본딩을 새로 만들지 않는 범위에서만 확인했습니다. SDP를 한 적 없는(uuids = null) M446K의 Classic 주소로 uuid 없이 `connectSppSocket()` 호출:
+      - 수정 전: 7ms 만에 `NullPointerException: getUuids(...) must not be null`.
+      - 수정 후: `cancelDiscovery` → SPP UUID로 RFCOMM 연결 시도 → M446K에 SPP 서비스가 없어 SDP 후 2.1초 만에 `IOException: read failed, socket might closed or timeout`, 소켓 close, 상태 DISCONNECTED. 페어링 요청은 뜨지 않았습니다.
+      - 실제 SPP 데이터 송수신(`readSingle` 부분 읽기)은 SPP 서버 기기가 없어 단위 테스트로만 확인했습니다.
+  - `bluetoothDevice.uuids`는 null일 수 있어서 NPE가 날 수 있습니다. 기본 SPP UUID(`00001101-...`)로 fallback하거나 `fetchUuidsWithSdp()`를 사용해야 합니다.
+  - `inputStream.read()`의 반환 길이를 확인하지 않습니다. 그래서 일부만 읽혔을 때 뒤쪽이 0으로 채워진 배열이 반환됩니다.
+  - 인자 검증의 `size < -2`는 `size < -1`의 오타입니다.
+  - 생성자 안에서 블로킹 `connect()`를 호출하고, 연결하기 전에 `cancelDiscovery()`를 호출하지 않습니다.
+- [x] **[버그] VirtualDevice 동작이 실기기와 다름** — `virtual/VirtualDeviceEngine.kt:44`, `virtual/VirtualDevice.kt:77`. `disconnect()`가 `bleDevice.onDisconnected()`를 호출하지 않습니다. 그래서 가상 `InitializableBleDevice`는 재연결 시 초기화하기 전부터 CONNECTED로 보고합니다. `notifyByteArray()`는 notification마다 새 `Thread`를 생성하므로 **순서가 보장되지 않습니다**.
+  - ✅ 해결 (`feature/virtual_device_fidelity`)
+    - `disconnect()`가 실제로 연결을 끊을 때(DISCONNECTED가 아닐 때) `bleDevice.onDisconnected()`를 호출합니다. 이미 끊긴 상태에서 다시 불러도 호출하지 않습니다.
+    - `notifyByteArray()`는 기기마다 하나인 worker(`Schedulers.io().createWorker()`)로 전달합니다. 호출한 스레드와 분리해서 전달하는 것은 같고, **보낸 순서대로** 전달합니다.
+    - 함께 수정: 연결 중(100ms)에 `disconnect()`가 불리면, 이전에는 타이머가 끝난 뒤 CONNECTED가 됐습니다. 이제 실기기 엔진처럼 연결하지 않고 `DisconnectedException`으로 끝납니다. 연결 구독을 해제하면 CONNECTING에 머물지 않고 DISCONNECTED로 돌아갑니다.
+    - 테스트: `VirtualDeviceEngineFidelityTest`(4건) + `VirtualDeviceNotificationOrderTest`(1건, 실제 스레드로 1000개 전달). 수정 전 코드에서는 5건 모두 실패했습니다.
+    - 실기기 확인(Fold5, 라이브러리 테스트 APK에서 `BleManager`에 가상 기기 3개 등록):
+      - notification 3000개를 연속으로 보냄: 수정 전 **순서가 뒤바뀐 쌍 103개** → 수정 후 0개(3000개 모두 수신).
+      - 초기화에 1초 걸리는 `InitializableBleDevice` 연결 → 해제 → 재연결: 수정 전에는 재연결 300ms 뒤 상태가 **CONNECTED**(상태 순서 `… DISCONNECTED, CONNECTING, CONNECTED`). 수정 후에는 INITIALIZING이고 순서는 `… DISCONNECTED, CONNECTING, INITIALIZING, CONNECTED`(첫 연결과 같음).
+      - 연결 중 `disconnect()`: 수정 전 500ms 뒤 **CONNECTED**, connect 정상 완료 → 수정 후 DISCONNECTED, connect는 에러.
+      - 참고: 처음에 가상 기기 주소를 숫자로만 된 유효한 MAC(`12:34:56:78:90:01`)으로 등록했더니 `getDevice()`가 가상 기기 대신 실제 기기를 돌려줘서 연결이 10초 타임아웃으로 실패했습니다. 아래 `getDevice()` 조회 순서 항목의 실제 사례입니다.
+- [x] **[버그] 작업이 타임아웃된 뒤에도 BluetoothGatt가 busy로 남아 다음 작업이 연달아 실패함 (실기기)** — `impl/BleDeviceEngineImpl.kt`(`enqueue`/`guardOperation`)
+  - ✅ 해결 (`feature/wait_gatt_release_after_timeout`)
+    - GATT 요청을 보낸 뒤 콜백을 받기 전까지 "요청 처리 중"(`gattRequestPendingRelay`)으로 표시합니다. 표시는 `sendGattRequest()`에서 켜고, read/write/descriptor/MTU 콜백에서 끕니다.
+    - 작업이 타임아웃되면 호출자에게는 `TimeoutException`을 바로 전달합니다. 다만 보낸 요청이 아직 처리 중이면, 큐는 **늦은 콜백 / 연결 끊김 / 최대 31초**(ATT transaction timeout 30초 + 여유) 중 먼저 오는 시점까지 다음 작업을 시작하지 않습니다(`waitForGattRelease()`).
+    - 요청을 보내지 않고 타임아웃된 경우(서비스 재탐색 대기 등)나 요청이 거절된 경우에는 기다리지 않습니다.
+    - 부수 효과로, 늦게 도착한 콜백이 다음 작업의 응답으로 잘못 매칭되던 위험도 사라졌습니다.
+    - 테스트: `BleDeviceEngineImplTimeoutReleaseTest`(7건). 수정 전 엔진에서는 핵심 대기 동작 4건이 실패했습니다. 나머지 3건은 불필요하게 기다리지 않는지 확인하는 보호 테스트입니다. `OperationQueueTest`의 "타임아웃 직후 다음 작업 시작" 테스트는 새 동작에 맞게 바꿨습니다.
+    - 실기기 확인(Fold5 → S23):
+      - **응답하지 않는 vendor characteristic**(`00000000-0000-3000-8000-000000000001`) read 후 정상 read 4건을 이어서 실행했습니다.
+        - 수정 전: 4건 모두 `CommunicationFailedException`으로 실패했고, 13초 뒤 다시 read해도 실패했습니다.
+        - 수정 후: 큐가 대기하다가, 요청 30초 뒤 Android가 `gatt_rsp_timeout`으로 링크를 끊자 4건 모두 GATT 호출 없이 **`DisconnectedException`**(실제 원인)으로 끝났습니다. busy 경고는 0건이었습니다.
+        - S23은 이 characteristic에 끝까지 응답하지 않으며, 링크가 끊기는 것은 Android 동작입니다.
+      - **늦은 콜백**(`operationTimeoutMillis=20ms`로 정상 characteristic을 강제 타임아웃시킨 뒤 바로 다음 read, 5회):
+        - 수정 전: 매회 busy 충돌로 573~605ms가 걸렸습니다(busy 경고 5건).
+        - 수정 후: 매회 늦은 콜백을 기다린 뒤 바로 실행되어 98~449ms(보통 219ms)가 걸렸습니다. busy 경고 0건, 대기 로그 5건이었습니다.
+  - S23의 일부 vendor characteristic은 read에 응답하지 않았습니다. 라이브러리 타임아웃(기본 10초) 후 큐는 다음 작업으로 넘어가지만, Android `BluetoothGatt`는 콜백이 올 때까지 busy 상태를 유지합니다.
+  - 그래서 이어진 read 4건이 각각 6번씩 `prior command is not finished`로 거절됐고, 결국 `CommunicationFailedException`으로 실패했습니다.
+  - ATT transaction timeout은 30초이므로, 라이브러리 타임아웃이 이보다 짧으면 이런 일이 생길 수 있습니다.
+  - 제안: 타임아웃이 나면 호출자에게는 바로 에러를 주되, 큐는 늦은 콜백이나 연결 끊김(최대 ATT timeout 30초)까지 다음 작업을 막습니다. 또는 타임아웃 시 링크를 끊고 재연결하도록 안내합니다.
+- [x] **[버그] `InitializableBleDevice` 초기화에 타임아웃이 없음** — `InitializableBleDevice.kt:30-46`. 실패하면 `disconnect()`도 두 번 호출됩니다.
+  - ✅ 해결 (`feature/initialize_timeout`)
+    - `InitializableBleDevice.initializeTimeoutMillis`(기본 `DEFAULT_INITIALIZE_TIMEOUT_MILLIS` = 30초)를 추가했습니다. GATT 연결 뒤 `initializeCompletable()`이 이 시간 안에 끝나지 않으면 연결을 끊고 `TimeoutException`으로 실패합니다. (연결 타임아웃과는 별개)
+    - 초기화가 실패하면 `disconnect()`를 한 번만 호출합니다.
+    - 함께 수정: 초기화가 끝나기 전에 `connectCompletable` 구독을 해제하면, 연결 중에 해제한 것과 같이 연결을 끊습니다. 이전에는 GATT가 연결된 채 INITIALIZING으로 남았습니다. (초기화가 끝난 뒤의 해제는 연결을 유지)
+    - ⚠️ 동작 변경: 30초보다 오래 걸리는 초기화는 이제 실패합니다. 필요하면 `initializeTimeoutMillis`를 늘려야 합니다.
+    - 테스트: `InitializableBleDeviceInitTimeoutTest`(5건, disconnect 호출 횟수를 세는 fake engine 사용). 수정 전 코드에서는 4건이 실패했습니다(타임아웃 없음 2건, 실패 시 disconnect 2회, 초기화 중 해제 시 연결 유지). 나머지 1건은 초기화가 끝난 뒤 해제해도 연결을 유지하는지 확인합니다.
+    - 함께 수정한 테스트: `BleManagerEngineImplDeviceMapTest.iteratingDevices_whileOtherThreadAddsDevices_doesNotThrow`가 만든 기기를 참조하지 않아, `deviceMap`이 약한 참조로 바뀐 뒤 GC 시점에 따라 299/300으로 간헐 실패했습니다. 기기를 참조하도록 고쳤습니다(별도 커밋).
+    - 실기기 확인(Fold5 → M446K. delegate가 초기화 단계를 제어하는 `InitializableBleDevice`를 만들도록 하고, `initializeTimeoutMillis` = 3초):
+      - 초기화가 끝나지 않음: 수정 전에는 15초 뒤에도 **INITIALIZING**으로 기다렸습니다. 수정 후에는 연결 후 3초 만에(전체 3.47초) `TimeoutException`과 함께 연결을 끊었습니다.
+      - 초기화 실패(Device Name read 후 에러): 수정 전에는 엔진 로그에 `disconnect`와 `disconnect ignored, state is DISCONNECTING`이 함께 남았습니다(2회 호출). 수정 후에는 `disconnect` 1회.
+      - INITIALIZING에서 connect 구독 해제: 수정 전 2초 뒤에도 **INITIALIZING**(GATT 연결 유지) → 수정 후 DISCONNECTED.
+- [x] **[버그] BroadcastReceiver를 `finalize()`에서 해제함** — `impl/BleManagerEngineImpl.kt:69-77`. `finalize()`는 호출 시점이 보장되지 않습니다. `BleManager`를 여러 개 만들면 receiver와 deviceMap도 각각 생기므로, 같은 기기에 대한 객체가 중복됩니다. 싱글턴으로 강제하거나 `close()` API를 제공해야 합니다.
+  - ✅ 해결 (`feature/close_ble_manager`)
+    - 실제로는 호출 시점보다 더 큰 문제가 있었습니다. 등록된 receiver(inner class)를 Context가 계속 참조하고 receiver가 엔진을 참조하므로, 엔진이 GC되지 않아 **`finalize()`가 호출될 수 없었습니다**. 버린 `BleManager`의 receiver와 기기 캐시가 프로세스가 끝날 때까지 남았습니다.
+    - `BleManager`가 `Closeable`을 구현합니다. `close()`는 블루투스 상태 receiver를 해제하고, 이 매니저가 연결한 기기(가상 기기 포함)를 끊습니다. 여러 번 불러도 됩니다.
+    - `close()`를 부르지 않고 버린 경우도 정리됩니다. receiver가 엔진을 약하게 참조하므로 엔진은 GC되고, receiver는 다음 블루투스 상태 broadcast를 받을 때 스스로 등록을 해제합니다. `finalize()`는 제거했습니다.
+    - 싱글턴은 강제하지 않았습니다(샘플 앱도 `BleManager`를 두 개 씀). `BleManager`마다 기기 캐시가 따로 있다는 점은 그대로입니다.
+    - ⚠️ 동작 변경: `close()`는 그 매니저로 연결한 기기를 끊습니다.
+    - 테스트: `BleManagerEngineImplCloseTest`(3건). 수정 전 코드에서 확인할 수 있는 "close 없이 버린 엔진이 GC되는지" 테스트가 실패했습니다(receiver가 엔진을 붙잡음). 나머지 2건은 새 `close()`의 receiver 해제(1회)와 연결 해제 테스트입니다.
+    - 실기기 확인(Fold5, 테스트 프로세스에서 `BleManager` 5개를 만들고 버린 뒤 GC, 호스트에서 `dumpsys activity broadcasts`로 그 프로세스의 `ACTION_STATE_CHANGED` receiver 수 확인):
+      - 수정 전: GC 후 **5개**, 블루투스를 껐다 켜고 다시 GC해도 **5개**.
+      - 수정 후 `close()` 없이: GC 후 5개 → 블루투스를 껐다 켠 뒤 **0개**(receiver가 스스로 해제).
+      - 수정 후 `close()` 호출: 바로 **0개**.
+      - 회귀: 살아 있는 매니저로 M446K에 연결한 상태에서 블루투스를 끄면 기존처럼 CONNECTED → DISCONNECTED로 정리됐습니다.
+- [x] **[버그] `getDevice()`가 가상 기기보다 실제 엔진을 먼저 조회함 (실기기)** — `BleManager.kt:88-91`, `impl/BleManagerEngineImpl.kt:125-140`
+  - ✅ 해결 (`feature/get_virtual_device_first`)
+    - `getDevice`, `getBondedDevice`, `getConnectedDevice`가 가상 기기를 먼저 조회합니다. 등록된 가상 기기의 MAC이면 엔진을 조회하지 않습니다.
+    - 가상 기기는 MAC 대소문자를 구분하지 않고 찾습니다(내부 키를 대문자로 저장). 실제 기기 MAC 입력을 정규화하는 것은 P3 항목으로 남겨 두었습니다.
+    - 테스트: `BleManagerVirtualLookupTest`(4건, 실제처럼 대문자 MAC만 받는 `getRemoteDevice` mock). 수정 전 코드에서는 3건이 실패했습니다(유효한 MAC의 가상 기기 대신 실제 기기, 대문자로 조회하면 실제 기기, 연결된 가상 기기를 대소문자 다르게 조회하면 null). 나머지 1건은 다른 MAC은 실제 기기를 돌려주는지 확인합니다.
+    - 실기기 확인(Fold5, 가상 기기 `12:34:56:78:90:01`, `12:34:56:78:90:ab` 등록):
+      - 수정 전: `getDevice("…:01")`과 `getDevice("…:AB")`가 **실제 기기**(`virtual=false`)를 돌려줬고, 그 기기로 연결하면 5초 타임아웃. `getRemoteDevice error` 로그 2건.
+      - 수정 후: 세 조회 모두 가상 기기, `…:01` 연결 104ms 성공, 에러 로그 0건.
+  - `BleManager.getDeviceInner()`는 `engine.getDevice()`를 먼저 호출하고, 결과가 없을 때만 `virtualDevices`를 봅니다.
+  - 샘플 앱의 가상 MAC(`12:34:56:78:90:ab`)은 소문자라서 `getRemoteDevice()`가 `IllegalArgumentException`을 던집니다. 그래서 가상 기기를 조회할 때마다 에러 로그와 스택트레이스가 남습니다(실기기 확인).
+  - 가상 MAC이 대문자(유효한 주소)라면 엔진이 실제 `BleDevice`를 만들어 반환하므로, **가상 기기 대신 존재하지 않는 실제 기기가 반환됩니다**. 이 경우는 코드로만 확인했습니다.
+  - 제안: `virtualDevices`를 먼저 조회하고, MAC 비교는 대소문자를 무시하도록 정규화합니다.
+- [x] **[샘플앱] DeviceActivity가 종료돼도 notification 구독을 해제하지 않음 (실기기)** — `app/.../DeviceActivity.kt:64-127`. `notificationDisposables`를 `onDestroy`에서 dispose하지 않아서, 화면을 닫은 뒤에도 연결이 끊길 때까지 구독이 살아 있습니다. read/write/특성 조회 구독도 Disposable을 관리하지 않습니다.
+  - ✅ 해결 (`feature/sample_device_activity_dispose`)
+    - `onDestroy`에서 notification 구독과 특성 조회/read/write 구독(`CompositeDisposable`)을 해제합니다.
+    - `notificationDisposables`를 main thread에서만 바꾸도록 `doFinally`를 `observeOn(mainThread)` 뒤로 옮겼습니다(이전에는 notification이 에러로 끝나면 binder/io 스레드에서 map을 바꿨음).
+    - 테스트용으로 `BluetoothService`가 가상 기기(`virtualBleDevice`)를 들고 있고, `VirtualBleDevice.notifying`으로 값을 보내고 있는지 알 수 있게 했습니다.
+    - 테스트: `app/src/androidTest/.../DeviceActivityDisposeTest`. 가상 기기에 연결하고 DeviceActivity에서 notification을 켠 뒤 화면을 닫아, 가상 기기가 보내기를 멈추는지 확인합니다.
+      - 수정 전(Fold5): `notification must stop after the activity is destroyed`로 실패(화면을 닫은 뒤에도 계속 보냄).
+      - 수정 후(Fold5): 통과.
+    - 실기기 확인(Fold5 샘플 앱 → M446K nRF `aaa1`, 임시 instrumentation으로 서비스의 `bleManager`로 연결한 뒤 DeviceActivity에서 notification을 켜고 화면을 닫음):
+      - 수정 전: 화면을 닫고 3초가 지나도 CCCD를 끄지 않았습니다(연결 CONNECTED 유지). 연결을 끊을 때에야 `setCharacteristicNotification : false`가 기록됐습니다.
+      - 수정 후: 화면을 닫은 지 0.3초 뒤 `setCharacteristicNotification : false`와 CCCD `0000` 쓰기가 기록됐고, 연결은 CONNECTED로 유지됐습니다.
+
+### 구조 개선
+
+- [x] **[구조] 콜백 스레드 정책 정리** — GATT 콜백, notification, 상태 변경이 모두 바인더 스레드에서 사용자 코드로 바로 전달됩니다. 사용자가 무거운 처리를 하면 해당 기기의 모든 GATT 콜백이 지연됩니다. 전용 scheduler로 `observeOn`하거나, 스레드 정책을 문서화해야 합니다.
+  - ✅ 해결 (`feature/callback_thread_policy`)
+    - 공개 API의 결과를 `Schedulers.io()`로 넘겨 전달합니다(`CallbackScheduler.kt`의 `deliverToCallback()`). 대상: `BleDevice`의 연결 상태 스트림, `connectCompletable`, read/write/MTU/특성 조회 결과, notification(설정 완료와 값 모두), bond/unbond, SPP 소켓, `BleManager.getConnectionStateObservable()`.
+      - 구독마다 하나의 스레드에서 순서대로 전달됩니다. 값 스트림은 `delayError`라서, 연결이 끊기기 직전에 받은 notification을 에러보다 먼저 모두 전달합니다.
+      - 사용자 코드가 바인더 스레드나 엔진의 상태 잠금 안에서 실행되지 않으므로, 오래 걸리는 처리를 해도 그 기기의 다음 GATT 작업과 다른 스레드의 상태 변경(`disconnect()` 등)이 기다리지 않습니다. (앞의 "stateRelay 직렬화" 항목의 ⚠️ "관찰자가 오래 걸리면 상태 전환이 기다린다"는 제약도 사라짐)
+    - 라이브러리 내부(연결 대기, 작업 큐, `BleManager`의 기기 캐시 등)는 기존처럼 바로 전달되는 내부 스트림(`connectionStateObservableInternal()`, 엔진 스트림)을 씁니다. 캐시된 기기마다 io 스레드를 붙잡지 않기 위해서입니다. `connectionState` 프로퍼티도 내부 스트림에서 바로 읽습니다.
+    - 스캔 결과는 바꾸지 않았습니다. Android가 main thread에서 전달하므로, 바꾸면 스캔 결과로 바로 UI를 갱신하는 앱이 깨집니다.
+    - 스레드 정책은 `BleDevice` KDoc과 CLAUDE.md에 적었습니다.
+    - ⚠️ 동작 변경: 결과가 바인더 스레드/호출 스레드 대신 `RxCachedThreadScheduler-*`에서 옵니다. UI를 바꾸려면 기존처럼 `observeOn(mainThread)`가 필요합니다. 서로 다른 구독 사이의 순서(예: 마지막 notification과 DISCONNECTED 상태)는 보장하지 않습니다. `InitializableBleDevice` 하위 클래스도 이제 `getConnectionStateObservable()`을 override할 수 있습니다(INITIALIZING 처리는 내부 스트림으로 옮김).
+    - 테스트: `CallbackThreadTest`(4건, callback scheduler를 `TestScheduler`로 바꿔 전달 시점을 확인). 수정 전 코드에서는 4건 모두 실패했습니다(read 결과·상태·notification·연결 완료가 콜백/`disconnect()` 안에서 바로 실행됨). 기존 테스트는 io가 trampoline이라 그대로 통과합니다.
+    - 실기기 확인(Fold5 → M446K):
+      - 콜백 스레드: 수정 전 연결 완료/read/notification 설정이 `binder:5754_3`, DISCONNECTING은 `disconnect()`를 부른 테스트 스레드 → 수정 후 모두 `RxCachedThreadScheduler-1/2`.
+      - read 결과를 1초 동안 처리하는 구독자 바로 뒤에 요청한 read(3회): 수정 전 **1109~1190ms** → 수정 후 108~137ms.
+      - CONNECTED를 1.5초 동안 처리하는 상태 관찰자가 있을 때 다른 스레드의 `disconnect()`: 수정 전 **1511ms** 대기 → 수정 후 7ms.
+      - 회귀(MTU, read, 응답 있는/없는 write, CCCD) 정상.
+- [x] **[구조] 예외 계층 정리** — 현재 `IllegalStateException`, `RuntimeException("Error")`, `NoSuchElementException`, `BleManager.DisconnectedException` 등이 섞여 있습니다. `sealed class BleException`(Disconnected(status), GattError(status), Timeout, CharacteristicNotFound, PermissionDenied, BondFailed(reason), BluetoothDisabled)로 통일하고 **연결 끊김 사유(HCI status)**를 노출합니다.
+  - ✅ 해결 (`feature/ble_exception_hierarchy`)
+    - 공통 상위 타입 `BleException`을 추가했습니다. 라이브러리가 BLE 작업 실패로 던지는 예외는 모두 이 타입이라 `catch (e: BleException)`으로 받을 수 있습니다.
+      - sealed가 아니라 abstract로 했습니다. 공개 타입 `exception.SystemServiceException`이 다른 패키지에 있어 sealed의 하위 타입이 될 수 없고, 라이브러리가 나중에 예외를 추가하면 사용하는 쪽의 exhaustive `when`이 컴파일 오류가 나기 때문입니다.
+      - 기존 예외 이름과 위치(`BleManager.XxxException`)는 그대로 두고 상위 타입만 바꿨습니다.
+    - 연결 끊김 사유: `DisconnectedException(status)`. `onConnectionStateChange`의 status(예: 8 연결 타임아웃, 19 상대 기기가 끊음, 22 호스트가 끊음, 62 연결 수립 실패, 133 GATT_ERROR)를 진행 중이던 작업, notification 스트림, 연결 시도의 에러로 전달합니다. 이 앱이 `disconnect()`로 끊었거나 사유를 모르면 null.
+    - 정리한 타입(모두 `BleManager` 안):
+      - `DisconnectedException(status)` / 하위 `BluetoothDisabledException`(블루투스가 꺼져 끝난 작업·연결, `connectGatt`가 null을 돌려준 경우. 이전 `ConnectFailedException("bluetooth is disabled" 등)`)
+      - `OperationTimeoutException(operation, timeoutMillis)`: 연결(CONNECT), 초기화(INITIALIZE), GATT 작업 타임아웃. 이전 `java.util.concurrent.TimeoutException`.
+      - `GattOperationFailedException(operation, status)` / 하위 `MtuChangeFailedException`
+      - `GattRequestRejectedException(operation)`: 이전 내부 전용 `CommunicationFailedException`(재시도 후에도 거절됨)
+      - `IllegalCharacteristicPropertyException(characteristicUuid, properties, operation)`: 이전 내부 전용 `IllegalCharacteristicProperty`(메시지 없음)
+      - `InvalidConnectionStateException(state, expected)`: 이미 연결 중인데 connect 등. 이전 `IllegalStateException`.
+      - `NotificationTypeConflictException`, `ScanFailedException(errorCode)`: 이전 `IllegalStateException`.
+      - `ConnectFailedException`, `CharacteristicNotFoundException`, `DescriptorNotFoundException`, `PermissionDeniedException`, `BondFailedException`(예상하지 못한 bond 상태도 포함), `exception.SystemServiceException`
+    - 표준 예외로 남긴 것: 잘못된 인자(`IllegalArgumentException`), SPP 소켓 I/O(`IOException`)와 받은 데이터 없음(`NoSuchElementException`, 샘플 앱이 이 값으로 "데이터 없음"을 처리), 가상 기기의 SPP 미지원(`UnsupportedOperationException`).
+    - 함께 수정: 블루투스 상태 broadcast에 알 수 없는 값이 오면 `IllegalStateException`으로 스캔이 끝났는데, 이제 STATE_ON이 아니면 블루투스를 쓸 수 없는 것으로 처리합니다.
+    - BondFailed(reason)는 사유를 넣지 않았습니다. 현재 bond가 1초 polling이라 사유를 알 수 없습니다(P3 "bond 상태 broadcast" 항목에서 가능).
+    - ⚠️ 동작 변경(사용하는 코드의 catch 확인 필요):
+      - 타임아웃을 `java.util.concurrent.TimeoutException`으로 잡던 코드는 `BleManager.OperationTimeoutException`으로 바꿔야 합니다.
+      - 이미 연결 중인데 connect, GATT 연결 중 SPP 연결의 `IllegalStateException` → `InvalidConnectionStateException`.
+      - 블루투스가 꺼진 경우의 `ConnectFailedException` → `BluetoothDisabledException`(DisconnectedException 하위).
+      - 이번 개발 중에 추가한 `PermissionDeniedException`(SecurityException 상속)과 `CharacteristicNotFoundException`/`DescriptorNotFoundException`(IllegalStateException 상속)은 `BleException`을 상속하도록 바꿨습니다.
+    - CLAUDE.md에 예외 규칙을 적고, 오래된 엔진 설명(작업 큐 없음, `serviceSingle` 캐시)을 현재 구조로 고쳤습니다.
+    - 테스트: `BleExceptionTest`(9건: 모든 예외의 상위 타입, 원격 끊김 status가 작업·notification·연결 시도로 전달, 로컬 끊김은 null, 블루투스 꺼짐, 타임아웃의 작업 이름, 거절 후 재시도, MTU 실패 타입, 연결 상태 오류). 새 타입을 쓰므로 수정 전 코드에서는 컴파일되지 않습니다(수정 전 동작은 아래 실기기 결과로 비교). 기존 테스트 25건의 기대 예외를 새 타입으로 바꿨습니다.
+    - 실기기 확인(Fold5 → M446K. 같은 프로브를 수정 전/후 코드로 실행. 상대 기기 끊김은 연결 중 호스트에서 M446K의 블루투스를 끔):
+      - 도달할 수 없는 주소 연결 3초: `java.util.concurrent.TimeoutException: The source did not signal an event for 3000 milliseconds…` → `OperationTimeoutException: CONNECT timed out after 3000ms`
+      - 연결된 상태에서 다시 connect: `IllegalStateException` → `InvalidConnectionStateException`
+      - read 전용 `2a38`에 notification: 내부 클래스 `BleDeviceEngineImpl$IllegalCharacteristicProperty`(메시지 null) → `IllegalCharacteristicPropertyException: Characteristic 00002a38-… does not support NOTIFY/INDICATE (properties 0x2)`
+      - 상대 기기 블루투스 꺼짐(스택 로그 `onConnectionStateChange 19 -> 0`): notification 에러가 `DisconnectedException`(status 없음, 메시지 null) → `DisconnectedException: Disconnected (status 19, 0x13)`, `status=19`
+      - 수정 전에는 위 예외가 모두 공통 타입이 없었고, 수정 후에는 모두 `BleException`이었습니다.
+- [x] **[구조] 테스트 부재** — 예제 테스트만 있습니다. 순수 로직(`BleScanFilter`, `ScanInfo` 파싱, `BleScanOptionsConverter`, `collectListLastSortedIndex`) 단위 테스트, mock `BluetoothGatt`로 engine 상태 전이 테스트(Robolectric/MockK), `VirtualDevice` 기반 통합 테스트를 추가해야 합니다. 이를 위해 `BleDeviceEngineImpl`의 GATT 의존성을 주입 가능하게 만들어야 합니다.
+  - ✅ 해결 (`feature/test_coverage`, 앞의 수정들에서 쌓인 테스트 포함)
+    - 현재 JVM 단위 테스트는 43개 클래스, 209건입니다(이 항목을 시작할 때 204건). 각 버그 수정마다 테스트를 추가하면서 기반이 갖춰졌습니다.
+      - engine 상태 전이: MockK로 `BluetoothDevice`/`BluetoothGatt`를 만들고 `connectGatt`에 넘긴 `BluetoothGattCallback`을 잡아 시스템 콜백을 직접 부르는 `impl/GattTestFixture`. GATT 의존성은 `BluetoothDevice`를 통해 주입되고, API 33 경로는 `sdkInt` 주입으로 확인합니다. Robolectric은 쓰지 않았습니다.
+      - 시간/스레드: `testutil/RxTestSchedulerRule`(computation → TestScheduler, io → trampoline), 콜백 전달 시점은 `CallbackScheduler.override`.
+      - 순수 로직: `BleScanFilterTest`, `ScanInfoTest`(파싱), `BleScannerTest`, `RxCollectingListTest`.
+    - 이 항목에서 추가한 것:
+      - `BleScanOptionsConverterInstrumentedTest`(4건): Android `ScanSettings`/`ScanFilter` 변환. JVM의 android.jar에서는 Builder가 stub이라 기기에서 실행하는 instrumented test로 만들었습니다.
+      - `virtual/VirtualDeviceIntegrationTest`(2건): `BleManager`에 `VirtualDevice`를 등록하고 스캔 결과 병합(필터 적용) → 연결 → 특성 조회/write/read → notification 순서와 시작/종료 → `close()` → 연결 끊김 오류까지 공개 API로 확인합니다.
+      - `BleScanFilterTest`에 rssi 기준, 가상 기기 이름/주소 필터 테스트(2건), `RxCollectingListTest`(2건).
+    - 테스트를 쓰다 발견해 고친 것: `collectListLastSortedIndex`(공개 유틸)는 목록 상태를 함수 호출 시점에 만들어, 같은 Observable을 다시 구독하면 이전 구독의 항목이 섞였습니다. 이제 구독마다 새 목록을 씁니다(수정 전 코드에서 `eachSubscription_collectsIndependently` 실패). 라이브러리 내부는 이 유틸을 더 이상 쓰지 않습니다.
+    - 항상 실패하던 라이브러리 `ExampleInstrumentedTest`와 의미 없는 `ExampleUnitTest`를 지웠습니다(아래 P3 항목).
+    - CLAUDE.md의 "예제 테스트만 있다"는 설명을 현재 테스트 구성으로 바꿨습니다.
+    - 남은 것: CI(CircleCI)는 JVM 단위 테스트만 실행합니다. instrumented test는 기기/에뮬레이터가 있어야 해서 CI에 넣지 않았습니다.
+    - 실기기 확인:
+      - 라이브러리 `connectedDebugAndroidTest`: 수정 전 Fold5에서 3건 중 `ExampleInstrumentedTest` 1건 실패로 **전체 실패** → 수정 후 Fold5(Android 17)와 M446K(Android 16)에서 각각 6건 모두 통과.
+      - 샘플 앱 `connectedDebugAndroidTest`(Fold5): 6건 모두 통과. 오늘 바뀐 예외 타입과 콜백 스레드에서도 `ConnectDeviceFailureTest`, `DeviceActivityDisposeTest`가 통과합니다.
+- [x] **[구조] BLE와 Classic(SPP) 책임 분리** — `BleSppSocket`은 BLE가 아니라 RFCOMM인데 같은 상태 머신(`stateRelay`)을 공유합니다. 별도 클래스나 모듈로 분리하는 것을 검토합니다.
+  - ✅ 해결 (`feature/separate_spp_connection`)
+    - SPP 연결과 그 상태를 `impl/SppConnection`으로 분리했습니다. 소켓 생성·연결·정리, UUID 선택, 기기 검색 중지를 이 클래스가 맡고, 자체 상태(DISCONNECTED/CONNECTING/CONNECTED)를 가집니다.
+    - 엔진의 GATT 상태(`State`)에서 `SPP_CONNECTING`/`SPP_CONNECTED`를 뺐습니다. GATT 관련 코드(연결 대기, 작업 큐, 연결 해제 등)는 이제 GATT 상태만 봅니다.
+    - 기기의 공개 연결 상태는 엔진이 두 상태를 합쳐 만듭니다(GATT가 DISCONNECTED일 때만 SPP 상태를 보여 줌). 공개 API와 동작은 이전과 같습니다.
+    - 검토 결과로 바꾸지 않은 것:
+      - 같은 기기의 GATT와 SPP를 동시에 쓰지 않는 규칙은 유지했습니다. 공개 연결 상태가 하나라서 둘이 동시에 연결되면 표현할 수 없고, 바꾸려면 공개 상태 API를 바꿔야 합니다. 두 상태 전환은 같은 잠금(`stateLock`) 안에서 확인해서, 동시에 연결을 시도해도 하나만 시작됩니다.
+      - 모듈 분리는 하지 않았습니다. SPP는 `BleDevice.connectSppSocket()` 하나로 노출되는 작은 기능이라, 배포 산출물을 나눌 만큼의 이점이 없습니다.
+    - 테스트: `SppConnectionTest`(4건: 분리된 클래스의 자체 상태, 배타 확인 실패 시 소켓을 만들지 않음, 공개 상태 순서 `DISCONNECTED → SPP_CONNECTING → SPP_CONNECTED → DISCONNECTED`, SPP 연결 중 GATT 작업은 GATT를 건드리지 않고 실패). 동작이 같은지는 기존 SPP 테스트(동시 연결 배타, 연결 해제, 블루투스 꺼짐, 소켓 정리 등)가 수정 없이 모두 통과하는 것으로 확인했습니다.
+    - 실기기 확인(Fold5 → M446K. 같은 프로브를 분리 전/후 코드로 실행, 결과 동일):
+      - SPP 연결 시도(M446K Classic 주소, SPP 서버 없음): 연결 중 상태 SPP_CONNECTING(`connected=false`, 연결 기기 목록에 없음) → SDP 후 `IOException` → 상태 순서 `DISCONNECTED, SPP_CONNECTING, DISCONNECTED`.
+      - SPP 연결 중 GATT connect: `InvalidConnectionStateException: Connection state is SPP_CONNECTING not DISCONNECTED`.
+      - GATT 연결 중 SPP connect: `InvalidConnectionStateException: Connection state is CONNECTED not DISCONNECTED`, GATT 연결과 read는 그대로 정상.
+      - GATT 회귀(MTU, read, 응답 있는/없는 write, CCCD) 정상.
+
+### 빠진 BLE 기능
+
+- [x] **[기능] 쓰기 타입 선택 API** — `writeCharacteristicSingle(uuid, bytes, writeType)` (with/without response).
+  - ✅ 해결 (`feature/write_type`): 위 "쓰기 타입 문제" 항목과 함께 `BleDevice.WriteType`으로 추가했습니다.
+- [x] **[기능] Connection priority** — `requestConnectionPriority(HIGH/BALANCED/LOW_POWER)`. 처리량과 지연에 큰 영향을 줍니다.
+  - ✅ 해결 (`feature/connection_priority`)
+    - `BleDevice.ConnectionPriority`(BALANCED/HIGH/LOW_POWER)와 `requestConnectionPriorityCompletable(priority)`를 추가했습니다. Android가 요청을 받으면 완료됩니다. 연결되지 않았으면 `DisconnectedException`, Android가 거절하면 `GattRequestRejectedException("REQUEST_CONNECTION_PRIORITY")`로 실패합니다.
+    - ATT 작업이 아니라 링크 파라미터 요청이라 GATT 작업 큐를 거치지 않습니다. 진행 중인 read/write를 기다리지 않고 바로 요청합니다.
+    - 실제 적용된 연결 간격은 `BluetoothGattCallback`의 숨겨진(@hide) 콜백 `onConnectionUpdated`로만 알 수 있어서, 같은 시그니처로 선언해 로그(`interval/latency/timeout`)로 남깁니다. R8이 지우지 않도록 `@Keep`을 붙였습니다.
+    - 새 간격은 상대 기기와 협상한 뒤에 적용되므로 Completable이 완료된 직후에는 아직 이전 간격일 수 있습니다. 완료 시점을 적용 시점까지 미루지 않은 이유: 숨겨진 콜백에 의존해야 하고, 간격이 바뀌지 않는 요청(이미 같은 우선순위 등)에는 콜백이 오지 않아 기다릴 수 없습니다. KDoc에 적었습니다.
+    - 가상 기기는 연결돼 있으면 바로 완료합니다.
+    - 테스트: `ConnectionPriorityTest`(4건: 우선순위 값 전달, 거절 시 `GattRequestRejectedException`, 연결 전 요청은 GATT를 호출하지 않고 `DisconnectedException`, 숨겨진 콜백이 프레임워크와 같은 JVM 시그니처로 선언됐는지).
+    - 실기기 확인(Fold5 → M446K, 우선순위마다 BODY_SENSOR_LOCATION read 20회 왕복 시간):
+      | 요청 | 적용된 간격(`onConnectionUpdated`) | read 왕복 median |
+      |---|---|---|
+      | (연결 직후 기본) | - | 60.8ms |
+      | LOW_POWER | 120ms, latency 7 | 241.1ms |
+      | HIGH | 15ms, latency 1 | 약 28ms (적용 후) |
+      | BALANCED | 30ms, latency 5 | 60.0ms |
+      - 요청 자체는 2~11ms에 완료되지만, LOW_POWER → HIGH는 적용까지 6.6~8.5초가 걸렸습니다(긴 간격에서는 파라미터 갱신 절차도 느림). BALANCED/LOW_POWER로 바꿀 때는 0.3~0.5초였습니다.
+      - 연결이 끊긴 뒤 요청: `DisconnectedException`.
+- [x] **[기능] RSSI 읽기** — `readRemoteRssi()`. 콜백(`impl/BleDeviceEngineImpl.kt:171`)은 있지만 로그만 남깁니다.
+  - ✅ 해결 (`feature/read_rssi`)
+    - `BleDevice.readRssiSingle()`을 추가했습니다. `gatt.readRemoteRssi()`를 호출하고 `onReadRemoteRssi` 콜백의 값(dBm)을 돌려줍니다.
+    - Android는 다른 GATT 요청이 처리 중이면 RSSI 읽기도 거절하므로, read/write와 같은 작업 큐에서 차례로 처리합니다. 연결 끊김(`DisconnectedException`), `operationTimeoutMillis` 타임아웃, 거절 시 재시도(5회/500ms)도 다른 작업과 같습니다. 실패 status는 `GattOperationFailedException("READ_RSSI", status)`입니다.
+    - 가상 기기는 연결돼 있으면 `VirtualDevice.readRssi()` 값을 돌려줍니다. 기본값은 가상 기기 스캔 결과와 같은 0이고, 하위 클래스에서 바꿀 수 있습니다(기존 하위 클래스는 수정할 필요 없음).
+    - 테스트: `ReadRssiTest`(6건: 콜백 값 전달, 실패 status, 거절 후 재시도, 처리 중인 read가 끝날 때까지 기다림, 읽는 중 연결 끊김은 끊긴 사유 포함 `DisconnectedException`, 연결 전 요청은 GATT 호출 없이 실패), `VirtualDeviceRssiTest`(2건).
+    - 실기기 확인(Fold5 → M446K): 연속 5회 읽기 3~13ms에 성공(-24dBm, 스캔 RSSI -39dBm). characteristic read 3건과 RSSI 읽기 3건을 동시에 요청해도 모두 성공했습니다(`[01, rssi -24, 재홍의 Jump3, rssi -22, 01, rssi -22]`, 268ms, 거절 없음). 연결이 끊긴 뒤 요청은 `DisconnectedException`.
+- [x] **[기능] 자동 재연결 / `autoConnect` 옵션** — 현재 `autoConnect=false`로 고정되어 있고, 끊겼을 때 재연결하는 정책이 없습니다. status 133이면 재시도하는 옵션도 필요합니다.
+  - (실기기) 이전 연결이 끊긴 직후(1~3초 이내)에 같은 기기로 다시 연결하면, 링크가 정리되는 도중이라 `connectCompletable()`이 `DisconnectedException`으로 실패하는 경우가 2회 있었습니다. 몇 초 뒤에 다시 시도하면 성공했습니다. 연결 재시도 정책을 정할 때 이 경우도 함께 고려해야 합니다.
+  - ✅ 해결 (`feature/auto_reconnect`)
+    - `BleDevice`에 연결 정책 속성 4개를 추가했습니다. 기본값은 모두 기존 동작과 같습니다.
+      - `autoConnect`(기본 false): `connectGatt`의 autoConnect로 연결합니다. 기기가 보일 때까지 Android가 백그라운드에서 기다리므로 `timeoutMillis`를 넉넉히 줘야 합니다.
+      - `connectRetryCount`(기본 0), `connectRetryDelayMillis`(기본 1000ms): `connectCompletable()`이 연결 도중 링크가 끊겨 실패하면(`DisconnectedException`: status 133, 직전 연결이 정리되는 중 등. 서비스 탐색 실패 포함) 이전 연결이 완전히 끊길 때까지 기다린 뒤 지연 시간만큼 쉬고 다시 시도합니다. `timeoutMillis`는 시도마다 적용됩니다.
+        - 다시 시도하지 않는 에러: 연결 타임아웃(사용자가 정한 시간), 블루투스 꺼짐, 권한 없음, 상태 오류, status 0x87(Android가 요청 자체를 거절. 아래 실기기 확인 참고), 초기화 중 read/write의 GATT 실패 status(다시 해도 같음).
+      - `autoReconnect`(기본 false): `connectCompletable()`로 연결된 뒤 `disconnect()`를 부르지 않았는데 끊기면, 마지막 연결과 같은 `timeoutMillis`/`autoConnect`로 다시 연결합니다. 실패하면 `connectRetryDelayMillis`마다 계속 시도합니다(기기가 아직 안 보이는 연결 타임아웃도 다시 시도).
+        - `disconnect()`, `connectCompletable()` 호출, `autoReconnect = false`, `BleManager.close()`로 멈춥니다. 연결에 실패한 `connectCompletable()`은 재연결 대상이 되지 않습니다. 이미 연결된 상태에서 `connectCompletable()`을 다시 불러 실패한 경우에는 기존 연결의 재연결 설정을 유지합니다.
+        - 블루투스가 꺼지면 재연결을 멈췄다가, 다시 켜지면(`BleManagerEngineImpl`의 receiver가 `STATE_ON`을 받으면) 이어서 연결합니다.
+        - 재연결 중의 상태는 공개 연결 상태에서 `DISCONNECTED → CONNECTING → (INITIALIZING →) CONNECTED`로 보입니다.
+    - 구조: 재시도와 재연결은 엔진이 아니라 `BleDevice`에서 합니다. 연결 시도 한 번을 `connectOnce()`(internal open)로 나누고 `InitializableBleDevice`가 여기에 초기화를 붙여서, 다시 시도하거나 다시 연결할 때도 `initializeCompletable()`이 실행됩니다. 엔진은 끊김을 `bleDevice.notifyDisconnected()`로 알립니다(`onDisconnected()` 호출 후 필요하면 재연결 예약). CLAUDE.md에 적었습니다.
+    - ⚠️ 동작 변화:
+      - `InitializableBleDevice`의 `initializeCompletable()`이 GATT 연결 직후 callback 스레드(io)에서 실행됩니다. 이전에도 `connectCompletable()`의 결과가 callback 스레드로 넘어온 뒤 실행됐으므로 실행 스레드는 같습니다.
+      - 초기화에 실패하면 엔진 연결만 끊습니다(이전에는 공개 `disconnect()`). 연결이 끊기는 동작은 같고, 재시도/재연결 설정을 지우지 않는 점만 다릅니다.
+      - `connectCompletable(timeoutMillis)`를 override 해서 연결 뒤 단계를 추가한 하위 클래스는, 자동 재연결 때 그 단계가 실행되지 않습니다(재연결은 `connectOnce()`를 부름). 연결 뒤 단계가 필요하면 `InitializableBleDevice`를 써야 합니다. KDoc에 적었습니다.
+    - 테스트: `AutoReconnectTest`(18건: autoConnect 전달, 기본은 재시도 없음, 지연 후 재시도, 재시도 소진 시 마지막 에러, 타임아웃/블루투스 꺼짐/0x87은 재시도 안 함, 서비스 탐색 실패는 재시도하고 초기화 GATT 실패는 안 함, 기본은 재연결 없음, 끊기면 autoConnect 설정으로 재연결, 성공할 때까지 계속 시도, disconnect()로 진행 중인 재연결 취소, 사용자 disconnect 후 재연결 안 함, autoReconnect=false로 멈춤, 이미 연결된 상태의 connect 실패는 재연결 유지, 실패한 연결은 재연결 안 함, 블루투스 꺼짐 동안 멈췄다 켜지면 재연결, Initializable 재연결 시 다시 초기화, 초기화 중 끊김은 재시도), `BleManagerEngineImplReconnectTest`(2건: `STATE_ON` 방송으로 재연결 재개, `close()`가 대기 중인 재연결을 멈춤).
+    - 실기기 확인(Fold5 → M446K):
+      - 상대 기기가 끊음(nRF에서 DISCONNECT): status 19로 끊긴 뒤 1초 후 재연결 시작, 0.5초 만에 CONNECTED, 재연결 후 read 정상. 이후 `disconnect()`하면 5초 동안 DISCONNECTED 유지(다시 연결하지 않음).
+      - `InitializableBleDevice` + autoReconnect: 상태 `DISCONNECTED → CONNECTING → INITIALIZING → CONNECTED`, 초기화(read 포함)가 두 번 실행됐고 둘 다 io 스레드(`RxCachedThreadScheduler`)에서 실행. 기존 초기화 프로브(초기화 실패, 초기화 중 dispose, 초기화 타임아웃) 결과는 이전과 같습니다.
+      - Fold5 블루투스 끄기/켜기: 꺼지면 DISCONNECTED → 1초 후 재연결 시도가 `BluetoothDisabledException`으로 멈춤(`reconnect stopped until bluetooth is enabled`) → 블루투스를 켜면 1초 후 재연결 → CONNECTED, read 정상.
+      - `autoConnect = true`: M446K(nRF)는 본딩하지 않은 상태에서 주기적으로 바뀌는 주소(RPA)로 광고하므로, Android가 백그라운드 연결 목록에 넣지 못하고(`Unable to add RPA ... to background connection`) 83~102ms 만에 status 135(0x87, GATT_ILLEGAL_PARAMETER)로 실패했습니다. 다시 해도 같으므로 재시도하지 않도록 했고(`connectRetryCount = 3`에서도 connectGatt 1회), autoConnect KDoc에 적었습니다. 본딩한 기기나 고정 주소 기기에서의 autoConnect 연결은 이 장비로 확인하지 못했습니다(두 폰을 본딩하지 않음).
+      - 위에 적힌 "끊긴 직후 재연결 실패"는 이번에는 재현되지 않았습니다(같은 프로세스에서 끊김 직후 0ms/1000ms 뒤 재연결 50회, 별도 프로세스로 연달아 7회 모두 성공). 같은 증상(`DisconnectedException`)은 `connectRetryCount`로 다시 시도됩니다(단위 테스트로 확인).
+- [x] **[기능] 일반 descriptor read/write API** — 현재는 CCCD 쓰기만 내부에서 사용합니다. `Type.READ_DESCRIPTOR`는 정의되어 있지만 쓰이지 않습니다.
+  - ✅ 해결 (`feature/descriptor_api`)
+    - `BleDevice.readDescriptorSingle(characteristicUuid, descriptorUuid)`와 `writeDescriptorSingle(characteristicUuid, descriptorUuid, byteArray)`를 추가했습니다. characteristic API처럼 서비스 UUID를 받는 overload도 있습니다. 쓰기는 쓴 값을 돌려줍니다.
+    - read/write와 같은 작업 큐에서 처리하고, 연결 끊김·타임아웃·거절 재시도 규칙도 같습니다. 실패 status는 `GattOperationFailedException("READ_DESCRIPTOR"/"WRITE_DESCRIPTOR", status)`, 찾지 못하면 `CharacteristicNotFoundException`/`DescriptorNotFoundException`입니다. API 33+에서는 값을 인자로 받는 콜백/쓰기 API를 씁니다.
+    - 응답을 characteristic UUID와 descriptor UUID로 함께 구분합니다(`ReplyData.descriptorUuid`). 이전에는 descriptor 응답을 characteristic UUID로만 구분했습니다.
+    - CCCD(0x2902)는 `setupNotification()`이 notification 상태와 함께 관리하므로 직접 쓰면 `IllegalArgumentException`입니다(호출 실수). 읽기는 됩니다.
+    - 내부 CCCD 쓰기와 일반 descriptor 쓰기가 같은 요청 코드(`requestWriteDescriptor`)를 씁니다.
+    - 가상 기기: `VirtualDevice`에 `readDescriptorSingle`/`writeDescriptorSingle`(open)을 추가했습니다. 기본은 descriptor가 없다(`DescriptorNotFoundException`)이고 하위 클래스에서 override 합니다. 기존 하위 클래스는 수정할 필요가 없습니다.
+    - 테스트: `DescriptorTest`(11건: 값 읽기(API 32 이하/33+), 다른 descriptor 응답 무시, 쓰기(API 32 이하/33+), 실패 status, CCCD는 읽기만, 없는 descriptor/characteristic, 서비스 지정, 처리 중인 작업 대기, 연결 전 요청), `VirtualDeviceDescriptorTest`(3건). `GattTestFixture`에 `addDescriptor`를 추가했습니다.
+    - 실기기 확인(Fold5 → M446K nRF 서버의 aaa1 characteristic: descriptor 2902, aab0, 2901, 2904):
+      - 2901(user description) 읽기 `Important value`, 2904(presentation format) 읽기 `06000127010001`, aab0(custom) 읽기 `01233456789a` → 쓰기 `0a0b0c` → 다시 읽기 `0a0b0c`.
+      - 2901 쓰기: nRF 서버가 쓰기를 허용하지 않아 `GattOperationFailedException(WRITE_DESCRIPTOR, status 3)`.
+      - CCCD 읽기: notification 전 `0000` → `setupNotification` 중 `0100` → dispose 후 `0000`. CCCD 직접 쓰기는 `IllegalArgumentException`(GATT 호출 없음).
+      - 없는 descriptor: `DescriptorNotFoundException`. characteristic read 2건과 descriptor read 3건을 동시에 요청해도 모두 성공(287ms, 거절 없음).
+- [x] **[기능] 블루투스 어댑터 상태와 권한 상태 공개 API** — 내부의 `scanAvailableObservable`을 `BleManager`에서 공개하고, BT 활성화 요청과 필요한 권한 목록을 제공하는 helper를 추가합니다.
+  - ✅ 해결 (`feature/adapter_permission_api`)
+    - 상태: `BleManager.isBluetoothEnabled`와 `getScanAvailabilityObservable()`을 추가했습니다. `ScanAvailability(bluetoothEnabled, locationEnabled)`(+ `available`)를 구독 시 현재 값부터, 블루투스나 위치(API 30 이하)가 바뀔 때마다 내보냅니다. 같은 상태는 다시 내보내지 않고, 내부 스트림과 달리 스캔할 수 없는 상태도 에러 없이 알립니다. 다른 공개 스트림처럼 callback 스레드(io)에서 전달됩니다. 위치는 API 31 이상에서 스캔에 필요 없으므로 항상 true입니다.
+    - 스캔이 쓰는 내부 스트림(`SystemServiceException`을 내는 것)도 같은 상태 스트림에서 만들도록 바꿨습니다. 스캔 동작은 같습니다.
+    - 권한: `BleManager.getRequiredPermissions()`(API 31+ `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT` / API 29~30 `ACCESS_FINE_LOCATION` / 그 이하 `ACCESS_COARSE_LOCATION`)와 `getMissingPermissions(context)`를 추가했습니다(`@JvmStatic`). 라이브러리가 권한을 확인할 때 쓰는 기준(`BlePermissions`)과 같은 목록입니다. 런타임 권한은 바뀌어도 알림이 없어서 상태 스트림에는 넣지 않았습니다.
+    - 설정 요청: `BleManager.createEnableBluetoothIntent()`(`ACTION_REQUEST_ENABLE`, API 31+는 `BLUETOOTH_CONNECT` 필요)와 `createLocationSettingsIntent()`를 추가했습니다. 앱이 블루투스를 직접 켜는 `BluetoothAdapter.enable()`은 API 33부터 막혀 있어 Intent로 사용자에게 요청하는 방식만 제공합니다.
+    - 샘플 앱의 권한 목록(두 화면)과 블루투스 켜기 Intent를 helper로 바꿨습니다.
+    - 테스트: `PermissionHelperTest`(3건: API 레벨별 필요 권한, 허용되지 않은 권한만 반환, API 28 이하에서 FINE으로 스캔 권한 충족), `BleManagerEngineImplScanAvailabilityTest`에 2건(상태 변화를 에러 없이 순서대로 전달·같은 상태 생략, `isBluetoothEnabled`), 기기 테스트 `BleManagerHelperInstrumentedTest`(3건: Intent action과 처리 화면 존재, 이 기기의 필요 권한, 없는 권한은 실제로 거부된 권한).
+    - 실기기 확인(Fold5, Android API 37):
+      - `BleManagerHelperInstrumentedTest` 3건 통과.
+      - 권한: 모두 허용 시 `missing=[]`, `BLUETOOTH_CONNECT`만 회수하면 `missing=[BLUETOOTH_CONNECT]`(스캔은 정상), `BLUETOOTH_SCAN`만 회수하면 `missing=[BLUETOOTH_SCAN]`이고 스캔은 `PermissionDeniedException`.
+      - 상태 스트림: 구독 즉시 `available=true` → 블루투스를 끄면 `bluetoothEnabled=false` → `createEnableBluetoothIntent()`로 연 시스템 대화상자("…에서 블루투스 켜기를 요청합니다", 허용/거부)에서 허용 → `available=true`. 모두 io 스레드에서 전달됐고 에러는 없었습니다.
+      - 샘플 앱: `BLUETOOTH_CONNECT`를 회수하고 스캔을 누르면 helper 목록으로 권한을 요청하고(근처 기기 권한 대화상자), 허용 뒤 스캔 결과가 나옵니다.
+      - 위치 서비스 경로(API 30 이하)는 이 장비로 확인하지 못했습니다(단위 테스트로 확인).
+- [x] **[기능] 스캔 개선**
+  - 일정 시간 보이지 않는 기기를 목록에서 제거(device lost timeout)합니다.
+  - `ScanInfo`에 serviceUuids, serviceData, txPower, `isConnectable`(API 26), timestamp를 추가합니다.
+  - "30초 내 5회 이상 startScan" 제한(이 경우 결과 없이 조용히 실패)을 감지하거나 방지합니다.
+  - ✅ 해결 (`feature/scan_improvements`)
+    - 사라진 기기 timeout: `BleScanSettings.Builder.setDeviceLostTimeout(timeoutMillis)`(기본 0 = 사용 안 함)를 추가했습니다. 기기마다 마지막으로 보인 시각을 기록하고, 최대 1초 간격으로 확인해서 timeout 동안 다시 보이지 않은 기기를 목록에서 빼고 목록을 내보냅니다. 빠진 기기가 다시 보이면 목록 끝에 추가됩니다. MATCH_LOST 콜백과 함께 쓸 수 있습니다. 시간 확인과 목록 전달은 스캔 결과처럼 main thread에서 합니다.
+    - `ScanInfo`에 `serviceUuids`(List<UUID>), `serviceData`(Map<UUID, ByteArray>), `txPower`(광고의 TX Power Level, 없으면 확장 광고의 TX power(API 26+)), `isConnectable`(API 26+, 그 아래는 null), `timestampNanos`(`elapsedRealtimeNanos` 기준)를 추가했습니다. 광고에 없는 항목은 null입니다. 생성자에 `@JvmOverloads`를 붙여 기존 생성자(`ScanInfo(rssi)`, `ScanInfo(rssi, map, manufacturerData)`)를 Java에서도 그대로 쓸 수 있습니다.
+    - startScan 횟수 제한: Android는 앱이 30초 안에 startScan을 5번 넘게 부르면 그 스캔을 결과 없이 무시합니다(logcat에만 `scanning too frequently`). `ScanStartLimiter`가 이 프로세스에서 라이브러리가 시작한 스캔을 기록해서, 한도를 넘는 시작은 한도가 풀리는 시각(+500ms 여유)까지 미루고 경고 로그를 남깁니다. 미뤄지는 동안 구독을 해제하거나 startScan이 실패한 경우는 세지 않습니다. 같은 앱의 다른 코드가 부른 startScan은 알 수 없어서 막지 못합니다.
+    - ⚠️ 동작 변화: 30초 안에 6번째로 시작하는 스캔은 결과 없이 조용히 실패하는 대신, 시작이 늦어진 뒤 정상으로 결과를 받습니다.
+    - 테스트: `ScanInfoTest`에 4건(서비스 UUID/데이터/시각, txPower 우선순위, isConnectable은 API 26+만, 기존 생성자), `BleManagerEngineImplScanListTest`에 3건(timeout 동안 안 보인 기기 제거·계속 보이는 기기 유지·다시 보이면 추가, timeout 없으면 유지, 제거할 기기가 없으면 내보내지 않음), `ScanStartLimiterTest`(4건: 30초 안 5번 허용 후 6번째 미룸, 6번째 스캔이 허용 시각에 시작, 시작 전 해제는 세지 않음, 실패한 시작은 세지 않음). `RxTestSchedulerRule`이 main thread scheduler도 `TestScheduler`로 바꾸고 `ScanStartLimiter`를 초기화합니다.
+    - 실기기 확인(Fold5 → M446K nRF 광고, 같은 프로브를 수정 전/후 코드로 실행):
+      - 스캔 시작/정지 6번 연속(각 스캔은 nRF 광고를 찾으면 정지): 수정 전에는 1~5번째는 0.3~0.9초에 찾았지만 6번째(시작 후 2.7초)는 40초 동안 결과가 없었고, logcat에 `registerAndStartScan(): ... is scanning too frequently`, `onScannerRegistered(status=6) ... App is scanning too frequently`가 남았습니다. 수정 후에는 6번째 시작이 28.6초 미뤄진 뒤 28.9초에 기기를 찾았고, `scanning too frequently` 로그는 없었습니다.
+      - 사라진 기기 timeout(5초): nRF 광고를 끄자 약 5초 뒤 목록에서 빠졌고, 다시 켜자 바로 목록에 들어왔습니다(광고를 다시 시작해 주소가 바뀜). 목록은 main thread에서 전달됐습니다.
+      - 주변 기기의 새 항목: 서비스 UUID(예: Nordic UART `6e400001-…`), 서비스 데이터(`0000fcf1-…`, `0000fe9f-…` 등), `txPower=12`(TX Power Level을 광고하는 기기), `isConnectable` true/false, `timestampNanos`(조회 시점의 `elapsedRealtimeNanos`보다 조금 이전 값)가 채워졌습니다.
+- [x] **[기능] 서비스/characteristic 트리 조회** — 현재 `BleCharacterisic`은 uuid와 속성 플래그만 제공합니다. 소속 service, descriptor 목록, raw properties를 제공해야 합니다.
+  - ✅ 해결 (`feature/service_tree`)
+    - `BleDevice.getServicesSingle()`을 추가했습니다. `BleService(uuid, isPrimary, characteristics)` 목록을 돌려주며, 연결되지 않았으면 `DisconnectedException`입니다. 서비스는 캐시하지 않고 현재 연결의 서비스 목록에서 만듭니다(재연결/서비스 변경 후에는 다시 조회).
+    - `BleCharacterisic`에 `serviceUuid`, `properties`(`BluetoothGattCharacteristic.PROPERTY_*` 조합 그대로), `descriptorUuids`를 추가했습니다. 기본값이 있는 open 멤버라서 기존 가상 characteristic 하위 클래스는 수정할 필요가 없고, 그 경우 `properties`는 `isReadable`/`isWritable`/`isNotifyAvailable`로 만든 READ/WRITE/NOTIFY, `serviceUuid`는 null, `descriptorUuids`는 빈 목록입니다. raw properties로 WRITE와 WRITE NO RESPONSE, NOTIFY와 INDICATE를 구분할 수 있습니다. `getCharacteristicsSingle()`의 characteristic도 소속 서비스를 알려 주므로 같은 UUID가 여러 서비스에 있을 때 구분할 수 있습니다.
+    - 가상 기기: `VirtualDevice.getServicesSingle()`(open)의 기본 구현이 characteristic을 `serviceUuid`로 묶은 primary 서비스를 만듭니다. `serviceUuid`가 없는 characteristic은 `VirtualDevice.UNKNOWN_SERVICE_UUID`(0) 서비스로 묶입니다. 실기기처럼 연결된 동안에만 조회됩니다.
+    - 테스트: `ServiceTreeTest`(3건: 서비스별 characteristic·primary/secondary·raw properties·descriptor 목록, characteristic 목록의 소속 서비스, 연결 전 조회), `VirtualDeviceServiceTest`(3건: serviceUuid로 묶기, 기본 properties 등 기본값, 연결 전 조회). `GattTestFixture`가 `characteristic.descriptors`를 제공합니다.
+    - 실기기 확인(Fold5 → M446K): 연결 전 조회는 `DisconnectedException`. 연결 후 9개 서비스, 21개 characteristic이 서비스별로 나왔고, 속성과 descriptor가 `BluetoothGatt`에서 직접 읽은 값과 같았습니다(예: aaa1 `0x12`(READ|NOTIFY), descriptor 2902/aab0/2901/2904, aaa2 `0x2c`(WRITE_NO_RESPONSE|WRITE|INDICATE)).
+
+---
+
+## P3 — 낮음 / 정리
+
+### 정리
+
+- [x] **[구조]** `rx_util/RxEnumerated.kt`에 package 선언이 없어서 `Observable.enumerated()`가 루트 패키지로 공개됩니다. 또 `index`가 구독 간에 공유됩니다.
+  - ✅ 해결 (`feature/remove_rx_enumerated`): 라이브러리와 샘플 앱 어디에서도 쓰지 않는 함수라서, 패키지를 붙이고 고치는 대신 파일을 지웠습니다. package 선언이 없는 파일은 이것 하나였습니다.
+    - ⚠️ 공개 API 제거: 사용하는 앱이 `enumerated()`를 쓰고 있었다면 컴파일되지 않습니다. (BLE와 관계없는 범용 Rx 확장이라 `zipWith(Observable.range(...))` 등으로 대체할 수 있습니다)
+    - 확인: release AAR의 `classes.jar`에서 루트 패키지 클래스가 `RxEnumeratedKt`, `RxEnumeratedKt$enumerated$1` 2개에서 0개가 됐습니다. 라이브러리 빌드, 샘플 앱 컴파일, 단위 테스트 통과. (동작 코드가 아니라 실기기 확인은 하지 않았습니다)
+- [x] **[구조]** 공개 top-level 확장 함수인 `ByteArray.toHexString()`(Kotlin stdlib의 `toHexString`과 이름이 같음)과 `BluetoothDevice.deleteBond()`(`impl/BleDeviceEngineImpl.kt:546-552`)를 `internal`로 바꿉니다. `impl/BleCharacteristicImpl`도 public이므로 `internal`로 바꿉니다.
+  - ✅ 해결 (`feature/internal_helpers`): 세 가지를 `internal`로 바꿨습니다. 같은 이유로 엔진만 쓰는 `extension.Context.locationManager`와 `rx_util.RxBroadcastReceiver`도 `internal`로 바꿨습니다. `rx_util.collectListLastSortedIndex`는 범용 유틸로 공개해 둔 것이라(P2에서 버그를 고침) 그대로 두었습니다.
+    - ⚠️ 공개 API 축소: 사용하는 앱이 이 함수들을 import 해서 쓰고 있었다면 컴파일되지 않습니다. `characteristic`은 `BleCharacterisic` 타입으로 받으므로 `BleCharacteristicImpl`을 직접 쓸 일은 없습니다.
+    - 확인: 샘플 앱 모듈에 다섯 가지를 쓰는 임시 파일을 넣고 컴파일하면 모두 `Cannot access ...: it is internal`로 실패했습니다(확인 후 지움). 이때 `byteArrayOf(1).toHexString()`은 라이브러리 함수 대신 표준 라이브러리의 실험 API(`@ExperimentalStdlibApi`)로 해석되어, 두 함수가 이름으로 충돌하던 것을 확인했습니다. 라이브러리 빌드, 단위 테스트 통과. (동작 변화가 없어 실기기 확인은 하지 않았습니다)
+- [x] **[구조]** `BleCharacterisic` 오타: 올바른 이름의 타입을 추가하고 기존 이름은 `@Deprecated typealias`로 남겨서 호환성을 유지합니다.
+  - ✅ 해결 (`feature/rename_ble_characteristic`): 클래스 이름을 `BleCharacteristic`으로 바꾸고, `BleCharacterisic`은 `@Deprecated(ReplaceWith("BleCharacteristic")) typealias`로 남겼습니다. 라이브러리, 테스트, 샘플 앱은 새 이름을 씁니다.
+    - Kotlin 소스 호환: 샘플 앱을 옛 이름 그대로 두고 컴파일하면 `import`, 상속(`object : BleCharacterisic()`), `override fun getCharacteristicsSingle(): Single<List<BleCharacterisic>>` 모두 deprecated 경고만 나고 컴파일됐습니다. typealias는 같은 타입이라 override 반환 타입도 그대로 맞습니다. (새 이름으로 옮긴 뒤에는 경고 없음)
+    - ⚠️ 바이너리/Java 호환 아님: JVM 클래스 이름이 바뀌므로 사용하는 앱은 다시 컴파일해야 하고, typealias는 Java에서 보이지 않으므로 Java 코드는 새 이름으로 바꿔야 합니다.
+    - 확인: 라이브러리 빌드, 샘플 앱 컴파일, 단위 테스트 통과. (이름 변경이라 실기기 확인은 하지 않았습니다)
+- [x] **[구조]** 죽은 코드 제거:
+  - 코드: `BleManager.Engine` enum(RX_ANDROID_BLE 흔적), `BleScanFilter.isOk`의 LOLLIPOP 분기, `@RequiresApi(LOLLIPOP/M)`, `BleManagerEngineImpl`의 pre-N 분기(minSdk 24), 미사용 `ConnectionStateData`, `Ble.*.Rx`/`Provisioning` Tag, 미사용 `TAG`/`LOG_TAG`
+  - 빌드: 미사용 `gson`/`rxkotlin`/`rxandroid` 의존성(현재 POM에 runtime 의존성으로 배포됨), 미사용 `jreleaser` 플러그인, CI의 android-29 system image 설치
+  - ✅ 해결 (`feature/remove_dead_code`)
+    - 코드:
+      - `BleManager.Engine`: 엔진을 고르는 `when` 분기와 주석 처리된 RxAndroidBle 코드를 지우고, 기본 생성자에서 `engine` 인자를 뺐습니다. 이 인자를 넘기던 호출이 깨지지 않도록 `Engine` enum과 `(context, delegate, engine, virtualDevices)` 생성자는 `@Deprecated`로 남겼습니다(`ReplaceWith` 제공). 다음 major 버전에서 지울 수 있습니다.
+      - 지움: `BleManager.ConnectionStateData`(⚠️ 공개 클래스였지만 라이브러리 어디서도 쓰지 않음), `Ble.Engine.Rx`/`Ble.Device.Rx`/`Ble.Device.Provisioning` 태그(상위 태그가 `internal`이라 외부에서 쓸 수 없었음), 미사용 `TAG`/`LOG_TAG` 4개.
+      - minSdk 24에서 항상 참인 분기를 지웠습니다: `BleScanFilter.isOk`의 LOLLIPOP 미만 이름/주소 필터(이름/주소는 `startScan`의 ScanFilter가 거르므로 rssi 조건만 남음), `BleScanOptionsConverter`의 M 분기, Builder와 변환기의 `@RequiresApi(LOLLIPOP/M)`. (`@RequiresApi(O/Q)`는 minSdk보다 높아서 그대로 둠)
+      - `BleManagerEngineImpl`의 pre-N 분기는 이전 작업에서 이미 없어져 있었습니다.
+    - 빌드:
+      - `gson`, `rxkotlin` 의존성을 지웠습니다. 생성한 POM의 runtime 의존성에서 두 개가 빠졌습니다(kotlin-reflect, rxandroid, rxrelay만 남음). `rxandroid`는 P2 스캔 개선에서 사라진 기기 timeout이 `AndroidSchedulers`를 쓰게 되어 남겼습니다.
+      - 설정 블록 없이 적용만 되어 있던 `jreleaser` 플러그인(buildscript classpath 포함)을 지웠습니다. 배포는 CI가 `build/staging-deploy`를 zip으로 올리므로 영향이 없습니다.
+      - CI(`.circleci/config.yml`)에서 쓰지 않는 android-29 system image 설치 단계를 지웠습니다(에뮬레이터를 띄우지 않음).
+    - CLAUDE.md의 `Engine` 설명을 고쳤습니다.
+    - 테스트: `BleManagerVirtualLookupTest`에 deprecated 생성자로 만든 `BleManager`가 같은 동작(가상 기기 조회)을 하는지 1건을 추가했습니다. `./gradlew build`(lint 포함) 통과, 샘플 앱 컴파일 통과, Fold5에서 `connectedDebugAndroidTest` 9건 통과(스캔 설정/필터 변환 포함).
+- [x] **[구조]** `BleDevice.connect()`가 Disposable을 버립니다(fire-and-forget). 제거하거나 Disposable을 반환해야 합니다.
+  - ✅ 해결 (`feature/connect_disposable`): 샘플 앱이 쓰고 있어서 지우지 않고 `Disposable`을 돌려주게 했습니다. 해제하면 진행 중인 연결을 취소하고, 연결된 뒤에 해제해도 연결은 유지됩니다. 결과는 이전처럼 로그로만 남깁니다(로그 오타 `conntection` 수정, 기기 표시). KDoc에 결과가 필요하면 `connectCompletable()`을 쓰라고 적었습니다.
+    - ⚠️ 반환 타입이 `Unit`에서 `Disposable`로 바뀌었습니다. Kotlin에서 반환값을 쓰지 않던 호출은 그대로 컴파일되지만, JVM 시그니처가 바뀌므로 사용하는 앱은 다시 컴파일해야 합니다.
+    - 테스트: `ConnectDisposableTest`(3건: 연결 중 해제는 연결 취소(gatt disconnect/close, DISCONNECTED), 연결 뒤 해제는 연결 유지, 연결 실패가 RxJavaPlugins로 새지 않음).
+    - 실기기 확인(Fold5 → M446K): `connect()` 직후(CONNECTING) 해제하면 `cancel connecting` 후 DISCONNECTED로 남았고, 다시 `connect()`해서 CONNECTED가 된 뒤 해제하면 1.5초 뒤에도 CONNECTED이고 read가 정상이었습니다.
+- [x] **[구조]** bond 상태를 1초 간격 polling으로 확인합니다. `ACTION_BOND_STATE_CHANGED` broadcast로 바꾸고 타임아웃을 추가합니다. `removeBond`는 리플렉션으로 숨겨진 API를 호출하므로 향후 막힐 수 있습니다.
+  - ✅ 해결 (`feature/bond_broadcast`)
+    - `bondCompletable`/`unbondCompletable`이 이 기기의 `ACTION_BOND_STATE_CHANGED` broadcast를 구독한 뒤 요청하고, broadcast로 결과를 받습니다. 구독하는 동안만 receiver를 등록합니다.
+    - `timeoutMillis` 인자를 추가했습니다(기본 60초, `@JvmOverloads`로 인자 없는 기존 호출 유지). 넘기면 `OperationTimeoutException("BOND"/"UNBOND")`입니다. 사용자가 시스템 페어링 화면에서 확인해야 할 수 있어서 길게 잡았습니다. 시간이 지나도 시스템의 페어링 과정은 계속될 수 있다고 KDoc에 적었습니다.
+    - 실패 판단:
+      - 진행 중(BONDING)이던 본딩이 NONE으로 끝나면 `BondFailedException`이고, 실패 사유(숨겨진 `EXTRA_REASON`)를 새 `reason` 속성에 담습니다. 요청 직후에는 아직 NONE일 수 있어서 그 NONE은 실패로 보지 않습니다.
+      - 실기기에서 다른 기기와 본딩 중일 때 `createBond()`가 true를 돌려주지만 시스템은 본딩을 시작하지 않고(`Failed to initiate bonding`) broadcast도 보내지 않는 것을 확인했습니다. 시작되면 바로 BONDING이 되므로, 요청 5초 뒤에도 NONE이면 `BondFailedException("Bonding did not start ...")`으로 끝냅니다.
+      - 이미 진행 중인 본딩이 있으면 새로 요청하지 않고 결과를 기다립니다.
+    - `removeBond`는 공개 API가 없어 리플렉션을 유지했습니다. 막힌 Android 버전에서는 크래시 대신 `BondFailedException("removeBond is not available ...")`으로 알립니다.
+    - ⚠️ 동작 변화: 결과가 최대 1초 늦게 나오던 것이 broadcast 시점에 바로 나옵니다. 끝나지 않는 본딩은 무한정 기다리던 것이 timeout으로 끝납니다. `BleDeviceEngine`의 bond 함수 시그니처가 바뀌었습니다(내부 클래스).
+    - 테스트: `BondTest`(10건: 이미 본딩됨, BONDED broadcast로 완료(polling 없음, receiver 해제), BONDING→NONE은 사유와 함께 실패, 다른 기기 broadcast 무시, timeout, 시작되지 않은 본딩, `createBond` 거절, 진행 중인 본딩은 요청 없이 대기, 본딩 안 된 기기 해제, `removeBond`를 찾지 못하면 `BondFailedException`(JVM의 android.jar에는 숨겨진 API가 없음)).
+    - 실기기 확인(Fold5, 두 폰을 본딩하지 않기 위해 존재하지 않는 MAC으로 실패 경로를 확인):
+      - 이미 본딩된 기기: 요청 없이 4ms에 완료.
+      - 없는 기기, timeout 2초: 2.01초에 `OperationTimeoutException`.
+      - 위 본딩이 시스템에서 진행 중일 때 다른 기기 본딩: 시스템 로그에 `Failed to initiate pairing`, 5.0초에 `Bonding did not start`(보완 전에는 broadcast가 오지 않아 60초 timeout까지 기다렸음).
+      - 없는 기기: BONDING broadcast를 받은 뒤 시스템이 page timeout으로 BOND_NONE을 알리자 약 10ms 뒤 `BondFailedException("Bond failed (reason 4)")`(요청 후 6.5초).
+      - `removeBond` 리플렉션은 API 37에서도 호출됐습니다(본딩 안 된 기기라 false). 실제 본딩/해제 성공 경로는 두 폰을 본딩해야 해서 확인하지 않았습니다.
+- [x] **[구조]** 라이브러리 manifest에 `uses-feature bluetooth_le required="true"`가 있어서 사용하는 앱에 설치 제한이 강제됩니다. 또 `neverForLocation` 플래그 때문에 비콘 스캔 결과가 필터링됩니다. `required="false"`로 바꾸거나, 앱에서 `tools:replace/remove`로 덮어쓰는 방법을 문서화합니다.
+  - ✅ 해결 (`feature/manifest_requirements`)
+    - `uses-feature android.hardware.bluetooth_le`를 `required="false"`로 바꿨습니다. manifest 병합은 하나라도 `required="true"`이면 true가 되므로, BLE가 꼭 필요한 앱은 자기 manifest에 선언하면 됩니다.
+    - `neverForLocation`은 그대로 두었습니다. 대부분의 앱은 위치 권한 없이 스캔하는 쪽이 낫기 때문입니다. 스캔 결과로 위치를 알아내야 하는 앱(비콘 등)이 플래그를 지우고 API 31+에서도 위치 권한을 선언하는 방법(`tools:remove="android:usesPermissionFlags"`, `tools:remove="android:maxSdkVersion"`)을 문서화했습니다. 저장소에 README가 없어서 `BleManager` 클래스 KDoc과 라이브러리 manifest 주석에 적었습니다.
+    - ⚠️ 동작 변화: 이 라이브러리를 쓰는 앱이 BLE 미지원 기기 필터링을 라이브러리 manifest에 기대고 있었다면, 이제 앱 manifest에 직접 선언해야 합니다.
+    - 확인(샘플 앱의 merged manifest):
+      - 변경 전 `required="true"` → 변경 후 `required="false"`.
+      - KDoc의 예시 세 줄(`uses-feature required="true"`, `BLUETOOTH_SCAN tools:remove`, `ACCESS_FINE_LOCATION tools:remove`)을 샘플 앱 manifest에 잠시 넣으면 `required="true"`, 플래그 없는 `BLUETOOTH_SCAN`, `maxSdkVersion` 없는 `ACCESS_FINE_LOCATION`으로 병합됐습니다(확인 후 되돌림).
+      - 라이브러리/샘플 앱 lint 통과. (manifest 선언 변경이라 실기기 확인은 하지 않았습니다)
+- [x] **[구조]** notification마다 로그 문자열(hex 변환, `device.name`)을 즉시 생성합니다. 고속 스트리밍에서 비용이 큽니다. 지연 평가로 바꾸거나 별도 verbose 레벨로 분리합니다.
+  - ✅ 해결 (`feature/lazy_notification_log`): 두 가지를 모두 했습니다.
+    - 지연 평가: `algorigo-logger`에는 메시지 람다 API가 없어서, 같은 logger의 레벨을 먼저 확인하고 남길 때만 메시지를 만드는 `logDebug`/`logVerbose`(internal inline, `logging/LazyLog.kt`)를 추가했습니다. `L.log`가 `java.util.logging.Logger.log`를 그대로 부르므로 남기는 결과는 같습니다. `BleDeviceEngineImpl`의 debug 로그 31곳을 바꿨습니다. 모두 로그 라벨(`bluetoothDevice.name`, Bluetooth 서비스 IPC)을 만들고, 일부는 hex 변환도 합니다.
+    - verbose 분리: notification 수신 로그(`onCharacteristicChanged`)는 매번 남으므로 VERBOSE로 내렸습니다.
+    - ⚠️ 동작 변화: 로그 레벨을 DEBUG로 둔 앱에서는 notification 수신 로그가 더 이상 보이지 않습니다(VERBOSE로 두면 보임).
+    - 테스트: `LazyLogTest`(2건: 로그가 꺼져 있으면 notification 100개에 기기 이름 조회 0번·로그 0건, DEBUG에서는 notification 로그가 없고 VERBOSE에서는 남음). 수정 전 코드로 실행하면 둘 다 실패합니다(이름 조회 100번, DEBUG에서 10번).
+    - 실기기 확인(Fold5, M446K에 연결한 상태에서 엔진의 notification 콜백을 20바이트 값으로 1만 번 호출, 로그 레벨 INFO): 수정 전 506.5µs → 수정 후 2.1µs(notification 하나당). 같은 기기에서 `BluetoothDevice.name` 한 번이 약 330µs여서, 수정 전 비용의 대부분이 이름 조회 IPC였습니다.
+- [x] **[구조]** `getDevice(mac)`에서 `getRemoteDevice`는 대문자 MAC만 허용합니다. 입력을 정규화해야 합니다.
+  - ✅ 해결 (`feature/normalize_mac`): `BleManager.getDevice`/`getBondedDevice`/`getConnectedDevice`가 MAC을 `"AA:BB:CC:DD:EE:FF"` 형식으로 바꿔 조회합니다. 대소문자, 구분자(`:`, `-`, 없음), 앞뒤 공백과 관계없이 받습니다. MAC 형식이 아닌 문자열은 대문자로만 바꾸고, 엔진 조회에서 null이 됩니다(이전과 같이 예외 없음). 가상 기기 id도 같은 방식으로 정규화해서 찾습니다.
+    - 샘플 앱은 MAC 형식을 직접 바꾸던 코드(정규식, `String.split` 확장 함수)를 지우고 입력을 그대로 넘깁니다. 이전에는 소문자 `aa:bb:...` 입력이 정규식을 통과한 뒤 `getDevice`가 null을 돌려줘 `!!`에서 NPE가 났습니다.
+    - 테스트: `MacAddressNormalizationTest`(5건: 정규화 형식, 소문자·구분자 없는 주소로 같은 기기 조회, 잘못된 주소는 null, 본딩 기기 소문자 조회, 가상 기기 여러 형식 조회). adapter mock이 실제 Android처럼 대문자 `:` 형식만 받습니다.
+    - 실기기 확인(Fold5 → M446K): Android의 `getRemoteDevice("4f:34:2d:86:b3:97")`는 `IllegalArgumentException: ... is not a valid Bluetooth address`. 라이브러리의 `getDevice("4f:34:2d:86:b3:97")`와 `getDevice("4f342d86b397")`는 스캔으로 찾은 기기와 같은 객체를 돌려줬고, 그 기기로 연결과 read가 정상이었습니다. `getConnectedDevice("4f342d86b397")`도 연결된 기기를 찾았습니다.
+- [x] **[구조]** `clazz.newInstance()`(`impl/BleManagerEngineImpl.kt:148`)는 deprecated이고, 사용하는 앱이 R8을 쓰면 no-arg 생성자가 제거될 수 있습니다. factory 람다 방식으로 바꾸거나 consumer proguard rule을 추가합니다.
+  - ✅ 해결 (`feature/device_constructor_keep`): 공개 API를 바꾸지 않도록 consumer proguard rule을 추가했습니다.
+    - `consumer-rules.pro`(비어 있었음)에 `BleDevice` 하위 클래스의 인자 없는 생성자를 남기는 `-keepclassmembers` 규칙을 넣었습니다. release AAR의 `proguard.txt`에 들어가서 사용하는 앱의 R8에 적용됩니다.
+    - deprecated `Class.newInstance()` 대신 `getDeclaredConstructor().newInstance()`를 씁니다. 인자 없는 생성자가 없는 클래스를 넘기면 원인을 담은 `IllegalArgumentException`입니다(호출 실수).
+    - CLAUDE.md의 설명을 고쳤습니다.
+    - 테스트: `GetDeviceByClassTest`(2건: 하위 클래스를 만들고 같은 기기는 캐시된 객체, 인자 없는 생성자가 없으면 `IllegalArgumentException`).
+    - 실기기 확인(Fold5, AGP 8.6.1의 R8 full mode): 샘플 앱에 리플렉션으로만 만드는 임시 하위 클래스(`ReflectOnlyDevice`)와 `getDevice(mac, ReflectOnlyDevice::class.java)` 호출을 넣고 minify한 release APK로 확인했습니다(확인 후 되돌림).
+      - 규칙 전: dex에서 이 클래스의 생성자가 지워졌고(Direct methods 없음), 앱에서 호출하면 `InstantiationException: java.lang.Class<n0.p> cannot be instantiated`로 크래시가 났습니다.
+      - 규칙 후: dex에 `<init>()V`가 남았고, 같은 호출이 `p null(AA:BB:CC:DD:EE:01)` 기기를 정상으로 만들었습니다. (입력은 `aabbccddee01`로, 앞 항목의 MAC 정규화도 release 빌드에서 동작)
+- [x] **[배포]** Gradle에서 deprecated된 `buildDir`, `archivesBaseName`을 교체합니다.
+  - ✅ 해결 (`feature/gradle_deprecations`)
+    - `archivesBaseName`을 `base { archivesName = "algorigoble2" }`로 바꾸고, `artifactId`와 `namespace`에서 `base.archivesName.get()`을 씁니다. 이것이 `BasePluginConvention` deprecation 경고의 원인이기도 했습니다.
+    - 루트 `clean` 태스크의 `rootProject.buildDir`를 `rootProject.layout.buildDirectory`로 바꿨습니다.
+    - `--warning-mode all`로 찾은 나머지 경고(Groovy 공백 대입 문법, Gradle 10에서 제거 예정)도 고쳤습니다: 두 모듈의 `namespace`, `compileSdk`를 `=` 대입으로 바꿈.
+    - 확인: `./gradlew help clean --warning-mode all`의 deprecation 경고가 10건(공백 대입 4, archivesBaseName 3, BasePluginConvention 3)에서 0건이 됐습니다. 바꾸기 전후 결과물이 같습니다: release AAR 이름 `algorigoble2-release.aar`, AAR manifest package `com.algorigo.rx.algorigoble2`, 생성된 POM(`groupId`, `artifactId` 포함)이 diff 없이 같음.
+    - 이 확인 중 `./gradlew build`에서 `VirtualDeviceNotificationOrderTest`가 실패했습니다. 이 변경과 관계없이 이전 커밋에서도 단독 실행하면 실패하는 불안정한 테스트여서 아래 항목으로 따로 고쳤습니다.
+- [x] **[테스트]** (P3 작업 중 발견) `VirtualDeviceNotificationOrderTest`가 단독으로 실행하면 실패합니다. 1000개 중 앞쪽 7~8개가 빠졌습니다.
+  - ✅ 해결 (`feature/fix_notification_order_test`): 테스트의 경쟁 문제였습니다. `setupNotification`의 설정 완료가 callback 스레드로 넘어간 뒤에 안쪽 notification 스트림을 구독하는데, 테스트는 구독 직후 바로 보내기 시작해서 그 사이에 보낸 notification을 받지 못했습니다. 실기기에서도 설정이 끝나기 전의 notification은 받지 않으므로 라이브러리 동작은 맞습니다. 다른 테스트 뒤에 실행되는 전체 실행에서는 대개 통과했지만, `clean` 뒤 `./gradlew build`나 단독 실행에서는 실패했습니다(P3 작업 전 커밋 `ef8d278`에서도 같음).
+    - 표시 값이 도착할 때까지 보내서 구독이 끝난 것을 확인한 뒤, 순서를 확인할 1000개를 보내도록 고쳤습니다.
+    - 확인: 단독 실행 5번(`--rerun-tasks`) 모두 통과, `./gradlew clean build` 통과(단위 테스트 300건).
+- [x] **[구조]** `ExampleInstrumentedTest`가 항상 실패합니다. 패키지명을 `com.algorigo.algorigoble2.test`로 기대하지만, 실제 namespace는 `com.algorigo.rx.algorigoble2`입니다. 이 때문에 `connectedDebugAndroidTest` 전체 실행이 실패하므로, 수정하거나 삭제해야 합니다(`algorigoble2/src/androidTest/.../ExampleInstrumentedTest.kt`).
+  - ✅ 해결 (`feature/test_coverage`): P2 "테스트 부재" 항목에서 라이브러리의 `ExampleInstrumentedTest`와 `ExampleUnitTest`를 지웠습니다. Fold5와 M446K에서 `:algorigoble2:connectedDebugAndroidTest`가 통과합니다.
+- [x] **[구조]** (실기기) 라이브러리 로그가 2~3번씩 중복 출력되는 경우가 있습니다. 예를 들어 `doOnError` 한 번에 같은 줄이 2~3번 나옵니다. 원인은 확인하지 못했습니다. 샘플 앱의 `BluetoothService`가 `AndroidHandler`를 추가하는 방식과 logger의 handler 전파 구조를 확인해야 합니다.
+  - ✅ 해결 (`feature/duplicate_logs`)
+    - 원인(실기기에서 확인): 라이브러리는 handler를 붙이지 않습니다. 중복은 앱 설정과 Android의 기본 설정이 겹쳐서 생깁니다.
+      - Android는 java.util.logging root logger에 `com.android.internal.logging.AndroidHandler`를 붙여 둡니다. 앱이 `BleManager.getLogger()`에 algorigo-logger의 `AndroidHandler`를 붙이면, 기록이 root로도 전파되어 Android 기본 handler가 한 번 더 남깁니다. 이 handler는 `Log.isLoggable`로 거르므로 NOTICE/WARNING/ERROR만 두 번 나오고 DEBUG/INFO는 한 번입니다.
+      - 앱이 handler를 여러 번 붙이면 붙인 수만큼 더 반복됩니다. 샘플 앱 `BluetoothService.onCreate()`는 조건 없이 붙였습니다.
+    - 샘플 앱은 handler가 없을 때만 붙이고 `LogManager.removeRootAndroidHandler()`(algorigo-logger가 이 용도로 제공)를 부르도록 고쳤습니다. 라이브러리 쪽에서 `useParentHandlers = false`로 막는 방법은 쓰지 않았습니다. handler를 붙이지 않은 앱도 지금은 root 기본 handler 덕분에 경고/에러를 logcat에서 볼 수 있는데, 막으면 그것까지 사라지기 때문입니다.
+    - `BleManager.getLogger()` KDoc과 CLAUDE.md에 logcat 설정 방법(핸들러 한 번만 붙이기, root 기본 handler 지우기)을 적었습니다.
+    - 실기기 확인(Fold5):
+      - 프로브로 레벨별 출력 횟수를 셌습니다. handler 1개일 때 debug/info 1번·notice/warning/error 2번, handler 2개일 때 각각 2번/3번, `removeRootAndroidHandler()` 후에는 모두 1번이었습니다. root handler 목록에서 `com.android.internal.logging.AndroidHandler`를 확인했습니다.
+      - 샘플 앱에서 없는 MAC(`AABBCCDDEE02`)으로 연결해 연결 timeout을 냈습니다. 수정 전에는 `doOnError` 줄과 예외 줄이 각각 2번, 수정 후에는 1번이었고, debug 로그(`connectGatt call`)는 그대로 남았습니다. (샘플 앱에서 서비스를 다시 만들어 3번이 되는 경우는 셸에서 서비스를 재생성하지 못해 프로브로만 확인했습니다)
+
+### 장기 기능
+
+- [ ] **[기능]** MTU 기반 long write 자동 분할 전송(chunking) 및 Reliable Write(`beginReliableWrite/executeReliableWrite`)
+- [ ] **[기능]** PHY 설정/조회(`setPreferredPhy`/`readPhy`). 콜백만 있고 로그만 남깁니다.
+- [ ] **[기능]** GATT 캐시 강제 갱신(`BluetoothGatt.refresh()` 리플렉션). DFU 이후 필요합니다.
+- [ ] **[기능]** 페어링 상세 제어(`ACTION_PAIRING_REQUEST`, PIN/passkey), bond 상태 Observable
+- [ ] **[기능]** 백그라운드 스캔(`PendingIntent` 기반 `startScan`, API 26+), Companion Device Manager 연동
+- [ ] **[기능]** L2CAP CoC(API 29+), Peripheral 역할(GATT Server, Advertising)
+- [ ] **[기능]** Kotlin Coroutines/Flow API 제공(Rx API와 병행)

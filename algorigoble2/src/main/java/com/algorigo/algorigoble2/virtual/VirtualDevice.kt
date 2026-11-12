@@ -1,12 +1,14 @@
 package com.algorigo.algorigoble2.virtual
 
-import com.algorigo.algorigoble2.BleCharacterisic
+import com.algorigo.algorigoble2.BleCharacteristic
 import com.algorigo.algorigoble2.BleDevice
 import com.algorigo.algorigoble2.BleManager
+import com.algorigo.algorigoble2.BleService
 import com.jakewharton.rxrelay3.BehaviorRelay
 import com.jakewharton.rxrelay3.PublishRelay
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Single
+import io.reactivex.rxjava3.schedulers.Schedulers
 import java.util.*
 
 abstract class VirtualDevice(
@@ -37,6 +39,26 @@ abstract class VirtualDevice(
         .flatMap {
             if (it == BleDevice.ConnectionState.CONNECTED) {
                 writeCharacteristicSingle(characteristicUuid, byteArray)
+            } else {
+                Single.error(BleManager.DisconnectedException())
+            }
+        }
+
+    fun readDescriptorSingleExternal(characteristicUuid: UUID, descriptorUuid: UUID): Single<ByteArray> = connectionStateRelay
+        .firstOrError()
+        .flatMap {
+            if (it == BleDevice.ConnectionState.CONNECTED) {
+                readDescriptorSingle(characteristicUuid, descriptorUuid)
+            } else {
+                Single.error(BleManager.DisconnectedException())
+            }
+        }
+
+    fun writeDescriptorSingleExternal(characteristicUuid: UUID, descriptorUuid: UUID, byteArray: ByteArray): Single<ByteArray> = connectionStateRelay
+        .firstOrError()
+        .flatMap {
+            if (it == BleDevice.ConnectionState.CONNECTED) {
+                writeDescriptorSingle(characteristicUuid, descriptorUuid, byteArray)
             } else {
                 Single.error(BleManager.DisconnectedException())
             }
@@ -73,16 +95,46 @@ abstract class VirtualDevice(
             }
         }
 
+    // notification 을 호출한 스레드와 분리해서 전달하되, 실기기처럼 보낸 순서대로 전달한다 (worker 는 작업을 순서대로 하나씩 실행한다)
+    private val notificationWorker = Schedulers.io().createWorker()
+
     protected fun notifyByteArray(characteristicUuid: UUID, byteArray: ByteArray) {
-        Thread {
+        notificationWorker.schedule {
             notificationRelay.accept(Pair(characteristicUuid, byteArray))
-        }.start()
+        }
     }
 
-    abstract fun getCharacteristicsSingle(): Single<List<BleCharacterisic>>
+    /** 연결된 동안 [BleDevice.readRssiSingle]이 돌려줄 RSSI(dBm). 기본값은 스캔 결과와 같은 0 이다. */
+    open fun readRssi(): Int = 0
+
+    /** 연결된 동안 [BleDevice.readDescriptorSingle]이 부른다. 기본은 descriptor 가 없다. ([BleManager.DescriptorNotFoundException]) */
+    open fun readDescriptorSingle(characteristicUuid: UUID, descriptorUuid: UUID): Single<ByteArray> =
+        Single.error(BleManager.DescriptorNotFoundException(characteristicUuid, descriptorUuid))
+
+    /** 연결된 동안 [BleDevice.writeDescriptorSingle]이 부른다. (CCCD 는 오지 않는다) 기본은 descriptor 가 없다. */
+    open fun writeDescriptorSingle(characteristicUuid: UUID, descriptorUuid: UUID, byteArray: ByteArray): Single<ByteArray> =
+        Single.error(BleManager.DescriptorNotFoundException(characteristicUuid, descriptorUuid))
+
+    abstract fun getCharacteristicsSingle(): Single<List<BleCharacteristic>>
+
+    /**
+     * 연결된 동안 [BleDevice.getServicesSingle]이 부른다. 기본은 [getCharacteristicsSingle]의 characteristic 을
+     * [BleCharacteristic.serviceUuid]로 묶은 primary 서비스들이고, serviceUuid 가 없는 characteristic 은 [UNKNOWN_SERVICE_UUID] 서비스로 묶는다.
+     */
+    open fun getServicesSingle(): Single<List<BleService>> = getCharacteristicsSingle()
+        .map { characteristics ->
+            characteristics
+                .groupBy { it.serviceUuid ?: UNKNOWN_SERVICE_UUID }
+                .map { (serviceUuid, list) -> BleService(serviceUuid, true, list) }
+        }
     abstract fun readCharacteristicSingle(characteristicUuid: UUID): Single<ByteArray>
     abstract fun writeCharacteristicSingle(characteristicUuid: UUID, byteArray: ByteArray): Single<ByteArray>
     abstract fun onNotificationStarted(type: BleDevice.NotificationType, characteristicUuid: UUID)
     abstract fun onNotificationStop(characteristicUuid: UUID)
 
+    companion object {
+        /** serviceUuid 를 지정하지 않은 가상 characteristic 을 묶는 서비스의 UUID */
+        @JvmField
+        val UNKNOWN_SERVICE_UUID: UUID = UUID(0L, 0L)
+    }
 }

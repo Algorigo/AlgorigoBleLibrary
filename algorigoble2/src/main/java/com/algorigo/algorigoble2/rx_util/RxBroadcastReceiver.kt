@@ -6,7 +6,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import io.reactivex.rxjava3.core.Observable
 
-object RxBroadcastReceiver {
+internal object RxBroadcastReceiver {
 
     fun broadCastReceiverObservable(context: Context, intentFilter: IntentFilter): Observable<Intent> {
         return Observable.create { emitter ->
