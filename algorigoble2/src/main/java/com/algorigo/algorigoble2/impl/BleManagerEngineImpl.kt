@@ -11,6 +11,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.location.LocationManager
 import android.os.Build
+import android.os.SystemClock
+import androidx.core.content.IntentCompat
 import androidx.core.location.LocationManagerCompat
 import com.algorigo.algorigoble2.*
 import com.algorigo.algorigoble2.exception.SystemServiceException
@@ -21,6 +23,7 @@ import com.algorigo.algorigoble2.virtual.VirtualDevice
 import com.algorigo.algorigoble2.virtual.VirtualDeviceEngine
 import com.algorigo.logger.L
 import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
+import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Maybe
 import io.reactivex.rxjava3.core.Observable
 import java.lang.ref.ReferenceQueue
@@ -30,8 +33,15 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.logging.Logger
 
+/**
+ * @param sdkInt 권한과 위치 확인에 쓰는 SDK 버전. 테스트에서 API 별 경로를 확인할 수 있도록 주입한다.
+ */
 @SuppressLint("MissingPermission")
-internal class BleManagerEngineImpl(private val context: Context, bleDeviceDelegate: BleManager.BleDeviceDelegate) : BleManagerEngine(bleDeviceDelegate) {
+internal class BleManagerEngineImpl(
+    private val context: Context,
+    bleDeviceDelegate: BleManager.BleDeviceDelegate,
+    private val sdkInt: Int = Build.VERSION.SDK_INT,
+) : BleManagerEngine(bleDeviceDelegate) {
 
     private val bluetoothManager: BluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private val bluetoothAdapter: BluetoothAdapter = bluetoothManager.adapter
@@ -128,7 +138,7 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
     ): Observable<List<Pair<BleDevice, ScanInfo>>> {
         return Observable.defer {
             // 권한이 없으면 플랫폼의 SecurityException 대신 PermissionDeniedException 으로 바로 실패한다
-            BlePermissions.checkScan(context)
+            BlePermissions.checkScan(context, sdkInt)
             // 스캔 가능 상태가 다시 나오면 이전 스캔을 멈추고 새로 시작한다. (flatMap 이면 두 스캔이 동시에 돌며 목록이 번갈아 전달된다)
             scanAvailableObservable
                 .switchMap {
@@ -190,12 +200,132 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
         }
     }
 
+    override fun discoveryObservable(): Observable<List<Pair<BleDevice, ScanInfo>>> {
+        return Observable.defer {
+            BlePermissions.checkScan(context, sdkInt)
+            // 발견된 기기의 이름(BluetoothDevice.getName)을 읽어야 delegate 가 기기를 고를 수 있다
+            BlePermissions.checkConnect(context, sdkInt)
+            // 스캔과 같은 조건(블루투스, API 30 이하에서는 위치)에서만 검색할 수 있다
+            scanAvailableObservable
+                .switchMap {
+                    discoveryBroadcastObservable()
+                        .collectDiscoveryList()
+                        .startWithItem(listOf())
+                }
+        }
+    }
+
+    /**
+     * 기기 검색 broadcast. 구독하는 동안 검색을 계속 다시 시작하고, 구독을 해제하면 멈춘다.
+     * 이 엔진의 기기가 SPP 연결 중이면 검색을 다시 시작하지 않는다. ([SppConnection]이 연결하기 전에 검색을 멈추는데,
+     * 바로 다시 시작하면 연결이 느려지거나 실패한다) 연결 시도가 끝나면 다시 시작한다.
+     */
+    private fun discoveryBroadcastObservable(): Observable<Intent> = Observable.defer {
+        // broadcast(main thread)와 연결 상태 변화(상태를 바꾼 스레드)에서 함께 쓴다
+        val lock = Any()
+        // SPP 연결 중이라서 검색을 시작하지 않았는지
+        var paused = false
+        val startUnlessSppConnecting = {
+            synchronized(lock) {
+                paused = getDevices().any { it.connectionState == BleDevice.ConnectionState.SPP_CONNECTING }
+                if (paused) {
+                    L.debug(Ble.Engine.Default, "discovery is paused while spp is connecting")
+                } else {
+                    startDiscovery()
+                }
+            }
+        }
+        val intentFilter = IntentFilter().apply {
+            addAction(BluetoothDevice.ACTION_FOUND)
+            // 오래된 SPP 모듈 등은 이름 없이 발견되고, 이름은 나중에 온다
+            addAction(BluetoothDevice.ACTION_NAME_CHANGED)
+            addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
+        }
+        RxBroadcastReceiver.broadCastReceiverObservable(context, intentFilter)
+            // 한 번의 검색은 약 12초면 끝나므로 다시 시작한다. (다른 앱이나 SppConnection 이 멈춘 경우도 여기로 온다)
+            .doOnNext { if (it.action == BluetoothAdapter.ACTION_DISCOVERY_FINISHED) startUnlessSppConnecting() }
+            // SPP 연결 시도가 끝나면(SPP_CONNECTED, DISCONNECTED) 멈춰 둔 검색을 다시 시작한다.
+            // 검색을 시작하기 전에 구독해서, 시작할 때 멈춰 둔 뒤에 연결 시도가 끝나도 놓치지 않는다
+            .mergeWith(
+                connectionStateRelay
+                    .filter { it.second != BleDevice.ConnectionState.SPP_CONNECTING }
+                    .doOnNext { synchronized(lock) { if (paused) startUnlessSppConnecting() } }
+                    .ignoreElements()
+            )
+            // receiver 를 등록한 뒤에 검색을 시작한다
+            .mergeWith(Completable.fromAction { startUnlessSppConnecting() })
+            // receiver 를 해제한 뒤에 멈추므로 멈춘 검색을 다시 시작하지 않는다
+            .doFinally { cancelDiscovery() }
+    }
+
+    private fun startDiscovery() {
+        if (bluetoothAdapter.startDiscovery()) {
+            L.debug(Ble.Engine.Default, "discovery started")
+        } else if (bluetoothAdapter.isEnabled) {
+            // 블루투스가 꺼지는 중이면 scanAvailableObservable 이 그 이유로 에러를 내므로 여기서는 내지 않는다
+            throw BleManager.DiscoveryFailedException()
+        }
+    }
+
+    private fun cancelDiscovery() {
+        // doFinally 에서 호출되므로 여기서 던진 예외는 RxJavaPlugins.onError 로 전달되어 앱이 크래시날 수 있다
+        try {
+            bluetoothAdapter.cancelDiscovery()
+        } catch (exception: Exception) {
+            L.warning(Ble.Engine.Default, "cancelDiscovery failed", exception)
+        }
+    }
+
+    /**
+     * 검색 broadcast 로 발견된 기기를 처음 발견된 순서대로 모아 목록으로 내보낸다. 같은 기기는 최신 [ScanInfo]로 바꾼다.
+     * 이름 없이 발견된 기기는 delegate 가 이름으로 고르면 처음에 빠지므로, 이름이 오면(ACTION_NAME_CHANGED) delegate 를 다시 불러 본다.
+     */
+    private fun Observable<Intent>.collectDiscoveryList(): Observable<List<Pair<BleDevice, ScanInfo>>> = Observable.defer {
+        // 구독마다 새 목록을 쓴다. 키는 BleDevice.deviceId 와 같은 MAC 주소
+        val devices = LinkedHashMap<String, Pair<BleDevice, ScanInfo>>()
+        // 발견됐지만 delegate 가 기기를 만들지 않은(null) 기기의 마지막 ScanInfo
+        val skipped = HashMap<String, ScanInfo>()
+        concatMapMaybe { intent ->
+            val action = intent.action
+            if (action != BluetoothDevice.ACTION_FOUND && action != BluetoothDevice.ACTION_NAME_CHANGED) {
+                return@concatMapMaybe Maybe.empty()
+            }
+            val bluetoothDevice = IntentCompat.getParcelableExtra(intent, BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                ?: return@concatMapMaybe Maybe.empty()
+            val address = bluetoothDevice.address
+            if (action == BluetoothDevice.ACTION_FOUND) {
+                // RSSI 를 모르면 Short.MIN_VALUE
+                val rssi = intent.getShortExtra(BluetoothDevice.EXTRA_RSSI, Short.MIN_VALUE)
+                val scanInfo = ScanInfo(
+                    rssi = if (rssi == Short.MIN_VALUE) null else rssi.toInt(),
+                    timestampNanos = SystemClock.elapsedRealtimeNanos(),
+                )
+                val device = getBleDevice(bluetoothDevice)
+                if (device == null) {
+                    skipped[address] = scanInfo
+                    return@concatMapMaybe Maybe.empty()
+                }
+                skipped.remove(address)
+                devices[address] = Pair(device, scanInfo)
+            } else if (!devices.containsKey(address)) {
+                // 이번 검색에서 발견되지 않은 기기(본딩된 기기 등)의 이름 변경은 무시한다
+                val scanInfo = skipped[address] ?: return@concatMapMaybe Maybe.empty()
+                val device = getBleDevice(bluetoothDevice) ?: return@concatMapMaybe Maybe.empty()
+                L.debug(Ble.Engine.Default, "discovered device is added after its name arrived : $address")
+                skipped.remove(address)
+                devices[address] = Pair(device, scanInfo)
+            }
+            // 목록에 있던 기기의 이름이 바뀌어도 다시 내보낸다. (deviceName 은 같은 BleDevice 에서 바뀐 값을 읽는다)
+            Maybe.just(devices.values.toList())
+        }
+    }
+
     override fun getDevices(): Collection<BleDevice> {
         return deviceMap.values.mapNotNull { it.get() }
     }
 
     override fun getBondedDevices(): List<BleDevice> {
-        BlePermissions.checkConnect(context)
+        BlePermissions.checkConnect(context, sdkInt)
         return bluetoothAdapter.bondedDevices.mapNotNull {
             getBleDevice(it)
         }
@@ -258,7 +388,7 @@ internal class BleManagerEngineImpl(private val context: Context, bleDeviceDeleg
     }
 
     private fun locationEnabledObservable(context: Context): Observable<Boolean> = when {
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> Observable.just(true)
+        sdkInt >= Build.VERSION_CODES.S -> Observable.just(true)
         else -> Observable
             .fromCallable {
                 LocationManagerCompat.isLocationEnabled(context.locationManager)
