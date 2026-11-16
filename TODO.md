@@ -889,7 +889,24 @@
 - [ ] **[기능]** MTU 기반 long write 자동 분할 전송(chunking) 및 Reliable Write(`beginReliableWrite/executeReliableWrite`)
 - [ ] **[기능]** PHY 설정/조회(`setPreferredPhy`/`readPhy`). 콜백만 있고 로그만 남깁니다.
 - [ ] **[기능]** GATT 캐시 강제 갱신(`BluetoothGatt.refresh()` 리플렉션). DFU 이후 필요합니다.
-- [ ] **[기능]** 페어링 상세 제어(`ACTION_PAIRING_REQUEST`, PIN/passkey), bond 상태 Observable
+- [x] **[기능]** 페어링 상세 제어(`ACTION_PAIRING_REQUEST`, PIN/passkey)
+  - ✅ 해결 (`feature/bond_pin`): `bondCompletable`에 `pin: String? = null` 인자를 추가했습니다. pin을 주면 PIN/passkey를 입력하는 페어링에서 시스템 입력 화면 대신 이 값을 넣습니다.
+    - 본딩하는 동안 `ACTION_PAIRING_REQUEST` receiver를 설정 앱보다 높은 우선순위(999)로 `createBond` 전에 등록합니다. 이 기기의 `PAIRING_VARIANT_PIN` 요청이면 `BluetoothDevice.setPin()`을 부르고, ordered broadcast를 끊어(`abortBroadcast`) 시스템 입력 화면을 띄우지 않습니다. 본딩이 끝나거나 timeout/dispose되면 해제합니다.
+    - `setPin`이 거절되면 broadcast를 끊지 않아 사용자가 시스템 화면에서 넣을 수 있게 둡니다(에러 로그).
+    - 숫자 비교(`PAIRING_VARIANT_PASSKEY_CONFIRMATION`)와 Just Works 확인은 `setPairingConfirmation`에 `BLUETOOTH_PRIVILEGED`가 필요해 일반 앱이 대신 승인할 수 없으므로 시스템 화면에 맡깁니다.
+    - pin은 1~16바이트(UTF-8)입니다. 벗어나면 요청 없이 `IllegalArgumentException`입니다. BLE passkey는 6자리 숫자 문자열(앞자리 0 포함)이어야 한다고 KDoc에 적었습니다. AOSP 스택은 LE 페어링이면 앞 6글자를 숫자로 바꿔 passkey로 씁니다.
+    - 틀린 PIN은 기존 실패 경로대로 `BondFailedException`(실기기에서 reason 1)입니다.
+    - 인자를 `timeoutMillis` 뒤에 붙여서 `@JvmOverloads`가 기존 JVM 시그니처 `bondCompletable()`, `bondCompletable(long)`을 그대로 만듭니다. Kotlin에서는 `bondCompletable(pin = "1234")`로 씁니다. 내부 `BleDeviceEngine.bondCompletable` 시그니처가 바뀌었습니다(가상 기기는 pin을 쓰지 않음).
+    - pin을 주지 않으면 동작은 이전과 같습니다.
+    - 테스트: `BondPinTest`(10건: PIN 요청에 setPin 후 BONDED로 완료하고 receiver 두 개를 해제, PIN receiver가 `createBond` 전에 등록됨, ordered broadcast 끊기, setPin 거절 시 끊지 않고 계속 기다림, 숫자 비교 요청은 시스템에 맡김, 다른 기기 요청 무시, 틀린 PIN은 reason과 함께 실패, pin 없으면 PIN receiver 없음, 이미 본딩됨, 범위 밖 PIN은 요청 없이 `IllegalArgumentException`이고 16바이트는 허용). 새 기능이라 수정 전 비교는 없습니다.
+    - 실기기 확인(M446K Android 16 → ubpulse H3, Classic SPP, Legacy PIN `1234`. 본딩을 해제하고 확인한 뒤 다시 본딩해 두었습니다):
+      - 본딩 해제: `unbondCompletable`이 0.3초에 완료(reason 9). 앞의 bond 항목에서 확인하지 못한 해제 성공 경로입니다.
+      - pin 없이: `PAIRING_REQUEST`(variant 0, ordered)가 오고 시스템 PIN 입력 화면(`BluetoothPairingDialog`)이 랼습니다. 입력하지 않아 30초 timeout으로 끝났습니다.
+      - pin `0000`(틀림): setPin 후 시스템 화면 없이 0.46초에 `BondFailedException("Bond failed (reason 1)")`.
+      - pin `1234`: setPin 후 시스템 화면 없이 0.79초에 BONDED. 다시 만든 본딩은 원래와 같은 Legacy 키(`COMBINATION`)입니다.
+      - pin을 준 두 경우 모두, 라이브러리보다 낮은 우선순위로 등록한 관찰용 receiver에 `PAIRING_REQUEST`가 오지 않아 broadcast가 끊긴 것을 확인했습니다.
+      - 숫자 비교 방식(폰끼리 등)은 PIN 경로가 아니어서 단위 테스트로만 확인했습니다. BLE passkey 기기가 없어 BLE 경로는 실기기로 확인하지 못했습니다.
+- [ ] **[기능]** bond 상태 Observable. 연결 뒤 기기가 먼저 요청한 페어링(암호화된 characteristic 접근 등)의 PIN 자동 입력
 - [ ] **[기능]** 백그라운드 스캔(`PendingIntent` 기반 `startScan`, API 26+), Companion Device Manager 연동
 - [ ] **[기능]** L2CAP CoC(API 29+), Peripheral 역할(GATT Server, Advertising)
 - [ ] **[기능]** Kotlin Coroutines/Flow API 제공(Rx API와 병행)

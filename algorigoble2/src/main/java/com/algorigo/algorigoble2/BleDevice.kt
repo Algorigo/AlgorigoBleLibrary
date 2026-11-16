@@ -140,10 +140,19 @@ open class BleDevice {
      * 기기와 본딩(페어링)한다. 이미 본딩돼 있으면 바로 완료한다.
      * 사용자가 시스템 페어링 화면에서 확인해야 할 수 있으므로 [timeoutMillis]를 넉넉하게 준다. (시간이 지나도 시스템의 페어링 과정은 계속될 수 있다)
      * 거절, 취소, 기기 응답 없음 등으로 실패하면 [BleManager.BondFailedException], 시간 안에 끝나지 않으면 [BleManager.OperationTimeoutException]("BOND").
+     *
+     * [pin]을 주면 PIN/passkey 를 입력하는 페어링일 때 시스템 입력 화면 대신 이 값을 넣는다. (없으면 사용자가 시스템 화면에서 입력한다)
+     * - BLE passkey 는 6자리 숫자 문자열로 준다. 앞자리 0 도 넣는다. (passkey 1234 → "001234") Android 가 앞 6글자를 숫자로 바꿔 쓴다.
+     * - Classic 기기의 PIN 은 1~16 바이트이다. (예: "0000", "1234") 범위를 벗어나면 IllegalArgumentException.
+     * - 숫자 비교(양쪽 화면의 숫자 확인)나 Just Works 확인처럼 입력하지 않는 페어링은 일반 앱이 대신 승인할 수 없어(BLUETOOTH_PRIVILEGED 필요)
+     *   [pin]을 줘도 시스템 화면이 뜬다. 어느 방식이 될지는 상대 기기의 IO capability 가 정한다. (예: 화면만 있는 기기면 passkey 입력)
+     * - 기기가 PIN 을 받지 않으면(틀린 PIN 등) [BleManager.BondFailedException]이다.
+     * - 시스템 입력 화면은 이 앱이 먼저 받아 막는다. 제조사 ROM 에 따라 잠깐 보였다가 본딩이 끝나면 닫힐 수 있다.
+     * - 이 함수로 시작했거나 기다리는 본딩에만 적용된다. 연결 뒤 암호화된 characteristic 에 접근해서 기기가 먼저 요청한 페어링에는 적용되지 않는다.
      */
     @JvmOverloads
-    fun bondCompletable(timeoutMillis: Long = DEFAULT_BOND_TIMEOUT_MILLIS): Completable =
-        engine.bondCompletable(timeoutMillis).deliverToCallback()
+    fun bondCompletable(timeoutMillis: Long = DEFAULT_BOND_TIMEOUT_MILLIS, pin: String? = null): Completable =
+        engine.bondCompletable(timeoutMillis, pin).deliverToCallback()
 
     /**
      * 본딩을 해제한다. 본딩돼 있지 않으면 바로 완료한다.

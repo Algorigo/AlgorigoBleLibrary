@@ -14,7 +14,8 @@ internal abstract class BleDeviceEngine() {
     abstract val deviceName: String?
     abstract val bonded: Boolean
 
-    abstract fun bondCompletable(timeoutMillis: Long): Completable
+    /** [pin]이 있으면 PIN/passkey 입력 요청에 넣는다. (BleDevice.bondCompletable 참고) */
+    abstract fun bondCompletable(timeoutMillis: Long, pin: String?): Completable
     abstract fun unbondCompletable(timeoutMillis: Long): Completable
 
     fun isConnected(): Boolean = getConnectionStateObservable().firstOrError().map { it == BleDevice.ConnectionState.CONNECTED }.blockingGet()
