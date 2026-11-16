@@ -49,6 +49,7 @@ Public API / engine split: user-facing classes delegate everything to `internal`
 - `setupNotification` returns `Observable<Observable<ByteArray>>`: the outer emission means the CCCD descriptor write succeeded; disposing it disables the notification.
 - Services are read from the current `BluetoothGatt` on every lookup (no cache), so reconnects and `onServiceChanged` rediscovery are picked up.
 - SPP (RFCOMM) lives in `impl/SppConnection` with its own state; the engine merges it into the single public state (`SPP_CONNECTING`/`SPP_CONNECTED` only while GATT is `DISCONNECTED`). GATT and SPP on the same device are mutually exclusive, checked under the shared `stateLock`.
+- Classic discovery (`BleManager.discoveryObservable()`, `BleManagerEngineImpl`) restarts `startDiscovery()` on every `ACTION_DISCOVERY_FINISHED`. `SppConnection` calls `cancelDiscovery()` before connecting, so the restart is skipped while any cached device is `SPP_CONNECTING` and resumes on its next state change. Devices the delegate rejected (null name) are retried on `ACTION_NAME_CHANGED`.
 - Bluetooth-off is detected by a broadcast receiver in `BleManagerEngineImpl`, which calls `onBluetoothDisabled()` on every cached device engine.
 
 ### Virtual devices

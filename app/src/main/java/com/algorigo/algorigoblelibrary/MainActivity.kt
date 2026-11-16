@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.util.Log
 import android.view.View
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
@@ -100,7 +101,12 @@ class MainActivity : RequestPermissionActivity() {
     private lateinit var macAddressButton: Button
     private lateinit var bleRecycler: RecyclerView
     private lateinit var startBtn: Button
+    private lateinit var discoveryBtn: Button
     private lateinit var stopBtn: Button
+    private lateinit var namedOnlyCheckBox: CheckBox
+
+    // 마지막으로 받은 스캔/검색 목록. '이름 있는 기기만'을 바꾸면 다시 걸러서 보여 준다
+    private var foundDevices = listOf<Pair<BleDevice, ScanInfo?>>()
 
     private val socketDisposables = mutableMapOf<String, Disposable>()
 
@@ -179,7 +185,9 @@ class MainActivity : RequestPermissionActivity() {
         macAddressButton = findViewById(R.id.mac_address_btn)
         bleRecycler = findViewById(R.id.ble_recycler)
         startBtn = findViewById(R.id.start_btn)
+        discoveryBtn = findViewById(R.id.discovery_btn)
         stopBtn = findViewById(R.id.stop_btn)
+        namedOnlyCheckBox = findViewById(R.id.named_only_checkbox)
 
         macAddressButton.setOnClickListener {
             macAddressEditText.text.toString().also { str ->
@@ -211,13 +219,20 @@ class MainActivity : RequestPermissionActivity() {
         startBtn.setOnClickListener {
             startScan()
         }
+        discoveryBtn.setOnClickListener {
+            startDiscovery()
+        }
         stopBtn.setOnClickListener {
             disposable?.dispose()
+        }
+        namedOnlyCheckBox.setOnCheckedChangeListener { _, _ ->
+            showDevices(foundDevices)
         }
     }
 
     @SuppressLint("MissingPermission")
     private fun startScan() {
+        disposable?.dispose()
         disposable = requestPermissionCompletable(getPermissions(), true)
             .andThen(Rx2ServiceBindingFactory.bind<BluetoothService.BluetoothBinder>(this, Intent(this, BluetoothService::class.java)))
             .flatMap { binder ->
@@ -240,32 +255,7 @@ class MainActivity : RequestPermissionActivity() {
                             .toMutableMap())
                         map.values.toList()
                     }
-                        .retryWhen { errors ->
-                            errors
-                                .doOnNext {
-                                    Log.e(TAG, "Error in retryWhen, $it")
-                                }
-                                .observeOn(AndroidSchedulers.mainThread())
-                                .flatMap {
-                                    when (it) {
-                                        is SystemServiceException.BluetoothUnavailableException -> {
-                                            requestBluetoothEnabledObservable()
-                                        }
-
-                                        is SystemServiceException.LocationUnavailableException -> {
-                                            requestGPSEnabledObservable()
-                                        }
-
-                                        is SystemServiceException.AllUnavailableException -> {
-                                            requestSystemServicesObservable()
-                                        }
-
-                                        else -> {
-                                            Observable.empty()
-                                        }
-                                    }
-                                }
-                        }
+                        .retryWhenSystemServicesEnabled()
 //                        .map { devices ->
 //                            val pattern = Pattern.compile("Algo")
 //                            devices.filter { device ->
@@ -280,20 +270,86 @@ class MainActivity : RequestPermissionActivity() {
             .observeOn(AndroidSchedulers.mainThread())
             .doOnSubscribe {
                 disposable = it
-                startBtn.isEnabled = false
-                adapter.bleDeviceList = listOf()
+                setSearching(true)
+                showDevices(listOf())
             }
             .doFinally {
-                startBtn.isEnabled = true
+                setSearching(false)
             }
             .subscribe({
-                adapter.bleDeviceList = it
+                showDevices(it)
             }, {
                 Log.e(TAG, "scan exception", it)
-                startBtn.isEnabled = true
-            }, {
-                startBtn.isEnabled = true
+                showError(it)
             })
+    }
+
+    /**
+     * Classic 기기 검색. BLE 광고를 하지 않는 기기(오래된 SPP 모듈 등)를 찾는다.
+     * 라이브러리가 약 12초마다 끝나는 검색을 다시 시작하므로, 스캔처럼 1분 뒤나 Stop 으로 멈춘다.
+     */
+    private fun startDiscovery() {
+        disposable?.dispose()
+        disposable = requestPermissionCompletable(getPermissions(), true)
+            .andThen(Rx2ServiceBindingFactory.bind<BluetoothService.BluetoothBinder>(this, Intent(this, BluetoothService::class.java)))
+            .flatMap { binder ->
+                binder.getService().bleManager.discoveryObservable()
+                    .retryWhenSystemServicesEnabled()
+            }
+            .take(1, TimeUnit.MINUTES)
+            .observeOn(AndroidSchedulers.mainThread())
+            .doOnSubscribe {
+                disposable = it
+                setSearching(true)
+                showDevices(listOf())
+            }
+            .doFinally {
+                setSearching(false)
+            }
+            .subscribe({ devices ->
+                Log.d(TAG, "discovered ${devices.size} devices")
+                showDevices(devices)
+            }, {
+                Log.e(TAG, "discovery exception", it)
+                showError(it)
+            })
+    }
+
+    /** 블루투스나 위치가 꺼져서 끝나면 켜 달라고 요청하고, 켜지면 다시 구독한다. 다른 에러는 그대로 전달한다. */
+    private fun <T : Any> Observable<T>.retryWhenSystemServicesEnabled(): Observable<T> = retryWhen { errors ->
+        errors
+            .doOnNext {
+                Log.e(TAG, "Error in retryWhen, $it")
+            }
+            .observeOn(AndroidSchedulers.mainThread())
+            .flatMap {
+                when (it) {
+                    is SystemServiceException.BluetoothUnavailableException -> requestBluetoothEnabledObservable()
+                    is SystemServiceException.LocationUnavailableException -> requestGPSEnabledObservable()
+                    is SystemServiceException.AllUnavailableException -> requestSystemServicesObservable()
+                    else -> Observable.error(it)
+                }
+            }
+    }
+
+    // 스캔과 검색은 하나만 실행한다
+    private fun setSearching(searching: Boolean) {
+        startBtn.isEnabled = !searching
+        discoveryBtn.isEnabled = !searching
+    }
+
+    // 주변에 이름 없는 BLE 기기가 많으면 목록이 길어지므로, 선택하면 이름 있는 기기만 보여 준다
+    private fun showDevices(devices: List<Pair<BleDevice, ScanInfo?>>) {
+        foundDevices = devices
+        adapter.bleDeviceList = if (namedOnlyCheckBox.isChecked) {
+            devices.filter { !it.first.deviceName.isNullOrEmpty() }
+        } else {
+            devices
+        }
+    }
+
+    private fun showError(throwable: Throwable) {
+        Toast.makeText(this, throwable.localizedMessage ?: throwable.javaClass.simpleName, Toast.LENGTH_LONG).show()
     }
 
     // 이 기기(Android 버전)에서 스캔과 연결에 필요한 권한

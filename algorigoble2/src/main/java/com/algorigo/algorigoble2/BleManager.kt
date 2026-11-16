@@ -97,6 +97,8 @@ class BleManager(
     class BondFailedException @JvmOverloads constructor(message: String = "Bond failed", val reason: Int? = null) : BleException(message)
     /** 스캔을 시작하지 못한 경우. [errorCode]는 ScanCallback.SCAN_FAILED_* 값이다. */
     class ScanFailedException(val errorCode: Int) : BleException("Scan failed with error code $errorCode")
+    /** 블루투스가 켜져 있는데 기기 검색(BluetoothAdapter.startDiscovery)을 시작하지 못한 경우 */
+    class DiscoveryFailedException : BleException("Bluetooth discovery could not be started")
 
     /** 이전에 엔진(RxAndroidBle/자체 구현)을 고르던 값. 지금은 자체 구현 하나뿐이다. */
     @Deprecated("BleManager has only one engine")
@@ -151,6 +153,25 @@ class BleManager(
     fun scanObservable(): Observable<List<Pair<BleDevice, ScanInfo>>> {
         return scanObservable(delegate.getBleScanSettings(), *delegate.getBleScanFilters())
     }
+
+    /**
+     * Classic 블루투스 기기 검색(BluetoothAdapter.startDiscovery)으로 주변 기기를 찾는다. BLE 광고를 하지 않는 기기(오래된 SPP 모듈 등)를 찾을 때 쓴다.
+     *
+     * - [scanObservable]처럼 발견된 기기를 처음 발견된 순서대로 모은 목록을 내보낸다. 구독하면 빈 목록을 먼저 내보낸다.
+     *   [ScanInfo]에는 rssi 와 timestampNanos 만 있다. 발견된 기기는 다시 보이지 않아도 목록에서 빠지지 않는다.
+     * - 한 번의 검색은 약 12초면 끝나므로 구독하는 동안 계속 다시 시작하고, 구독을 해제하면 멈춘다.
+     * - [BleDeviceDelegate.createBleDevice]는 scanRecord 없이 불린다. 이름 없이 발견된 기기는 이름이 오면(ACTION_NAME_CHANGED) 목록을 다시 내보내고,
+     *   그때까지 delegate 가 null 을 돌려줘 목록에 없던 기기는 delegate 를 다시 불러 판단한다.
+     * - SPP 연결은 검색 중이면 느려지거나 실패하므로, 이 BleManager 의 기기가 SPP 연결 중(SPP_CONNECTING)이면 검색을 다시 시작하지 않고
+     *   연결 시도가 끝나면 다시 시작한다.
+     * - 스캔 권한과 연결 권한(API 31+ BLUETOOTH_SCAN, BLUETOOTH_CONNECT)이 모두 필요하다. 없으면 [PermissionDeniedException]으로 끝난다.
+     * - [scanObservable]과 같이 스캔할 수 없는 상태(블루투스 꺼짐, API 30 이하에서 위치 꺼짐)가 되면
+     *   [com.algorigo.algorigoble2.exception.SystemServiceException]으로, 검색을 시작하지 못하면 [DiscoveryFailedException]으로 끝난다.
+     * - 가상 기기는 넣지 않는다. (가상 기기는 SPP 를 지원하지 않는다)
+     * - 목록은 스캔 결과처럼 main thread 에서 전달된다.
+     */
+    fun discoveryObservable(): Observable<List<Pair<BleDevice, ScanInfo>>> = engine.discoveryObservable()
+
     // MAC 주소는 대소문자, 구분자(":", "-", 없음)와 관계없이 받는다. (Android 는 "AA:BB:CC:DD:EE:FF" 형식만 받는다)
     // 형식이 맞지 않는 주소이면 null 이다.
 

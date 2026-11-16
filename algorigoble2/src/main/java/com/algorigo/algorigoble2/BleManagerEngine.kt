@@ -11,6 +11,9 @@ internal abstract class BleManagerEngine(protected val bleDeviceDelegate: BleMan
 
     abstract fun scanObservable(scanSettings: BleScanSettings, vararg scanFilters: BleScanFilter): Observable<List<Pair<BleDevice, ScanInfo>>>
 
+    /** Classic 기기 검색으로 발견한 기기 목록. 구독하는 동안 검색을 계속 다시 시작한다. */
+    abstract fun discoveryObservable(): Observable<List<Pair<BleDevice, ScanInfo>>>
+
     abstract val isBluetoothEnabled: Boolean
 
     /** 현재 상태를 먼저 내보내고 바뀔 때마다 내보낸다. 에러로 끝나지 않는다. */
