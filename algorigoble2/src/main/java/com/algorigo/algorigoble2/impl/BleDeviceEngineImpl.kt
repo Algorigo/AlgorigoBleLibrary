@@ -9,7 +9,9 @@ import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.BluetoothStatusCodes
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import androidx.annotation.ChecksSdkIntAtLeast
@@ -378,7 +380,10 @@ internal class BleDeviceEngineImpl(
             return "$name(${bluetoothDevice.address})"
         }
 
-    override fun bondCompletable(timeoutMillis: Long): Completable = Completable.defer {
+    override fun bondCompletable(timeoutMillis: Long, pin: String?): Completable = Completable.defer {
+        val pinBytes = pin?.toByteArray(Charsets.UTF_8)?.also {
+            require(it.size in 1..MAX_PIN_BYTES) { "PIN must be 1 to $MAX_PIN_BYTES bytes" }
+        }
         BlePermissions.checkConnect(context, sdkInt)
         if (bluetoothDevice.bondState == BluetoothDevice.BOND_BONDED) {
             return@defer Completable.complete()
@@ -402,7 +407,9 @@ internal class BleDeviceEngineImpl(
                 else -> Observable.empty()
             }
         }
-        bondStateChanges()
+        // PIN 입력 요청을 받을 receiver 도 요청(createBond) 전에 등록한다
+        val stateChanges = if (pinBytes == null) bondStateChanges() else bondStateChanges().mergeWith(pinReplies(pinBytes))
+        stateChanges
             .mergeWith(request)
             // 요청 직후에는 아직 BOND_NONE 일 수 있으므로, 진행 중(BONDING)이던 본딩이 NONE 으로 끝났거나 시작되지 않은 경우만 실패로 본다
             .filter {
@@ -445,6 +452,38 @@ internal class BleDeviceEngineImpl(
     }
 
     private class BondStateChange(val previousState: Int, val state: Int, val reason: Int?, val started: Boolean = true)
+
+    /**
+     * 이 기기의 PIN/passkey 입력 요청(ACTION_PAIRING_REQUEST, PAIRING_VARIANT_PIN)에 [pin]을 넣는다. 구독하는 동안 receiver 를 등록한다.
+     * 시스템(설정 앱)보다 먼저 받도록 우선순위를 높이고, 넣은 뒤에는 ordered broadcast 를 끊어 시스템 입력 화면을 띄우지 않는다.
+     * 숫자 비교, Just Works 확인 등 다른 방식은 일반 앱이 대신 승인할 수 없어(setPairingConfirmation 은 BLUETOOTH_PRIVILEGED) 시스템에 맡긴다.
+     */
+    private fun pinReplies(pin: ByteArray): Completable = Completable.create { emitter ->
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action != BluetoothDevice.ACTION_PAIRING_REQUEST) return
+                val device = IntentCompat.getParcelableExtra(intent, BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                if (device?.address != bluetoothDevice.address) return
+                val variant = intent.getIntExtra(BluetoothDevice.EXTRA_PAIRING_VARIANT, BluetoothDevice.ERROR)
+                if (variant != BluetoothDevice.PAIRING_VARIANT_PIN) {
+                    logDebug(Ble.Device.Default) { "$logLabel : pairing request (variant $variant) is left to the system" }
+                    return
+                }
+                if (bluetoothDevice.setPin(pin)) {
+                    logDebug(Ble.Device.Default) { "$logLabel : setPin" }
+                    if (isOrderedBroadcast) {
+                        abortBroadcast()
+                    }
+                } else {
+                    // 넣지 못했으면 시스템 입력 화면에서 사용자가 넣을 수 있게 broadcast 를 그대로 둔다
+                    L.error(Ble.Device.Default, "$logLabel : setPin was rejected")
+                }
+            }
+        }
+        val filter = IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST).apply { priority = PAIRING_REQUEST_PRIORITY }
+        context.registerReceiver(receiver, filter)
+        emitter.setCancellable { context.unregisterReceiver(receiver) }
+    }
 
     /** 이 기기의 본딩 상태 변화(ACTION_BOND_STATE_CHANGED). 구독하는 동안 receiver 를 등록한다. */
     private fun bondStateChanges(): Observable<BondStateChange> =
@@ -1097,6 +1136,10 @@ internal class BleDeviceEngineImpl(
         private const val BOND_START_CHECK_MILLIS = 5_000L
         // 숨겨진 BluetoothDevice.EXTRA_REASON. 본딩이 실패하거나 해제된 사유
         private const val EXTRA_UNBOND_REASON = "android.bluetooth.device.extra.REASON"
+        // Bluetooth PIN 은 최대 16 바이트이다
+        private const val MAX_PIN_BYTES = 16
+        // PIN 입력 요청을 시스템(설정 앱)의 receiver 보다 먼저 받는다
+        private const val PAIRING_REQUEST_PRIORITY = IntentFilter.SYSTEM_HIGH_PRIORITY - 1
     }
 }
 

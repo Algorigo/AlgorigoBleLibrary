@@ -20,7 +20,8 @@ internal class VirtualDeviceEngine(private val virtualDevice: VirtualDevice) : B
     override val bonded: Boolean
         get() = false
 
-    override fun bondCompletable(timeoutMillis: Long): Completable {
+    // 가상 기기는 본딩하지 않으므로 pin 도 쓰지 않는다
+    override fun bondCompletable(timeoutMillis: Long, pin: String?): Completable {
         return Completable.complete()
     }
 
